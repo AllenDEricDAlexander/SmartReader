@@ -19,8 +19,7 @@ export async function outlineFromPdf(pdf: PdfDocumentLike): Promise<OutlineItem[
     return [];
   }
 
-  const resolved = await resolveOutlineItems(pdf, outline, 0, []);
-  return resolved.slice(0, 80);
+  return resolveOutlineItems(pdf, outline, 0, []);
 }
 
 async function resolveOutlineItems(

@@ -8,6 +8,7 @@ SmartReader is a macOS-first local reader MVP for PDF and EPUB files. The curren
 - Warm paper-inspired macOS utility styling with compact chrome, subtle document shadows, responsive sidebar behavior, and narrow-window toolbar simplification.
 - Local PDF and EPUB open entry points through browser file selection, drag/drop, and Tauri native file dialog.
 - PDF reader path backed by PDF.js, lazy-loaded behind the reader boundary.
+- Desktop PDF open validation, page-count metadata, outline extraction, and bounded search are backed by Rust/Tauri commands.
 - EPUB reader path backed by Rust lazy metadata/chapter commands for Tauri desktop files, with a JSZip-based DRM-free EPUB parser kept for browser file fallback.
 - Sidebar modes for contents, PDF thumbnails, bookmarks, and search results.
 - Find bar, page/location controls, zoom controls, PDF fit modes, bookmark toggling, and preferences dialog.
@@ -16,7 +17,7 @@ SmartReader is a macOS-first local reader MVP for PDF and EPUB files. The curren
 - Independent per-tab progress tracking so switching between open files keeps the last PDF page or EPUB chapter/location.
 - Command registry for primary keyboard shortcuts such as open, close tab, find, sidebar, zoom, bookmark, preferences, location focus, and tab switching.
 - EPUB HTML sanitization before chapter rendering.
-- PDF outline entries resolve PDF destinations when available and skip malformed entries.
+- PDF outline entries resolve PDF destinations when available, keep the full resolved outline, and skip malformed entries.
 - Tauri desktop host with native app window, native file dialog, PDF/EPUB file associations, Open With event handling, and path-backed recent-file reopen attempts.
 - Runtime reader caching for open tabs, lazy PDF page rendering, and async Rust document reads to reduce repeat loading and keep large files more responsive.
 - Rust-backed desktop EPUB search scans the book without requiring React to load every chapter into memory.
@@ -30,7 +31,7 @@ SmartReader is a macOS-first local reader MVP for PDF and EPUB files. The curren
 - Vitest
 - PDF.js via `pdfjs-dist`
 - JSZip for browser-file EPUB fallback parsing
-- Tauri 2 desktop shell with dialog plugin, validated Rust document-read commands, and Rust EPUB metadata/chapter/search commands
+- Tauri 2 desktop shell with dialog plugin, validated Rust document-read commands, Rust PDF metadata/outline/search commands, and Rust EPUB metadata/chapter/search commands
 - CSS modules are not used; styling is in `src/styles.css`
 
 ## Web Run, Test, And Build
@@ -100,6 +101,18 @@ For a local macOS DMG build with dependency checks and the required web build st
 
 Use `./scripts/build-dmg.sh --debug` for a debug DMG. The script prints the generated DMG path under `src-tauri/target/*/bundle/dmg/` when the build completes.
 
+For the shared local desktop packaging entry point:
+
+```bash
+./scripts/build-desktop.sh dmg
+./scripts/build-desktop.sh win
+./scripts/build-desktop.sh linux
+./scripts/build-desktop.sh all
+./scripts/build-desktop.sh dmg --debug
+```
+
+`build-desktop.sh` uses the project Tauri CLI through npm and prints the generated artifact paths. `dmg` must run on macOS, `win` builds Windows `nsis` and `msi` installers on Windows, and `linux` builds `deb` and `rpm` packages on Linux with the required system packaging tools. `all` only builds targets supported by the current host OS and skips the other operating systems with an explicit message.
+
 Tauri runs the same Vite frontend and uses Rust commands for validated PDF/EPUB document reads instead of exposing broad renderer filesystem permissions.
 
 ## Shared TypeScript Adapter Boundary
@@ -108,7 +121,7 @@ Tauri runs the same Vite frontend and uses Rust commands for validated PDF/EPUB 
 - `DocumentSession` remains the UI state contract for opened files.
 - `AppSessionSnapshot` stores only durable desktop-path session state and excludes runtime-heavy data such as browser `File` objects, object URLs, PDF proxies, parsed EPUB chapters, outlines, and search results.
 - `RendererAdapter` and related adapter factory types in `src/reader/adapterBoundary.ts` are the extension point for PDF.js, the current EPUB reader, future PDFKit, future React Native renderers, and future WASM parser/search adapters.
-- Tauri-specific APIs are isolated in `src/platform/tauriBridge.ts`, with native document reads and desktop EPUB metadata/chapter/search routed through Rust validation instead of broad renderer filesystem permissions.
+- Tauri-specific APIs are isolated in `src/platform/tauriBridge.ts`, with native document reads plus desktop PDF and EPUB metadata/search routed through Rust validation instead of broad renderer filesystem permissions.
 
 ## Session Restore And Performance Notes
 
@@ -116,6 +129,8 @@ Tauri runs the same Vite frontend and uses Rust commands for validated PDF/EPUB 
 - Reading progress is saved through session snapshots and recent-file metadata. Reopened desktop documents resume from their last saved PDF page or EPUB chapter/location when the file path remains accessible.
 - Open PDF and EPUB tabs keep an in-memory reader cache during the current app session. Switching back to an already-open tab reuses loaded PDF proxies or parsed EPUB chapters instead of re-reading and re-parsing the file.
 - PDF continuous mode renders visible and near-visible pages first through `IntersectionObserver`, leaving offscreen pages as placeholders until they approach the viewport.
+- Desktop PDF opening validates the path and reads page-count/outline metadata in Rust before React renders pages. The renderer still uses PDF.js canvas output for visible page painting.
+- Desktop PDF search uses a Rust command with a bounded result limit, so React does not scan page text for path-backed desktop PDFs.
 - Tauri document reads run through an async Rust command that validates PDF/EPUB paths and performs blocking filesystem reads off the async command executor.
 - Desktop EPUB opening uses Rust to read package/spine/nav metadata first, then loads the active chapter on demand. This avoids transferring and parsing the full book in React before first render.
 - Desktop EPUB search uses a Rust command that scans chapters sequentially with a bounded result limit, so search is not limited to chapters already loaded in the React cache.
@@ -136,7 +151,8 @@ React Native/mobile and WASM are future platform tracks, not current runtime cap
 ## Current Limitations
 
 - The Tauri shell is present, but release signing/notarization is not configured.
-- DMG packaging is available through `npm run desktop:build:dmg`, but it is not enabled in the default `desktop:build` target. The default desktop build still produces the macOS `.app` bundle.
+- DMG packaging is available through `npm run desktop:build:dmg` and `./scripts/build-desktop.sh dmg`, but it is not enabled in the default `desktop:build` target. The default desktop build still produces the macOS `.app` bundle.
+- Windows and Linux installer packaging is exposed through `./scripts/build-desktop.sh`, but those targets still require matching host operating systems and their native packaging toolchains.
 - PDFKit integration is not implemented; PDF rendering currently uses PDF.js.
 - EPUB support is an MVP DRM-free parser and renderer. It does not provide full EPUB3 compatibility, DRM handling, embedded asset rewriting, annotations, or advanced layout fidelity.
 - Printing, annotation editing, custom shortcut editing, and multi-window behavior are deferred.

@@ -31,13 +31,15 @@ import {
   listenForDesktopOpenFiles,
   openDesktopFileDialog,
   openEpubDocument,
+  openPdfDocument,
   openPendingDesktopFiles,
   readEpubChapter,
   readFileSource,
   searchEpubDocument,
+  searchPdfDocument,
   setupTauriMenu
 } from "./platform/tauriBridge";
-import type { DesktopEpubDocument } from "./platform/tauriBridge";
+import type { DesktopEpubDocument, DesktopPdfDocument } from "./platform/tauriBridge";
 import { createAccessErrorSession, isTauriRuntime } from "./platform/fileSources";
 import type {
   Bookmark,
@@ -994,15 +996,29 @@ function PdfReader(props: {
 
   useEffect(() => {
     let disposed = false;
-    const cached = props.documentCache.get(props.session.id)?.pdf;
+    const cachedDocument = props.documentCache.get(props.session.id);
+    const cached = cachedDocument?.pdf;
 
     async function loadPdf() {
       setError("");
+      const metadataPromise = loadPdfMetadata(props.session, props.documentCache);
 
       if (cached) {
         setPdf(cached);
-        props.onPageCountChange(cached.numPages);
-        props.onSearchReady((query) => searchPdf(cached, query));
+        metadataPromise.then((metadata) => {
+          if (disposed) {
+            return;
+          }
+          props.onPageCountChange(metadata.pageCount);
+          props.onOutlineChange(metadata.outline);
+          props.onSearchReady(createPdfSearchHandler(props.session.fileSource, cached));
+        }).catch(() => {
+          if (disposed) {
+            return;
+          }
+          props.onPageCountChange(cached.numPages);
+          props.onSearchReady((query) => searchPdf(cached, query));
+        });
         return;
       }
 
@@ -1026,9 +1042,18 @@ function PdfReader(props: {
           pdf: loaded
         });
         setPdf(loaded);
-        props.onPageCountChange(loaded.numPages);
-        props.onOutlineChange(await outlineFromPdf(loaded));
-        props.onSearchReady((query) => searchPdf(loaded, query));
+        const metadata = await metadataPromise.catch(async () => ({
+          id: props.session.filePath ?? props.session.id,
+          pageCount: loaded.numPages,
+          outline: await outlineFromPdf(loaded)
+        }));
+        if (disposed) {
+          loaded.destroy();
+          return;
+        }
+        props.onPageCountChange(metadata.pageCount);
+        props.onOutlineChange(metadata.outline);
+        props.onSearchReady(createPdfSearchHandler(props.session.fileSource, loaded));
       } catch {
         setError("This PDF could not be rendered.");
       }
@@ -1051,7 +1076,7 @@ function PdfReader(props: {
       );
       pageFrame?.scrollIntoView?.({ block: "start" });
     });
-  }, [pdf, props.session.id]);
+  }, [pdf, props.session.id, props.session.location]);
 
   const handleVisiblePage = useCallback((pageNumber: number) => {
     props.onLocationChange({ kind: "page", page: pageNumber });
@@ -1601,6 +1626,12 @@ interface EpubDocumentMetadata {
   outline: OutlineItem[];
 }
 
+interface PdfDocumentMetadata {
+  id: string;
+  pageCount: number;
+  outline: OutlineItem[];
+}
+
 interface EpubChapterMetadata {
   id: string;
   href: string;
@@ -1615,6 +1646,7 @@ interface EpubDocumentCache {
 
 interface LoadedReaderDocument {
   pdf?: PDFDocumentProxy;
+  pdfMetadata?: PdfDocumentMetadata;
   epub?: EpubDocumentCache;
 }
 
@@ -1645,6 +1677,42 @@ function chapterIndexForLocation(chapters: EpubChapterMetadata[], location: Read
 }
 
 let pdfJsModule: Promise<typeof import("pdfjs-dist")> | undefined;
+
+async function loadPdfMetadata(
+  session: DocumentSession,
+  documentCache: Map<string, LoadedReaderDocument>
+): Promise<PdfDocumentMetadata> {
+  const cached = documentCache.get(session.id)?.pdfMetadata;
+  if (cached) {
+    return cached;
+  }
+
+  if (session.fileSource.kind !== "desktop-path") {
+    throw new Error("Browser-file PDF metadata is resolved through PDF.js");
+  }
+
+  const document = await openPdfDocument(session.fileSource.path);
+  const metadata = desktopDocumentToPdfMetadata(session.fileSource.path, document);
+  documentCache.set(session.id, {
+    ...documentCache.get(session.id),
+    pdfMetadata: metadata
+  });
+
+  return metadata;
+}
+
+function desktopDocumentToPdfMetadata(path: string, document: DesktopPdfDocument): PdfDocumentMetadata {
+  return {
+    id: document.id || path,
+    pageCount: document.pageCount,
+    outline: document.outline.map((item) => ({
+      id: item.id,
+      title: item.title,
+      location: { kind: "page", page: item.page },
+      level: item.level
+    }))
+  };
+}
 
 async function loadPdfJs(): Promise<typeof import("pdfjs-dist")> {
   if (!pdfJsModule) {
@@ -1748,6 +1816,28 @@ function createEpubSearchHandler(
   }
 
   return async () => [];
+}
+
+function createPdfSearchHandler(
+  source: DocumentSession["fileSource"],
+  pdf: PDFDocumentProxy
+): (query: string) => Promise<SearchResult[]> {
+  if (source.kind === "desktop-path") {
+    return (query) => searchDesktopPdf(source.path, query);
+  }
+
+  return (query) => searchPdf(pdf, query);
+}
+
+async function searchDesktopPdf(path: string, query: string): Promise<SearchResult[]> {
+  const results = await searchPdfDocument(path, query, 50);
+
+  return results.map((result) => ({
+    id: result.id,
+    label: result.label,
+    snippet: result.snippet,
+    location: { kind: "page", page: result.page }
+  }));
 }
 
 async function searchDesktopEpub(path: string, query: string): Promise<SearchResult[]> {

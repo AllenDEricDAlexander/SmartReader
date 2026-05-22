@@ -5,12 +5,17 @@ import { App } from "./App";
 import type { AppSessionSnapshot, DocumentSession } from "./types/reader";
 
 const pdfMocks = vi.hoisted(() => {
+  const outlineItems = [
+    { title: "Intro", dest: [{ num: 1, gen: 0 }], items: [] },
+    { title: "Later chapter", dest: [{ num: 2, gen: 0 }], items: [] }
+  ];
+  const getPageIndex = vi.fn(async (ref: { num: number }) => Math.max(0, ref.num - 1));
   const getDocument = vi.fn(() => ({
     promise: Promise.resolve({
       numPages: 2,
-      getOutline: vi.fn(async () => null),
+      getOutline: vi.fn(async () => outlineItems),
       getDestination: vi.fn(async () => null),
-      getPageIndex: vi.fn(async () => 0),
+      getPageIndex,
       getPage: vi.fn(async () => ({
         getViewport: () => ({ width: 640, height: 900 }),
         getTextContent: vi.fn(async () => ({ items: [] })),
@@ -20,7 +25,7 @@ const pdfMocks = vi.hoisted(() => {
     })
   }));
 
-  return { getDocument };
+  return { getDocument, getPageIndex, outlineItems };
 });
 
 const tauriMocks = vi.hoisted(() => {
@@ -91,12 +96,29 @@ const tauriMocks = vi.hoisted(() => {
       progress: 1
     }
   ]);
+  const openPdfDocument = vi.fn(async () => ({
+    id: "/Users/mario/Books/start.pdf",
+    pageCount: 2,
+    outline: [
+      { id: "outline-1", title: "Intro", page: 1, level: 0 },
+      { id: "outline-2", title: "Later chapter", page: 2, level: 0 }
+    ]
+  }));
+  const searchPdfDocument = vi.fn(async () => [
+    {
+      id: "pdf-search-2-4",
+      label: "Page 2",
+      snippet: "Native PDF result",
+      page: 2
+    }
+  ]);
   const readFileSource = vi.fn(async () => new ArrayBuffer(8));
 
   return {
     createDesktopSession,
     isDesktopRuntime: () => desktopRuntime,
     openEpubDocument,
+    openPdfDocument,
     openPendingDesktopFiles,
     listenForDesktopOpenFiles: vi.fn(async (openPath: (path: string) => void) => {
       desktopOpenHandler = openPath;
@@ -107,6 +129,7 @@ const tauriMocks = vi.hoisted(() => {
     readEpubChapter,
     readFileSource,
     searchEpubDocument,
+    searchPdfDocument,
     emitDesktopOpen: (path: string) => desktopOpenHandler?.(path),
     reset: () => {
       desktopOpenHandler = undefined;
@@ -115,10 +138,12 @@ const tauriMocks = vi.hoisted(() => {
       desktopRuntime = true;
       createDesktopSession.mockClear();
       openEpubDocument.mockClear();
+      openPdfDocument.mockClear();
       openPendingDesktopFiles.mockClear();
       readEpubChapter.mockClear();
       readFileSource.mockClear();
       searchEpubDocument.mockClear();
+      searchPdfDocument.mockClear();
     },
     setDesktopRuntime: (enabled: boolean) => {
       desktopRuntime = enabled;
@@ -138,11 +163,13 @@ vi.mock("./platform/tauriBridge", () => ({
   createDesktopSession: tauriMocks.createDesktopSession,
   listenForDesktopOpenFiles: tauriMocks.listenForDesktopOpenFiles,
   openEpubDocument: tauriMocks.openEpubDocument,
+  openPdfDocument: tauriMocks.openPdfDocument,
   openDesktopFileDialog: tauriMocks.openDesktopFileDialog,
   openPendingDesktopFiles: tauriMocks.openPendingDesktopFiles,
   readEpubChapter: tauriMocks.readEpubChapter,
   readFileSource: tauriMocks.readFileSource,
   searchEpubDocument: tauriMocks.searchEpubDocument,
+  searchPdfDocument: tauriMocks.searchPdfDocument,
   setupTauriMenu: tauriMocks.setupTauriMenu
 }));
 
@@ -174,7 +201,10 @@ describe("App desktop open delivery", () => {
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:smartreader-test");
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     HTMLCanvasElement.prototype.getContext = vi.fn(() => ({})) as unknown as typeof HTMLCanvasElement.prototype.getContext;
-    Element.prototype.scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn()
+    });
   });
 
   it("drains pending desktop files only once after open state changes", async () => {
@@ -225,6 +255,64 @@ describe("App desktop open delivery", () => {
     expect(
       readFileSourceCalls.filter(([source]) => source.path === "/Users/mario/Books/start.pdf")
     ).toHaveLength(1);
+  });
+
+  it("loads desktop PDF metadata through Tauri for contents navigation", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    expect(await screen.findByText("Intro")).toBeInTheDocument();
+    expect(screen.getByText("Later chapter")).toBeInTheDocument();
+    expect(tauriMocks.openPdfDocument).toHaveBeenCalledWith("/Users/mario/Books/start.pdf");
+  });
+
+  it("scrolls to a clicked PDF outline page after the location changes", async () => {
+    tauriMocks.setPendingPaths([]);
+    tauriMocks.setDesktopRuntime(false);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 0;
+    });
+
+    render(<App />);
+
+    fireEvent.drop(screen.getByRole("main"), {
+      dataTransfer: {
+        files: [new File(["%PDF-1.7"], "local.pdf", { type: "application/pdf" })]
+      }
+    });
+
+    await screen.findByText("Intro");
+    fireEvent.click(screen.getByText("Later chapter"));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
+    });
+
+    (HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mockClear();
+    fireEvent.click(screen.getByText("Intro"));
+
+    await waitFor(() => {
+      expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+    });
+  });
+
+  it("searches desktop PDF content through Rust", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.click(screen.getByLabelText("Find"));
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "native" }
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+
+    await waitFor(() => {
+      expect(tauriMocks.searchPdfDocument).toHaveBeenCalledWith("/Users/mario/Books/start.pdf", "native", 50);
+    });
+    expect(await screen.findByText("Native PDF result")).toBeInTheDocument();
   });
 
   it("hydrates the last desktop session on startup", async () => {

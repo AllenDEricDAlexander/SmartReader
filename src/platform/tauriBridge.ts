@@ -41,6 +41,26 @@ export interface DesktopEpubSearchResult {
   progress: number;
 }
 
+export interface DesktopPdfOutlineItem {
+  id: string;
+  title: string;
+  page: number;
+  level: number;
+}
+
+export interface DesktopPdfDocument {
+  id: string;
+  pageCount: number;
+  outline: DesktopPdfOutlineItem[];
+}
+
+export interface DesktopPdfSearchResult {
+  id: string;
+  label: string;
+  snippet: string;
+  page: number;
+}
+
 const supportedExtensions = ["pdf", "epub"];
 const desktopOpenFileEvent = "smartreader://open-file";
 const supportedDocumentPath = /\.(pdf|epub)$/i;
@@ -69,13 +89,31 @@ export async function readDesktopFile(path: string): Promise<Uint8Array> {
 
 export async function createDesktopSession(path: string): Promise<DocumentSession> {
   try {
-    if (!path.toLowerCase().endsWith(".epub")) {
+    if (path.toLowerCase().endsWith(".pdf")) {
+      await openPdfDocument(path);
+    } else if (!path.toLowerCase().endsWith(".epub")) {
       await readDesktopFile(path);
     }
     return createSessionFromFile(createDesktopPathFile(path));
   } catch {
     return createAccessErrorSession(path);
   }
+}
+
+export async function openPdfDocument(path: string): Promise<DesktopPdfDocument> {
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  return invoke<DesktopPdfDocument>("open_pdf_document", { path });
+}
+
+export async function searchPdfDocument(
+  path: string,
+  query: string,
+  limit?: number
+): Promise<DesktopPdfSearchResult[]> {
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  return invoke<DesktopPdfSearchResult[]>("search_pdf_document", { path, query, limit });
 }
 
 export async function openEpubDocument(path: string): Promise<DesktopEpubDocument> {

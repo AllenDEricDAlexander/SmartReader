@@ -14,6 +14,8 @@ use serde::Serialize;
 use tauri::{Emitter, Manager};
 use zip::ZipArchive;
 
+use lopdf::{Document as PdfDocument, Object, ObjectId, Outline};
+
 const OPEN_FILE_EVENT: &str = "smartreader://open-file";
 const UNSUPPORTED_DOCUMENT_ERROR: &str = "Unsupported document format";
 const DOCUMENT_ACCESS_ERROR: &str =
@@ -71,6 +73,30 @@ struct EpubSearchResultDto {
     progress: f64,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PdfDocumentDto {
+    id: String,
+    page_count: usize,
+    outline: Vec<PdfOutlineItemDto>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+struct PdfOutlineItemDto {
+    id: String,
+    title: String,
+    page: usize,
+    level: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+struct PdfSearchResultDto {
+    id: String,
+    label: String,
+    snippet: String,
+    page: usize,
+}
+
 struct EpubPackage {
     title: Option<String>,
     chapters: Vec<EpubChapterMetadataDto>,
@@ -121,6 +147,30 @@ async fn open_epub_document(path: String) -> Result<EpubDocumentDto, String> {
     tauri::async_runtime::spawn_blocking(move || open_epub_document_from_path(document_path))
         .await
         .map_err(|_| DOCUMENT_READ_CANCELLED_ERROR.to_string())?
+}
+
+#[tauri::command]
+async fn open_pdf_document(path: String) -> Result<PdfDocumentDto, String> {
+    let document_path = PathBuf::from(path);
+
+    tauri::async_runtime::spawn_blocking(move || open_pdf_document_from_path(document_path))
+        .await
+        .map_err(|_| DOCUMENT_READ_CANCELLED_ERROR.to_string())?
+}
+
+#[tauri::command]
+async fn search_pdf_document(
+    path: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<PdfSearchResultDto>, String> {
+    let document_path = PathBuf::from(path);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        search_pdf_document_from_path(document_path, query, limit)
+    })
+    .await
+    .map_err(|_| DOCUMENT_READ_CANCELLED_ERROR.to_string())?
 }
 
 #[tauri::command]
@@ -179,6 +229,153 @@ fn read_document_bytes(document_path: &Path) -> io::Result<Vec<u8>> {
     file.read_to_end(&mut bytes)?;
 
     Ok(bytes)
+}
+
+fn open_pdf_document_from_path(document_path: PathBuf) -> Result<PdfDocumentDto, String> {
+    validate_pdf_path(&document_path)?;
+
+    let document =
+        PdfDocument::load(&document_path).map_err(|_| DOCUMENT_ACCESS_ERROR.to_string())?;
+    let page_count = document.get_pages().len();
+    let outline = pdf_outline_items(&document);
+
+    Ok(PdfDocumentDto {
+        id: document_path.to_string_lossy().into_owned(),
+        page_count,
+        outline,
+    })
+}
+
+fn search_pdf_document_from_path(
+    document_path: PathBuf,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<PdfSearchResultDto>, String> {
+    validate_pdf_path(&document_path)?;
+
+    let query = normalize_whitespace(&query);
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let limit = limit
+        .unwrap_or(DEFAULT_EPUB_SEARCH_LIMIT)
+        .min(MAX_EPUB_SEARCH_LIMIT);
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+
+    let document =
+        PdfDocument::load(&document_path).map_err(|_| DOCUMENT_ACCESS_ERROR.to_string())?;
+    let lower_query = query.to_lowercase();
+    let mut results = Vec::new();
+
+    for page_number in document.get_pages().keys() {
+        if results.len() >= limit {
+            break;
+        }
+
+        let text = document.extract_text(&[*page_number]).unwrap_or_default();
+        let normalized_text = normalize_whitespace(&text);
+        let Some(match_index) = normalized_text.to_lowercase().find(&lower_query) else {
+            continue;
+        };
+
+        results.push(PdfSearchResultDto {
+            id: format!("pdf-search-{}-{}", page_number, match_index),
+            label: format!("Page {}", page_number),
+            snippet: snippet_around(&normalized_text, match_index, query.len()),
+            page: usize::try_from(*page_number).unwrap_or(usize::MAX),
+        });
+    }
+
+    Ok(results)
+}
+
+fn validate_pdf_path(document_path: &Path) -> Result<(), String> {
+    if !is_supported_pdf_path(document_path) {
+        return Err(UNSUPPORTED_DOCUMENT_ERROR.to_string());
+    }
+
+    let metadata = fs::metadata(document_path).map_err(|_| DOCUMENT_ACCESS_ERROR.to_string())?;
+    if metadata.is_file() {
+        Ok(())
+    } else {
+        Err(DOCUMENT_ACCESS_ERROR.to_string())
+    }
+}
+
+fn pdf_outline_items(document: &PdfDocument) -> Vec<PdfOutlineItemDto> {
+    let mut named_destinations = Default::default();
+    let Ok(Some(outlines)) = document.get_outlines(None, None, &mut named_destinations) else {
+        return Vec::new();
+    };
+    let page_lookup: HashMap<ObjectId, usize> = document
+        .get_pages()
+        .into_iter()
+        .filter_map(|(page_number, object_id)| {
+            usize::try_from(page_number)
+                .ok()
+                .map(|page_number| (object_id, page_number))
+        })
+        .collect();
+    let mut items = Vec::new();
+    flatten_pdf_outlines(&outlines, 0, &page_lookup, &mut items);
+    items
+}
+
+fn flatten_pdf_outlines(
+    outlines: &[Outline],
+    level: usize,
+    page_lookup: &HashMap<ObjectId, usize>,
+    items: &mut Vec<PdfOutlineItemDto>,
+) {
+    for outline in outlines {
+        match outline {
+            Outline::Destination(destination) => {
+                if let (Some(title), Some(page)) = (
+                    pdf_object_text(destination.title().ok()),
+                    pdf_destination_page(destination.page().ok(), page_lookup),
+                ) {
+                    items.push(PdfOutlineItemDto {
+                        id: format!("pdf-outline-{}", items.len()),
+                        title,
+                        page,
+                        level,
+                    });
+                }
+            }
+            Outline::SubOutlines(children) => {
+                flatten_pdf_outlines(children, level + 1, page_lookup, items);
+            }
+        }
+    }
+}
+
+fn pdf_destination_page(
+    page: Option<&Object>,
+    page_lookup: &HashMap<ObjectId, usize>,
+) -> Option<usize> {
+    match page? {
+        Object::Reference(object_id) => page_lookup.get(object_id).copied(),
+        Object::Integer(index) if *index >= 0 => usize::try_from(index + 1).ok(),
+        _ => None,
+    }
+}
+
+fn pdf_object_text(value: Option<&Object>) -> Option<String> {
+    let bytes = value?.as_str().ok()?;
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        let text: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect();
+        String::from_utf16(&text).ok()
+    } else {
+        Some(String::from_utf8_lossy(bytes).to_string())
+    }
+    .map(|text| normalize_whitespace(&text))
+    .filter(|text| !text.is_empty())
 }
 
 fn open_epub_document_from_path(document_path: PathBuf) -> Result<EpubDocumentDto, String> {
@@ -844,6 +1041,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             pending_open_files,
             read_document,
+            open_pdf_document,
+            search_pdf_document,
             open_epub_document,
             read_epub_chapter,
             search_epub_document
@@ -924,9 +1123,21 @@ fn is_supported_epub_path(path: &Path) -> bool {
     extension.eq_ignore_ascii_case("epub")
 }
 
+fn is_supported_pdf_path(path: &Path) -> bool {
+    let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
+        return false;
+    };
+
+    extension.eq_ignore_ascii_case("pdf")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lopdf::{
+        content::{Content, Operation},
+        dictionary, Bookmark, Document as TestPdfDocument, Stream,
+    };
     use std::io::Write;
 
     #[test]
@@ -990,6 +1201,38 @@ mod tests {
             )
         );
         fs::remove_dir(path).unwrap();
+    }
+
+    #[test]
+    fn open_pdf_document_extracts_page_count_and_full_outline() {
+        let path = test_path("outline.pdf");
+        write_test_pdf(&path, &["Intro body", "Later body"], true).unwrap();
+
+        let document = open_pdf_document_from_path(path.clone()).unwrap();
+
+        assert_eq!(document.page_count, 2);
+        assert_eq!(document.outline.len(), 2);
+        assert_eq!(document.outline[0].title, "Intro");
+        assert_eq!(document.outline[0].page, 1);
+        assert_eq!(document.outline[1].title, "Later chapter");
+        assert_eq!(document.outline[1].page, 2);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn search_pdf_document_finds_text_without_renderer_pdfjs() {
+        let path = test_path("search.pdf");
+        write_test_pdf(&path, &["Intro body", "Native PDF result"], false).unwrap();
+
+        let results =
+            search_pdf_document_from_path(path.clone(), "Native PDF".to_string(), Some(10))
+                .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].page, 2);
+        assert_eq!(results[0].label, "Page 2");
+        assert!(results[0].snippet.contains("Native PDF result"));
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -1229,5 +1472,87 @@ mod tests {
 
         zip.finish()?;
         Ok(())
+    }
+
+    fn write_test_pdf(path: &Path, page_texts: &[&str], include_outline: bool) -> io::Result<()> {
+        let mut document = TestPdfDocument::with_version("1.5");
+        let pages_id = document.new_object_id();
+        let font_id = document.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Courier",
+        });
+        let resources_id = document.add_object(dictionary! {
+            "Font" => dictionary! {
+                "F1" => font_id,
+            },
+        });
+        let pages = page_texts
+            .iter()
+            .map(|text| {
+                let content = Content {
+                    operations: vec![
+                        Operation::new("BT", vec![]),
+                        Operation::new("Tf", vec!["F1".into(), 48.into()]),
+                        Operation::new("Td", vec![100.into(), 600.into()]),
+                        Operation::new("Tj", vec![Object::string_literal(*text)]),
+                        Operation::new("ET", vec![]),
+                    ],
+                };
+                let content_id =
+                    document.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+                Object::Reference(document.add_object(dictionary! {
+                    "Type" => "Page",
+                    "Parent" => pages_id,
+                    "Contents" => content_id,
+                }))
+            })
+            .collect::<Vec<_>>();
+        document.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => pages,
+                "Count" => page_texts.len() as i64,
+                "Resources" => resources_id,
+                "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+            }),
+        );
+        let catalog_id = document.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        document.trailer.set("Root", catalog_id);
+
+        if include_outline {
+            let pages: Vec<_> = document.get_pages().values().copied().collect();
+            if let Some(page) = pages.first() {
+                document.add_bookmark(
+                    Bookmark::new("Intro".to_string(), [0.0, 0.0, 0.0], 0, *page),
+                    None,
+                );
+            }
+            if let Some(page) = pages.get(1) {
+                document.add_bookmark(
+                    Bookmark::new("Later chapter".to_string(), [0.0, 0.0, 0.0], 0, *page),
+                    None,
+                );
+            }
+            if let Some(outline_id) = document.build_outline() {
+                let root_id = document
+                    .trailer
+                    .get(b"Root")
+                    .and_then(Object::as_reference)
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                if let Ok(Object::Dictionary(catalog)) = document.get_object_mut(root_id) {
+                    catalog.set("Outlines", Object::Reference(outline_id));
+                }
+            }
+        }
+
+        document
+            .save(path)
+            .map(|_| ())
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 }

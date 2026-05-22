@@ -85,4 +85,29 @@ describe("outlineFromPdf", () => {
       { id: "outline-1", title: "Good Name", location: { kind: "page", page: 5 }, level: 0 }
     ]);
   });
+
+  it("keeps all resolved outline entries instead of truncating long documents", async () => {
+    const pageRefs = Array.from({ length: 120 }, (_, index) => ({ num: index + 1, gen: 0 }));
+    const pdf = {
+      getOutline: vi.fn().mockResolvedValue(
+        pageRefs.map((ref, index) => ({
+          title: `Section ${index + 1}`,
+          dest: [ref],
+          items: []
+        }))
+      ),
+      getDestination: vi.fn(),
+      getPageIndex: vi.fn(async (ref: unknown) => pageRefs.indexOf(ref as (typeof pageRefs)[number]))
+    };
+
+    const outline = await outlineFromPdf(pdf);
+
+    expect(outline).toHaveLength(120);
+    expect(outline.at(-1)).toEqual({
+      id: "outline-119",
+      title: "Section 120",
+      location: { kind: "page", page: 120 },
+      level: 0
+    });
+  });
 });
