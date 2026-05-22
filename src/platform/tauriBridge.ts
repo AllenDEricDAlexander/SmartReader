@@ -5,6 +5,42 @@ import type { DocumentSession, ReaderFileSource } from "../types/reader";
 
 type TauriUnlisten = () => void;
 
+export interface DesktopEpubChapterMetadata {
+  id: string;
+  href: string;
+  label: string;
+  index: number;
+}
+
+export interface DesktopEpubOutlineItem {
+  id: string;
+  title: string;
+  href: string;
+  index?: number;
+  level: number;
+}
+
+export interface DesktopEpubDocument {
+  id: string;
+  title?: string;
+  chapters: DesktopEpubChapterMetadata[];
+  outline: DesktopEpubOutlineItem[];
+}
+
+export interface DesktopEpubChapter extends DesktopEpubChapterMetadata {
+  sanitizedHtml: string;
+  text: string;
+}
+
+export interface DesktopEpubSearchResult {
+  id: string;
+  label: string;
+  snippet: string;
+  href: string;
+  index: number;
+  progress: number;
+}
+
 const supportedExtensions = ["pdf", "epub"];
 const desktopOpenFileEvent = "smartreader://open-file";
 const supportedDocumentPath = /\.(pdf|epub)$/i;
@@ -33,11 +69,35 @@ export async function readDesktopFile(path: string): Promise<Uint8Array> {
 
 export async function createDesktopSession(path: string): Promise<DocumentSession> {
   try {
-    await readDesktopFile(path);
+    if (!path.toLowerCase().endsWith(".epub")) {
+      await readDesktopFile(path);
+    }
     return createSessionFromFile(createDesktopPathFile(path));
   } catch {
     return createAccessErrorSession(path);
   }
+}
+
+export async function openEpubDocument(path: string): Promise<DesktopEpubDocument> {
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  return invoke<DesktopEpubDocument>("open_epub_document", { path });
+}
+
+export async function readEpubChapter(path: string, href: string): Promise<DesktopEpubChapter> {
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  return invoke<DesktopEpubChapter>("read_epub_chapter", { path, href });
+}
+
+export async function searchEpubDocument(
+  path: string,
+  query: string,
+  limit?: number
+): Promise<DesktopEpubSearchResult[]> {
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  return invoke<DesktopEpubSearchResult[]>("search_epub_document", { path, query, limit });
 }
 
 export async function readFileSource(source: ReaderFileSource): Promise<ArrayBuffer> {

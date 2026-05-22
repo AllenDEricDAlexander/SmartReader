@@ -122,3 +122,33 @@ export interface Preferences {
   epubTheme: ReaderTheme;
   recentRetention: number;
 }
+
+export type PersistedReaderFileSource = Extract<ReaderFileSource, { kind: "desktop-path" }> | { kind: "empty" };
+
+export interface PersistedDocumentSession {
+  id: string;
+  title: string;
+  filePath?: string;
+  fileSource: PersistedReaderFileSource;
+  format: DocumentFormat;
+  status: DocumentSession["status"];
+  error?: ReaderError;
+  location: ReaderLocation;
+  lastLocation: ReaderLocation;
+  zoom: number;
+  fitMode: FitMode;
+  sidebarMode: SidebarMode;
+  bookmarks: Bookmark[];
+  pageCount?: number;
+  epubSettings: EpubReadingSettings;
+  openedAt: number;
+  updatedAt: number;
+}
+
+export interface AppSessionSnapshot {
+  version: 1;
+  activeTabId: string;
+  sidebarOpen: boolean;
+  preferences: Preferences;
+  sessions: PersistedDocumentSession[];
+}

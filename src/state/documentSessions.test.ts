@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createEmptySession,
+  createSessionFromRecentFile,
   createSessionFromFile,
   detectDocumentFormat,
   updateSessionLocation,
@@ -80,5 +81,26 @@ describe("document session state", () => {
     expect(session.status).toBe("empty");
     expect(session.title).toBe("Empty Tab");
     expect(session.format).toBe("empty");
+  });
+
+  it("creates a reopen session from recent-file progress metadata", () => {
+    const session = createSessionFromRecentFile({
+      id: "/Users/mario/Documents/spec.pdf",
+      title: "spec.pdf",
+      path: "/Users/mario/Documents/spec.pdf",
+      parentPath: "/Users/mario/Documents",
+      format: "pdf",
+      access: "desktop-path",
+      lastOpenedAt: 1000,
+      resumeLabel: "Page 9",
+      location: { kind: "page", page: 9 }
+    });
+
+    expect(session.fileSource).toEqual({
+      kind: "desktop-path",
+      path: "/Users/mario/Documents/spec.pdf"
+    });
+    expect(session.location).toEqual({ kind: "page", page: 9 });
+    expect(session.lastLocation).toEqual({ kind: "page", page: 9 });
   });
 });

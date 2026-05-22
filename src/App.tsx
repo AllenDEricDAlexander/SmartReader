@@ -18,9 +18,26 @@ import {
   recordRecentFile,
   saveRecentFiles
 } from "./state/recentFiles";
+import {
+  createAppSessionSnapshot,
+  loadAppSessionSnapshot,
+  restoreAppSessionSnapshot,
+  saveAppSessionSnapshot
+} from "./state/sessionPersistence";
 import { sanitizeEpubHtml } from "./reader/epubSanitizer";
 import { outlineFromPdf } from "./reader/pdfOutline";
-import { createDesktopSession, listenForDesktopOpenFiles, openDesktopFileDialog, openPendingDesktopFiles, readFileSource, setupTauriMenu } from "./platform/tauriBridge";
+import {
+  createDesktopSession,
+  listenForDesktopOpenFiles,
+  openDesktopFileDialog,
+  openEpubDocument,
+  openPendingDesktopFiles,
+  readEpubChapter,
+  readFileSource,
+  searchEpubDocument,
+  setupTauriMenu
+} from "./platform/tauriBridge";
+import type { DesktopEpubDocument } from "./platform/tauriBridge";
 import { createAccessErrorSession, isTauriRuntime } from "./platform/fileSources";
 import type {
   Bookmark,
@@ -49,19 +66,30 @@ export function App() {
   const locationInputRef = useRef<HTMLInputElement>(null);
   const searchAdapterRef = useRef<(query: string) => Promise<SearchResult[]>>(async () => []);
   const openDesktopPathRef = useRef<(path: string) => Promise<void>>(async () => undefined);
-  const [sessions, setSessions] = useState<DocumentSession[]>(() => [createEmptySession()]);
-  const [activeTabId, setActiveTabId] = useState(() => sessions[0].id);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [initialAppState] = useState(() =>
+    restoreAppSessionSnapshot(loadAppSessionSnapshot(), defaultPreferences)
+  );
+  const [sessions, setSessions] = useState<DocumentSession[]>(() => initialAppState.sessions);
+  const [activeTabId, setActiveTabId] = useState(() => initialAppState.activeTabId);
+  const [sidebarOpen, setSidebarOpen] = useState(initialAppState.sidebarOpen);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [hud, setHud] = useState("");
   const [preferencesOpen, setPreferencesOpen] = useState(false);
-  const [preferences, setPreferences] = useState(defaultPreferences);
+  const [preferences, setPreferences] = useState(initialAppState.preferences);
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>(() => loadRecentFiles());
+  const documentCacheRef = useRef(new Map<string, LoadedReaderDocument>());
+  const hudTimerRef = useRef<number | undefined>(undefined);
+  const sessionsRef = useRef<DocumentSession[]>(initialAppState.sessions);
   const isDesktop = isTauriRuntime();
 
   const activeSession = sessions.find((session) => session.id === activeTabId);
+  const activeLocationKey = activeSession ? JSON.stringify(activeSession.location) : "";
+
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
 
   const updateActiveSession = useCallback((updater: (session: DocumentSession) => DocumentSession) => {
     setSessions((current) =>
@@ -70,8 +98,11 @@ export function App() {
   }, [activeTabId]);
 
   const showHud = useCallback((message: string) => {
+    if (hudTimerRef.current) {
+      window.clearTimeout(hudTimerRef.current);
+    }
     setHud(message);
-    window.setTimeout(() => setHud(""), 1200);
+    hudTimerRef.current = window.setTimeout(() => setHud(""), 1200);
   }, []);
 
   const recordSessionRecent = useCallback((session: DocumentSession) => {
@@ -129,17 +160,30 @@ export function App() {
     addSession(session);
   }, [addSession]);
 
-  const closeTab = useCallback(() => {
+  const closeTab = useCallback((tabId = activeTabId) => {
     setSessions((current) => {
+      const index = current.findIndex((session) => session.id === tabId);
+      const closingSession = current[index];
+
+      if (!closingSession) {
+        return current;
+      }
+
+      disposeSessionResources(closingSession, documentCacheRef.current.get(tabId));
+      documentCacheRef.current.delete(tabId);
+
       if (current.length === 1) {
         const empty = createEmptySession();
         setActiveTabId(empty.id);
+        searchAdapterRef.current = async () => [];
         return [empty];
       }
 
-      const index = current.findIndex((session) => session.id === activeTabId);
-      const next = current.filter((session) => session.id !== activeTabId);
-      setActiveTabId(next[Math.max(0, index - 1)]?.id ?? next[0].id);
+      const next = current.filter((session) => session.id !== tabId);
+      if (tabId === activeTabId) {
+        setActiveTabId(next[Math.max(0, index - 1)]?.id ?? next[0].id);
+        searchAdapterRef.current = async () => [];
+      }
       return next;
     });
   }, [activeTabId]);
@@ -208,6 +252,10 @@ export function App() {
     }
   }, [updateActiveSession]);
 
+  const handleLocationChange = useCallback((location: ReaderLocation) => {
+    updateActiveSession((session) => updateSessionLocation(session, location));
+  }, [updateActiveSession]);
+
   const registry = useMemo(
     () =>
       createCommandRegistry({
@@ -240,6 +288,35 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    saveAppSessionSnapshot(
+      createAppSessionSnapshot({
+        sessions,
+        activeTabId,
+        sidebarOpen,
+        preferences
+      })
+    );
+  }, [activeTabId, preferences, sessions, sidebarOpen]);
+
+  useEffect(() => {
+    if (activeSession?.status !== "ready") {
+      searchAdapterRef.current = async () => [];
+    }
+  }, [activeSession?.id, activeSession?.status]);
+
+  useEffect(() => {
+    if (activeSession?.status !== "ready") {
+      return;
+    }
+
+    setRecentFiles((current) => {
+      const next = recordRecentFile(current, activeSession, preferences.recentRetention);
+      saveRecentFiles(next);
+      return next;
+    });
+  }, [activeLocationKey, activeSession?.id, preferences.recentRetention]);
+
+  useEffect(() => {
     const onMenuCommand = (event: Event) => {
       const commandId = (event as CustomEvent<CommandId>).detail;
       registry.runCommand(commandId);
@@ -251,16 +328,38 @@ export function App() {
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
     openPendingDesktopFiles((path) => {
       openDesktopPathRef.current(path);
     }).catch(() => undefined);
     listenForDesktopOpenFiles((path) => {
       openDesktopPathRef.current(path);
     }).then((cleanup) => {
+      if (disposed) {
+        cleanup?.();
+        return;
+      }
       unlisten = cleanup;
     });
 
-    return () => unlisten?.();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (hudTimerRef.current) {
+        window.clearTimeout(hudTimerRef.current);
+      }
+      documentCacheRef.current.forEach((document, sessionId) => {
+        const session = sessionsRef.current.find((item) => item.id === sessionId);
+        disposeSessionResources(session, document);
+      });
+      documentCacheRef.current.clear();
+      searchAdapterRef.current = async () => [];
+    };
   }, []);
 
   useEffect(() => {
@@ -323,10 +422,7 @@ export function App() {
         sessions={sessions}
         activeTabId={activeTabId}
         onActivate={setActiveTabId}
-        onClose={(id) => {
-          setActiveTabId(id);
-          window.setTimeout(closeTab, 0);
-        }}
+        onClose={closeTab}
         onNewTab={createNewTab}
       />
 
@@ -372,6 +468,7 @@ export function App() {
           session={activeSession}
           recentFiles={recentFiles}
           preferences={preferences}
+          documentCache={documentCacheRef.current}
           onOpen={openFilePicker}
           onOpenRecent={async (recent) => {
             if (recent.access === "desktop-path" && isDesktop) {
@@ -391,7 +488,7 @@ export function App() {
             saveRecentFiles(next);
             setRecentFiles(next);
           }}
-          onLocationChange={(location) => updateActiveSession((session) => updateSessionLocation(session, location))}
+          onLocationChange={handleLocationChange}
           onOutlineChange={(outline) => updateActiveSession((session) => ({ ...session, outline }))}
           onPageCountChange={(pageCount) => updateActiveSession((session) => ({ ...session, pageCount }))}
           onSearchReady={(handler) => {
@@ -441,7 +538,10 @@ function TabStrip(props: {
             onClick={() => props.onActivate(session.id)}
           >
             <span className={`format-dot ${session.format}`} />
-            <span className="tab-title">{session.title}</span>
+            <span className="tab-copy">
+              <span className="tab-title">{session.title}</span>
+              <span className="tab-meta">{tabProgressLabel(session)}</span>
+            </span>
             {session.status === "error" ? <span className="tab-error" aria-label="Error" /> : null}
             <span className="tab-shortcut">{index < 9 ? `⌘${index + 1}` : ""}</span>
             <span
@@ -500,9 +600,21 @@ function CommandToolbar(props: {
         onClick={props.onToggleSidebar}
       />
       <ToolbarButton label="Open file" icon="open" onClick={props.onOpen} />
-      <span className="toolbar-separator" />
-      <ToolbarButton label="Back" icon="back" disabled={!hasDocument} onClick={() => undefined} />
-      <ToolbarButton label="Forward" icon="forward" disabled={!hasDocument} onClick={() => undefined} />
+      <span className="toolbar-separator history-control" />
+      <ToolbarButton
+        className="history-control"
+        label="Back"
+        icon="back"
+        disabled={!hasDocument}
+        onClick={() => undefined}
+      />
+      <ToolbarButton
+        className="history-control"
+        label="Forward"
+        icon="forward"
+        disabled={!hasDocument}
+        onClick={() => undefined}
+      />
       <form
         className="location-form"
         onSubmit={(event) => {
@@ -523,12 +635,25 @@ function CommandToolbar(props: {
         />
         {props.session?.pageCount ? <span>/ {props.session.pageCount}</span> : null}
       </form>
-      <span className="toolbar-separator" />
-      <ToolbarButton label="Zoom out" icon="minus" disabled={!hasDocument} onClick={props.onZoomOut} />
-      <button className="zoom-value" type="button" disabled={!hasDocument} onClick={props.onResetZoom}>
+      <span className="toolbar-status" aria-live="polite">{readerStatusLabel(props.session)}</span>
+      <span className="toolbar-separator zoom-control" />
+      <ToolbarButton
+        className="zoom-control"
+        label="Zoom out"
+        icon="minus"
+        disabled={!hasDocument}
+        onClick={props.onZoomOut}
+      />
+      <button className="zoom-value zoom-control" type="button" disabled={!hasDocument} onClick={props.onResetZoom}>
         {Math.round((props.session?.zoom ?? 1) * 100)}%
       </button>
-      <ToolbarButton label="Zoom in" icon="plus" disabled={!hasDocument} onClick={props.onZoomIn} />
+      <ToolbarButton
+        className="zoom-control"
+        label="Zoom in"
+        icon="plus"
+        disabled={!hasDocument}
+        onClick={props.onZoomIn}
+      />
       <select
         className="fit-select"
         aria-label="Fit mode"
@@ -553,13 +678,14 @@ function CommandToolbar(props: {
 function ToolbarButton(props: {
   label: string;
   icon: IconName;
+  className?: string;
   disabled?: boolean;
   pressed?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
-      className="toolbar-button"
+      className={`toolbar-button ${props.className ?? ""}`}
       type="button"
       title={props.label}
       aria-label={props.label}
@@ -653,7 +779,7 @@ function SidebarRows(props: {
     return session.outline.map((item) => (
       <button
         key={item.id}
-        className="sidebar-row"
+        className={`sidebar-row ${sameLocation(item.location, session.location) ? "active" : ""}`}
         type="button"
         style={{ paddingLeft: `${12 + (item.level ?? 0) * 14}px` }}
         onClick={() => props.onJump(item.location)}
@@ -720,6 +846,7 @@ function ReaderViewport(props: {
   session?: DocumentSession;
   recentFiles: RecentFile[];
   preferences: Preferences;
+  documentCache: Map<string, LoadedReaderDocument>;
   onOpen: () => void;
   onOpenRecent: (recent: RecentFile) => void;
   onRemoveRecent: (path: string) => void;
@@ -751,6 +878,7 @@ function ReaderViewport(props: {
       {session.format === "pdf" ? (
         <PdfReader
           session={session}
+          documentCache={props.documentCache}
           onLocationChange={props.onLocationChange}
           onOutlineChange={props.onOutlineChange}
           onPageCountChange={props.onPageCountChange}
@@ -760,6 +888,7 @@ function ReaderViewport(props: {
         <EpubReader
           session={session}
           preferences={props.preferences}
+          documentCache={props.documentCache}
           onLocationChange={props.onLocationChange}
           onOutlineChange={props.onOutlineChange}
           onSearchReady={props.onSearchReady}
@@ -783,6 +912,7 @@ function EmptyState(props: {
         </div>
         <h1>SmartReader</h1>
         <p>Open a local PDF or EPUB.</p>
+        <p className="empty-hint">Drop a document here, use ⌘O, or reopen a recent file below.</p>
         <button className="primary-button" type="button" onClick={props.onOpen}>
           Open File
         </button>
@@ -799,10 +929,12 @@ function EmptyState(props: {
         ) : (
           props.recentFiles.map((file) => (
             <button key={file.id} className="recent-row" type="button" onClick={() => props.onOpenRecent(file)}>
-              <span className="recent-title">{file.title}</span>
-              <span className="recent-meta">
-                {file.format.toUpperCase()} · {file.parentPath} · {file.resumeLabel}
+              <span className={`recent-format ${file.format}`}>{file.format.toUpperCase()}</span>
+              <span className="recent-copy">
+                <span className="recent-title">{file.title}</span>
+                <span className="recent-meta">{file.parentPath}</span>
               </span>
+              <span className="recent-progress">{file.resumeLabel}</span>
             </button>
           ))
         )}
@@ -822,7 +954,9 @@ function ErrorState(props: {
   return (
     <section className="error-state">
       <div className="error-panel">
-        <Icon name="warning" />
+        <div className="error-mark">
+          <Icon name="warning" />
+        </div>
         <h1>{props.session.error?.title ?? "Unable to open document"}</h1>
         <p>{props.session.error?.message ?? "The renderer could not load this file."}</p>
         <div className="error-actions">
@@ -846,19 +980,32 @@ function ErrorState(props: {
 
 function PdfReader(props: {
   session: DocumentSession;
+  documentCache: Map<string, LoadedReaderDocument>;
   onLocationChange: (location: ReaderLocation) => void;
   onOutlineChange: (outline: OutlineItem[]) => void;
   onPageCountChange: (pageCount: number) => void;
   onSearchReady: (handler: (query: string) => Promise<SearchResult[]>) => void;
 }) {
-  const [pdf, setPdf] = useState<PDFDocumentProxy>();
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [pdf, setPdf] = useState<PDFDocumentProxy | undefined>(
+    () => props.documentCache.get(props.session.id)?.pdf
+  );
   const [error, setError] = useState("");
 
   useEffect(() => {
     let disposed = false;
+    const cached = props.documentCache.get(props.session.id)?.pdf;
 
     async function loadPdf() {
       setError("");
+
+      if (cached) {
+        setPdf(cached);
+        props.onPageCountChange(cached.numPages);
+        props.onSearchReady((query) => searchPdf(cached, query));
+        return;
+      }
+
       setPdf(undefined);
 
       try {
@@ -874,6 +1021,10 @@ function PdfReader(props: {
           return;
         }
 
+        props.documentCache.set(props.session.id, {
+          ...props.documentCache.get(props.session.id),
+          pdf: loaded
+        });
         setPdf(loaded);
         props.onPageCountChange(loaded.numPages);
         props.onOutlineChange(await outlineFromPdf(loaded));
@@ -887,30 +1038,49 @@ function PdfReader(props: {
     return () => {
       disposed = true;
     };
-  }, [props.session.id]);
+  }, [props.documentCache, props.session.id]);
+
+  useEffect(() => {
+    if (!pdf || props.session.fitMode === "single" || props.session.location.kind !== "page") {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      const pageFrame = canvasRef.current?.querySelector<HTMLElement>(
+        `[data-page-number="${props.session.location.kind === "page" ? props.session.location.page : 1}"]`
+      );
+      pageFrame?.scrollIntoView?.({ block: "start" });
+    });
+  }, [pdf, props.session.id]);
+
+  const handleVisiblePage = useCallback((pageNumber: number) => {
+    props.onLocationChange({ kind: "page", page: pageNumber });
+  }, [props.onLocationChange]);
 
   if (error) {
     return <InlineReaderError message={error} />;
   }
 
   if (!pdf) {
-    return <ReaderLoading title={props.session.title} />;
+    return <ReaderLoading title={props.session.title} detail="Preparing PDF pages" />;
   }
 
   const pageNumbers =
     props.session.fitMode === "single" && props.session.location.kind === "page"
       ? [props.session.location.page]
       : Array.from({ length: pdf.numPages }, (_, index) => index + 1);
+  const currentPage = props.session.location.kind === "page" ? props.session.location.page : 1;
 
   return (
-    <div className="pdf-canvas">
+    <div ref={canvasRef} className="pdf-canvas">
       {pageNumbers.map((pageNumber) => (
         <PdfPage
-          key={`${props.session.id}-${pageNumber}-${props.session.zoom}`}
+          key={`${props.session.id}-${pageNumber}`}
           pdf={pdf}
           pageNumber={pageNumber}
           zoom={zoomForFitMode(props.session.fitMode, props.session.zoom)}
-          onVisible={() => props.onLocationChange({ kind: "page", page: pageNumber })}
+          renderImmediately={props.session.fitMode === "single" || Math.abs(pageNumber - currentPage) <= 1}
+          onVisiblePage={handleVisiblePage}
         />
       ))}
     </div>
@@ -921,17 +1091,50 @@ function PdfPage(props: {
   pdf: PDFDocumentProxy;
   pageNumber: number;
   zoom: number;
-  onVisible: () => void;
+  renderImmediately: boolean;
+  onVisiblePage: (pageNumber: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pageRef = useRef<HTMLElement>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [shouldRender, setShouldRender] = useState(props.renderImmediately);
+
+  useEffect(() => {
+    if (props.renderImmediately || shouldRender) {
+      setShouldRender(true);
+      return;
+    }
+
+    const element = pageRef.current;
+
+    if (!element || !window.IntersectionObserver) {
+      setShouldRender(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setShouldRender(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "900px 0px" }
+    );
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [props.renderImmediately, shouldRender]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function renderPage() {
+      if (!shouldRender) {
+        return;
+      }
+
       setLoading(true);
       setError("");
       try {
@@ -951,7 +1154,7 @@ function PdfPage(props: {
     return () => {
       cancelled = true;
     };
-  }, [props.pageNumber, props.pdf, props.zoom]);
+  }, [props.pageNumber, props.pdf, props.zoom, shouldRender]);
 
   useEffect(() => {
     const element = pageRef.current;
@@ -963,7 +1166,7 @@ function PdfPage(props: {
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting && entry.intersectionRatio > 0.45) {
-          props.onVisible();
+          props.onVisiblePage(props.pageNumber);
         }
       },
       { threshold: [0.45] }
@@ -971,11 +1174,16 @@ function PdfPage(props: {
 
     observer.observe(element);
     return () => observer.disconnect();
-  }, [props.onVisible]);
+  }, [props.onVisiblePage, props.pageNumber]);
 
   return (
-    <article ref={pageRef} className="pdf-page-frame" aria-label={`Page ${props.pageNumber}`}>
-      {loading ? <div className="page-skeleton" /> : null}
+    <article
+      ref={pageRef}
+      className="pdf-page-frame"
+      data-page-number={props.pageNumber}
+      aria-label={`Page ${props.pageNumber}`}
+    >
+      {loading || !shouldRender ? <div className="page-skeleton" /> : null}
       {error ? (
         <div className="page-error">
           <span>{error}</span>
@@ -993,58 +1201,92 @@ function PdfPage(props: {
 function EpubReader(props: {
   session: DocumentSession;
   preferences: Preferences;
+  documentCache: Map<string, LoadedReaderDocument>;
   onLocationChange: (location: ReaderLocation) => void;
   onOutlineChange: (outline: OutlineItem[]) => void;
   onSearchReady: (handler: (query: string) => Promise<SearchResult[]>) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const metadataRequestRef = useRef(0);
+  const chapterRequestRef = useRef(0);
+  const pendingLocalChapterHrefRef = useRef<string | undefined>(undefined);
+  const cachedEpub = props.documentCache.get(props.session.id)?.epub;
+  const cachedMetadata = cachedEpub?.metadata;
   const [error, setError] = useState("");
-  const [chapters, setChapters] = useState<EpubChapter[]>([]);
-  const [activeChapterIndex, setActiveChapterIndex] = useState(0);
+  const [metadata, setMetadata] = useState<EpubDocumentMetadata | undefined>(() => cachedMetadata);
+  const [activeChapterIndex, setActiveChapterIndex] = useState(() =>
+    chapterIndexForLocation(cachedMetadata?.chapters ?? [], props.session.location)
+  );
+  const [activeChapter, setActiveChapter] = useState<EpubChapter | undefined>(() => {
+    const chapter = cachedMetadata?.chapters[activeChapterIndex];
+    return chapter ? cachedEpub?.chapters.get(chapter.href) : undefined;
+  });
+  const selectChapterIndex = useCallback((index: number) => {
+    const chapter = metadata?.chapters[index];
+    if (chapter) {
+      pendingLocalChapterHrefRef.current = chapter.href;
+    }
+
+    setActiveChapterIndex(index);
+  }, [metadata]);
 
   useEffect(() => {
     let disposed = false;
+    const requestId = ++metadataRequestRef.current;
+    pendingLocalChapterHrefRef.current = undefined;
 
     async function loadEpub() {
       setError("");
-      setChapters([]);
+      setActiveChapter(undefined);
+
+      const cached = props.documentCache.get(props.session.id)?.epub;
+      if (cached?.metadata) {
+        const activeIndex = chapterIndexForLocation(cached.metadata.chapters, props.session.location);
+        setMetadata(cached.metadata);
+        setActiveChapterIndex(activeIndex);
+        setActiveChapter(cached.chapters.get(cached.metadata.chapters[activeIndex]?.href ?? ""));
+        props.onOutlineChange(cached.metadata.outline);
+        props.onSearchReady(createEpubSearchHandler(props.session.fileSource, cached));
+        return;
+      }
+
+      if (props.session.fileSource.kind === "empty") {
+        setError("This EPUB could not be rendered.");
+        return;
+      }
 
       try {
-        if (props.session.fileSource.kind === "empty") {
-          throw new Error("Missing file source");
-        }
-        const data = await readFileSource(props.session.fileSource);
+        const loaded = props.session.fileSource.kind === "desktop-path"
+          ? await loadDesktopEpubMetadata(props.session.fileSource.path)
+          : await loadBrowserEpubMetadata(props.session.fileSource);
 
-        if (disposed) {
+        if (disposed || requestId !== metadataRequestRef.current) {
           return;
         }
 
-        const parsed = await parseEpub(data);
-        setChapters(parsed);
-        props.onOutlineChange(
-          parsed.map((chapter, index) => ({
-            id: chapter.id,
-            title: chapter.label,
-            location: {
-              kind: "epub",
-              chapterHref: chapter.href,
-              chapterLabel: chapter.label,
-              progress: parsed.length > 1 ? index / (parsed.length - 1) : 0
-            },
-            level: 0
-          }))
-        );
-        props.onSearchReady(async (query) => searchEpub(parsed, query));
+        const activeIndex = chapterIndexForLocation(loaded.metadata.chapters, props.session.location);
+        props.documentCache.set(props.session.id, {
+          ...props.documentCache.get(props.session.id),
+          epub: loaded
+        });
+        setMetadata(loaded.metadata);
+        setActiveChapterIndex(activeIndex);
+        setActiveChapter(loaded.chapters.get(loaded.metadata.chapters[activeIndex]?.href ?? ""));
+        props.onOutlineChange(loaded.metadata.outline);
+        props.onSearchReady(createEpubSearchHandler(props.session.fileSource, loaded));
       } catch {
-        setError("This EPUB could not be rendered.");
+        if (!disposed && requestId === metadataRequestRef.current) {
+          setError("This EPUB could not be rendered.");
+        }
       }
     }
 
     loadEpub();
     return () => {
       disposed = true;
+      metadataRequestRef.current += 1;
     };
-  }, [props.session.id]);
+  }, [props.documentCache, props.session.id]);
 
   useEffect(() => {
     if (props.session.location.kind !== "epub" || !props.session.location.chapterHref) {
@@ -1052,15 +1294,24 @@ function EpubReader(props: {
     }
 
     const chapterHref = props.session.location.chapterHref;
-    const index = chapters.findIndex((chapter) => chapter.href === chapterHref);
+    const pendingLocalChapterHref = pendingLocalChapterHrefRef.current;
+    if (pendingLocalChapterHref) {
+      if (chapterHref === pendingLocalChapterHref) {
+        pendingLocalChapterHrefRef.current = undefined;
+      }
+
+      return;
+    }
+
+    const index = metadata?.chapters.findIndex((chapter) => chapter.href === chapterHref) ?? -1;
     if (index >= 0) {
       setActiveChapterIndex(index);
-      containerRef.current?.scrollTo({ top: 0 });
+      containerRef.current?.scrollTo?.({ top: 0 });
     }
-  }, [chapters, props.session.location]);
+  }, [metadata, props.session.location]);
 
   useEffect(() => {
-    const chapter = chapters[activeChapterIndex];
+    const chapter = metadata?.chapters[activeChapterIndex];
 
     if (!chapter) {
       return;
@@ -1070,19 +1321,88 @@ function EpubReader(props: {
       kind: "epub",
       chapterHref: chapter.href,
       chapterLabel: chapter.label,
-      progress: chapters.length > 1 ? activeChapterIndex / (chapters.length - 1) : 0
+      progress: metadata.chapters.length > 1 ? activeChapterIndex / (metadata.chapters.length - 1) : 0
     });
-  }, [activeChapterIndex, chapters]);
+  }, [activeChapterIndex, metadata]);
+
+  useEffect(() => {
+    let disposed = false;
+    const requestId = ++chapterRequestRef.current;
+    const chapter = metadata?.chapters[activeChapterIndex];
+
+    if (!chapter || props.session.fileSource.kind !== "desktop-path") {
+      if (chapter) {
+        setActiveChapter(props.documentCache.get(props.session.id)?.epub?.chapters.get(chapter.href));
+      }
+      return () => {
+        disposed = true;
+        chapterRequestRef.current += 1;
+      };
+    }
+
+    const cached = props.documentCache.get(props.session.id)?.epub?.chapters.get(chapter.href);
+    if (cached) {
+      setActiveChapter(cached);
+      return () => {
+        disposed = true;
+        chapterRequestRef.current += 1;
+      };
+    }
+
+    setActiveChapter(undefined);
+    readEpubChapter(props.session.fileSource.path, chapter.href)
+      .then((loaded) => {
+        if (disposed || requestId !== chapterRequestRef.current) {
+          return;
+        }
+
+        const epub = props.documentCache.get(props.session.id)?.epub;
+        if (!epub) {
+          return;
+        }
+
+        const nextChapter = desktopChapterToEpubChapter(loaded);
+        epub.chapters.set(nextChapter.href, nextChapter);
+        setActiveChapter(nextChapter);
+        props.onSearchReady(createEpubSearchHandler(props.session.fileSource, epub));
+      })
+      .catch(() => {
+        if (!disposed && requestId === chapterRequestRef.current) {
+          setError("This EPUB could not be rendered.");
+        }
+      });
+
+    return () => {
+      disposed = true;
+      chapterRequestRef.current += 1;
+    };
+  }, [activeChapterIndex, metadata, props.documentCache, props.session.fileSource, props.session.id]);
 
   if (error) {
     return <InlineReaderError message={error} />;
   }
 
-  if (chapters.length === 0) {
-    return <ReaderLoading title={props.session.title} />;
+  if (!metadata) {
+    return <ReaderLoading title={props.session.title} detail="Preparing EPUB structure" />;
   }
 
-  const chapter = chapters[activeChapterIndex];
+  if (!activeChapter) {
+    return (
+      <ReaderLoading
+        title={props.session.title}
+        detail={`Opening ${metadata.chapters[activeChapterIndex]?.label ?? "chapter"}`}
+      />
+    );
+  }
+
+  const chapter = activeChapter;
+  const chapterStatus = chapterProgressLabel(activeChapterIndex, metadata.chapters.length);
+  const chapterPercent = readingProgressPercent({
+    kind: "epub",
+    chapterHref: chapter.href,
+    chapterLabel: chapter.label,
+    progress: metadata.chapters.length > 1 ? activeChapterIndex / (metadata.chapters.length - 1) : 0
+  });
 
   return (
     <div
@@ -1094,19 +1414,25 @@ function EpubReader(props: {
           <button
             type="button"
             disabled={activeChapterIndex === 0}
-            onClick={() => setActiveChapterIndex((index) => Math.max(0, index - 1))}
+            onClick={() => selectChapterIndex(Math.max(0, activeChapterIndex - 1))}
           >
             Previous
           </button>
-          <span>{chapter.label}</span>
+          <span className="epub-chapter-title">
+            <strong>{chapter.label}</strong>
+            <small>{chapterStatus}</small>
+          </span>
           <button
             type="button"
-            disabled={activeChapterIndex === chapters.length - 1}
-            onClick={() => setActiveChapterIndex((index) => Math.min(chapters.length - 1, index + 1))}
+            disabled={activeChapterIndex === metadata.chapters.length - 1}
+            onClick={() => selectChapterIndex(Math.min(metadata.chapters.length - 1, activeChapterIndex + 1))}
           >
             Next
           </button>
         </header>
+        <div className="epub-progress-track" aria-label={chapterStatus}>
+          <span style={{ width: `${chapterPercent}%` }} />
+        </div>
         <div className="epub-content" dangerouslySetInnerHTML={{ __html: chapter.html }} />
       </article>
     </div>
@@ -1238,11 +1564,14 @@ function PreferencesDialog(props: {
   );
 }
 
-function ReaderLoading(props: { title: string }) {
+function ReaderLoading(props: { title: string; detail?: string }) {
   return (
     <div className="reader-loading">
-      <span className="spinner" />
-      <span>Opening {props.title}</span>
+      <span className="spinner" aria-hidden="true" />
+      <span className="reader-loading-copy">
+        <strong>Opening {props.title}</strong>
+        {props.detail ? <small>{props.detail}</small> : null}
+      </span>
     </div>
   );
 }
@@ -1260,8 +1589,59 @@ interface EpubChapter {
   id: string;
   href: string;
   label: string;
+  index: number;
   html: string;
   text: string;
+}
+
+interface EpubDocumentMetadata {
+  id: string;
+  title?: string;
+  chapters: EpubChapterMetadata[];
+  outline: OutlineItem[];
+}
+
+interface EpubChapterMetadata {
+  id: string;
+  href: string;
+  label: string;
+  index: number;
+}
+
+interface EpubDocumentCache {
+  metadata: EpubDocumentMetadata;
+  chapters: Map<string, EpubChapter>;
+}
+
+interface LoadedReaderDocument {
+  pdf?: PDFDocumentProxy;
+  epub?: EpubDocumentCache;
+}
+
+function disposeSessionResources(session: DocumentSession | undefined, document?: LoadedReaderDocument) {
+  disposeLoadedReaderDocument(document);
+
+  const objectUrl = session?.objectUrl ?? (session?.fileSource.kind === "browser-file" ? session.fileSource.objectUrl : undefined);
+  if (objectUrl) {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function disposeLoadedReaderDocument(document?: LoadedReaderDocument) {
+  if (document?.pdf) {
+    void document.pdf.destroy();
+  }
+
+  document?.epub?.chapters.clear();
+}
+
+function chapterIndexForLocation(chapters: EpubChapterMetadata[], location: ReaderLocation): number {
+  if (location.kind !== "epub" || !location.chapterHref) {
+    return 0;
+  }
+
+  const index = chapters.findIndex((chapter) => chapter.href === location.chapterHref);
+  return index >= 0 ? index : 0;
 }
 
 let pdfJsModule: Promise<typeof import("pdfjs-dist")> | undefined;
@@ -1278,6 +1658,112 @@ async function loadPdfJs(): Promise<typeof import("pdfjs-dist")> {
   }
 
   return pdfJsModule;
+}
+
+async function loadDesktopEpubMetadata(path: string): Promise<EpubDocumentCache> {
+  const document = await openEpubDocument(path);
+  const metadata = desktopDocumentToEpubMetadata(path, document);
+
+  return {
+    metadata,
+    chapters: new Map()
+  };
+}
+
+async function loadBrowserEpubMetadata(source: Extract<DocumentSession["fileSource"], { kind: "browser-file" }>): Promise<EpubDocumentCache> {
+  const data = await readFileSource(source);
+  const chapters = await parseEpub(data);
+  const metadata = chaptersToEpubMetadata(source.file.name, chapters);
+
+  return {
+    metadata,
+    chapters: new Map(chapters.map((chapter) => [chapter.href, chapter]))
+  };
+}
+
+function desktopDocumentToEpubMetadata(path: string, document: DesktopEpubDocument): EpubDocumentMetadata {
+  return {
+    id: document.id || path,
+    title: document.title,
+    chapters: document.chapters,
+    outline: document.outline.map((item) => {
+      const chapter = typeof item.index === "number"
+        ? document.chapters[item.index]
+        : document.chapters.find((entry) => entry.href === item.href);
+
+      return {
+        id: item.id,
+        title: item.title,
+        location: {
+          kind: "epub",
+          chapterHref: item.href,
+          chapterLabel: item.title,
+          progress: chapter && document.chapters.length > 1 ? chapter.index / (document.chapters.length - 1) : 0
+        },
+        level: item.level
+      };
+    })
+  };
+}
+
+function chaptersToEpubMetadata(id: string, chapters: EpubChapter[]): EpubDocumentMetadata {
+  return {
+    id,
+    chapters,
+    outline: chapters.map((chapter) => ({
+      id: chapter.id,
+      title: chapter.label,
+      location: {
+        kind: "epub",
+        chapterHref: chapter.href,
+        chapterLabel: chapter.label,
+        progress: chapters.length > 1 ? chapter.index / (chapters.length - 1) : 0
+      },
+      level: 0
+    }))
+  };
+}
+
+function desktopChapterToEpubChapter(chapter: Awaited<ReturnType<typeof readEpubChapter>>): EpubChapter {
+  return {
+    id: chapter.id,
+    href: chapter.href,
+    label: chapter.label,
+    index: chapter.index,
+    html: chapter.sanitizedHtml,
+    text: chapter.text
+  };
+}
+
+function createEpubSearchHandler(
+  source: DocumentSession["fileSource"],
+  epub: EpubDocumentCache
+): (query: string) => Promise<SearchResult[]> {
+  if (source.kind === "desktop-path") {
+    return (query) => searchDesktopEpub(source.path, query);
+  }
+
+  if (source.kind === "browser-file") {
+    return (query) => searchEpub(Array.from(epub.chapters.values()), query);
+  }
+
+  return async () => [];
+}
+
+async function searchDesktopEpub(path: string, query: string): Promise<SearchResult[]> {
+  const results = await searchEpubDocument(path, query, 50);
+
+  return results.map((result) => ({
+    id: result.id,
+    label: result.label,
+    snippet: result.snippet,
+    location: {
+      kind: "epub",
+      chapterHref: result.href,
+      chapterLabel: result.label,
+      progress: result.progress
+    }
+  }));
 }
 
 async function parseEpub(data: ArrayBuffer): Promise<EpubChapter[]> {
@@ -1329,6 +1815,7 @@ async function parseEpub(data: ArrayBuffer): Promise<EpubChapter[]> {
       id: idref ?? `chapter-${index}`,
       href: manifestItem.href,
       label: navLabels.get(manifestItem.href) ?? `Chapter ${index + 1}`,
+      index,
       html: "",
       text: ""
     });
@@ -1520,6 +2007,58 @@ function locationToStatus(location: ReaderLocation, pageCount?: number): string 
   }
 
   return "";
+}
+
+function tabProgressLabel(session: DocumentSession): string {
+  if (session.status === "empty") {
+    return "New tab";
+  }
+
+  if (session.status === "error") {
+    return "Needs attention";
+  }
+
+  if (session.location.kind === "page") {
+    return `Page ${session.location.page}`;
+  }
+
+  if (session.location.kind === "epub") {
+    return session.location.chapterLabel ?? `${readingProgressPercent(session.location)}%`;
+  }
+
+  return session.format.toUpperCase();
+}
+
+function readerStatusLabel(session?: DocumentSession): string {
+  if (!session || session.status !== "ready") {
+    return "";
+  }
+
+  if (session.location.kind === "page") {
+    return session.pageCount
+      ? `Page ${session.location.page} of ${session.pageCount}`
+      : `Page ${session.location.page}`;
+  }
+
+  if (session.location.kind === "epub") {
+    return session.location.chapterLabel
+      ? `${session.location.chapterLabel} · ${readingProgressPercent(session.location)}%`
+      : `${readingProgressPercent(session.location)}%`;
+  }
+
+  return "";
+}
+
+function chapterProgressLabel(index: number, total: number): string {
+  return total > 0 ? `Chapter ${index + 1} of ${total}` : "Chapter";
+}
+
+function readingProgressPercent(location: ReaderLocation): number {
+  if (location.kind !== "epub") {
+    return 0;
+  }
+
+  return Math.round(Math.min(1, Math.max(0, location.progress)) * 100);
 }
 
 function zoomForFitMode(fitMode: FitMode, zoom: number): number {

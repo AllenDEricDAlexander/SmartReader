@@ -5,6 +5,7 @@ import type {
   FitMode,
   ReaderFileLike,
   ReaderLocation,
+  RecentFile,
   SidebarMode
 } from "../types/reader";
 
@@ -67,6 +68,24 @@ export function createSessionFromFile(file: ReaderFileLike): DocumentSession {
             message: "SmartReader MVP opens PDF and EPUB files."
           }
         : undefined
+  };
+}
+
+/** Creates a path-backed reopen session while preserving recent-file reading progress. */
+export function createSessionFromRecentFile(recent: RecentFile): DocumentSession {
+  const session = createSessionFromFile({
+    kind: "desktop-path",
+    path: recent.path,
+    name: recent.title,
+    size: 0,
+    lastModified: recent.lastOpenedAt
+  });
+
+  return {
+    ...session,
+    location: recent.location,
+    lastLocation: recent.location,
+    updatedAt: Date.now()
   };
 }
 
