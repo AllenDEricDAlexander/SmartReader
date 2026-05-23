@@ -27,8 +27,14 @@ import {
 import { sanitizeEpubHtml } from "./reader/epubSanitizer";
 import { outlineFromPdf } from "./reader/pdfOutline";
 import {
+  exportSmartReaderCacheFile,
   createDesktopSession,
+  getSmartReaderCacheInfo,
+  importSmartReaderCacheFile,
   listenForDesktopOpenFiles,
+  openCacheDirectoryDialog,
+  openCacheExportDialog,
+  openCacheImportDialog,
   openDesktopFileDialog,
   openEpubDocument,
   openPdfDocument,
@@ -37,10 +43,27 @@ import {
   readFileSource,
   searchEpubDocument,
   searchPdfDocument,
+  saveSmartReaderCache,
+  setSmartReaderCacheLocation,
   setupTauriMenu
 } from "./platform/tauriBridge";
 import type { DesktopEpubDocument, DesktopPdfDocument } from "./platform/tauriBridge";
 import { createAccessErrorSession, isTauriRuntime } from "./platform/fileSources";
+import { PreferencesDialog as PreferencesPanel } from "./components/PreferencesDialog";
+import type { CacheInfo, CacheStatus, ShortcutConflict, ShortcutPreference } from "./components/PreferencesDialog";
+import {
+  defaultReaderShortcutBindings,
+  findShortcutConflicts,
+  shouldHandleReaderShortcut,
+  useReaderShortcuts
+} from "./hooks/useReaderShortcuts";
+import {
+  createSmartReaderCacheEnvelope,
+  validateSmartReaderCacheEnvelope,
+  writeSmartReaderCache as writeLocalSmartReaderCache
+} from "./state/smartReaderCache";
+import { searchEpubChapters, searchPdfDocumentText } from "./lib/fallbackSearch";
+import { detectWasmFeatures } from "./lib/wasmAdapter";
 import type {
   Bookmark,
   DocumentSession,
@@ -50,7 +73,8 @@ import type {
   ReaderLocation,
   RecentFile,
   SearchResult,
-  SidebarMode
+  SidebarMode,
+  SmartReaderCacheEnvelope
 } from "./types/reader";
 
 const defaultPreferences: Preferences = {
@@ -60,7 +84,11 @@ const defaultPreferences: Preferences = {
   defaultPdfFitMode: "continuous",
   epubFontSize: 18,
   epubTheme: "system",
-  recentRetention: 12
+  recentRetention: 12,
+  cacheLocation: { mode: "default" },
+  search: { resultLimit: "unlimited", includePdf: true, includeEpub: true },
+  shortcuts: [],
+  wasm: { enabled: true }
 };
 
 export function App() {
@@ -81,6 +109,13 @@ export function App() {
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferences, setPreferences] = useState(initialAppState.preferences);
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>(() => loadRecentFiles());
+  const [cacheInfo, setCacheInfo] = useState<CacheInfo>(() => ({
+    activePath: "Browser local storage",
+    defaultPath: "Browser local storage",
+    source: "default"
+  }));
+  const [cacheStatus, setCacheStatus] = useState<CacheStatus>({ state: "idle" });
+  const [pendingImportedCache, setPendingImportedCache] = useState<SmartReaderCacheEnvelope | undefined>();
   const documentCacheRef = useRef(new Map<string, LoadedReaderDocument>());
   const hudTimerRef = useRef<number | undefined>(undefined);
   const sessionsRef = useRef<DocumentSession[]>(initialAppState.sessions);
@@ -107,6 +142,32 @@ export function App() {
     hudTimerRef.current = window.setTimeout(() => setHud(""), 1200);
   }, []);
 
+  const refreshCacheInfo = useCallback(async () => {
+    if (!isDesktop) {
+      setCacheInfo({
+        activePath: "Browser local storage",
+        defaultPath: "Browser local storage",
+        source: "default"
+      });
+      return;
+    }
+
+    try {
+      const info = await getSmartReaderCacheInfo();
+      setCacheInfo({
+        activePath: info.activePath,
+        defaultPath: info.defaultPath,
+        customPath: info.isCustom ? info.activePath : undefined,
+        source: info.isCustom ? "custom" : "default"
+      });
+    } catch {
+      setCacheStatus({
+        state: "error",
+        message: "Cache location is unavailable."
+      });
+    }
+  }, [isDesktop]);
+
   const recordSessionRecent = useCallback((session: DocumentSession) => {
     if (session.status === "ready") {
       setRecentFiles((current) => {
@@ -128,6 +189,67 @@ export function App() {
     setActiveTabId(session.id);
     recordSessionRecent(session);
   }, [activeTabId, recordSessionRecent]);
+
+  const createCurrentCacheEnvelope = useCallback(() => {
+    const snapshot = createAppSessionSnapshot({
+      sessions,
+      activeTabId,
+      sidebarOpen,
+      preferences
+    });
+
+    return createSmartReaderCacheEnvelope({
+      appVersion: "0.1.0",
+      settings: preferences,
+      recentFiles,
+      readingProgress: recentFiles.map((file) => ({
+        documentId: file.id,
+        title: file.title,
+        path: file.path,
+        format: file.format,
+        location: file.location,
+        updatedAt: file.lastOpenedAt
+      })),
+      session: {
+        activeTabId: snapshot.activeTabId,
+        sidebarOpen: snapshot.sidebarOpen,
+        tabs: snapshot.sessions
+      },
+      adapterCache: { searchIndexes: [] }
+    });
+  }, [activeTabId, preferences, recentFiles, sessions, sidebarOpen]);
+
+  const applyImportedCache = useCallback((cache: SmartReaderCacheEnvelope) => {
+    const safeCache = validateSmartReaderCacheEnvelope(cache);
+
+    if (!safeCache) {
+      return false;
+    }
+
+    const importedPreferences = {
+      ...defaultPreferences,
+      ...safeCache.settings
+    };
+    const restored = restoreAppSessionSnapshot(
+      {
+        version: 1,
+        activeTabId: safeCache.session.activeTabId,
+        sidebarOpen: safeCache.session.sidebarOpen,
+        preferences: importedPreferences,
+        sessions: safeCache.session.tabs
+      },
+      defaultPreferences
+    );
+
+    setPreferences(importedPreferences);
+    setRecentFiles(safeCache.recentFiles);
+    saveRecentFiles(safeCache.recentFiles);
+    setSessions(restored.sessions);
+    setActiveTabId(restored.activeTabId);
+    setSidebarOpen(restored.sidebarOpen);
+    setPendingImportedCache(undefined);
+    return true;
+  }, []);
 
   const openDesktopPath = useCallback(async (path: string) => {
     const session = await createDesktopSession(path);
@@ -161,6 +283,129 @@ export function App() {
 
     addSession(session);
   }, [addSession]);
+
+  const chooseCacheDirectory = useCallback(async (options: { moveExisting: boolean }) => {
+    if (!isDesktop) {
+      setCacheStatus({ state: "error", message: "Custom cache locations require the desktop app." });
+      return;
+    }
+
+    const path = await openCacheDirectoryDialog();
+    if (!path) {
+      return;
+    }
+
+    setCacheStatus({ state: "loading", message: "Updating cache location..." });
+    try {
+      const result = await setSmartReaderCacheLocation(path, options.moveExisting);
+      setPreferences((current) => ({
+        ...current,
+        cacheLocation: { mode: "custom", path: result.activePath }
+      }));
+      await refreshCacheInfo();
+      setCacheStatus({ state: "success", message: "Cache location updated." });
+    } catch {
+      setCacheStatus({ state: "error", message: "Cache location could not be updated." });
+    }
+  }, [isDesktop, refreshCacheInfo]);
+
+  const resetCacheDirectory = useCallback(async () => {
+    if (!isDesktop) {
+      setCacheStatus({ state: "error", message: "Custom cache locations require the desktop app." });
+      return;
+    }
+
+    setCacheStatus({ state: "loading", message: "Resetting cache location..." });
+    try {
+      await setSmartReaderCacheLocation("", false);
+      setPreferences((current) => ({
+        ...current,
+        cacheLocation: { mode: "default" }
+      }));
+      await refreshCacheInfo();
+      setCacheStatus({ state: "success", message: "Cache location reset." });
+    } catch {
+      setCacheStatus({ state: "error", message: "Cache location could not be reset." });
+    }
+  }, [isDesktop, refreshCacheInfo]);
+
+  const exportCache = useCallback(async () => {
+    if (!isDesktop) {
+      setCacheStatus({ state: "error", message: "Cache export requires the desktop app." });
+      return;
+    }
+
+    const destinationPath = await openCacheExportDialog();
+    if (!destinationPath) {
+      return;
+    }
+
+    setCacheStatus({ state: "loading", message: "Exporting cache..." });
+    try {
+      await exportSmartReaderCacheFile(destinationPath, createCurrentCacheEnvelope());
+      setCacheStatus({ state: "success", message: "Cache exported." });
+    } catch {
+      setCacheStatus({ state: "error", message: "Cache could not be exported." });
+    }
+  }, [createCurrentCacheEnvelope, isDesktop]);
+
+  const importCache = useCallback(async () => {
+    if (!isDesktop) {
+      setCacheStatus({ state: "error", message: "Cache import requires the desktop app." });
+      return;
+    }
+
+    const sourcePath = await openCacheImportDialog();
+    if (!sourcePath) {
+      return;
+    }
+
+    setCacheStatus({ state: "loading", message: "Validating cache import..." });
+    try {
+      const result = await importSmartReaderCacheFile(sourcePath, false);
+      const safeCache = validateSmartReaderCacheEnvelope(result.cache);
+
+      if (!safeCache) {
+        throw new Error("Invalid SmartReader cache.");
+      }
+
+      setPendingImportedCache(safeCache);
+      setCacheStatus({
+        state: "success",
+        message: "Cache archive validated.",
+        pendingImportName: sourcePath.split("/").pop(),
+        pendingImportPath: sourcePath
+      });
+    } catch {
+      setPendingImportedCache(undefined);
+      setCacheStatus({ state: "error", message: "Cache import is invalid." });
+    }
+  }, [isDesktop]);
+
+  const applyPendingImportedCache = useCallback(async () => {
+    if (!pendingImportedCache) {
+      return;
+    }
+
+    setCacheStatus({ state: "loading", message: "Applying imported cache..." });
+    try {
+      const safeCache = validateSmartReaderCacheEnvelope(pendingImportedCache);
+
+      if (!safeCache || !applyImportedCache(safeCache)) {
+        throw new Error("Invalid SmartReader cache.");
+      }
+
+      if (isDesktop) {
+        await saveSmartReaderCache(safeCache);
+      } else {
+        writeLocalSmartReaderCache(safeCache);
+      }
+      await refreshCacheInfo();
+      setCacheStatus({ state: "success", message: "Imported cache applied." });
+    } catch {
+      setCacheStatus({ state: "error", message: "Imported cache could not be applied." });
+    }
+  }, [applyImportedCache, isDesktop, pendingImportedCache, refreshCacheInfo]);
 
   const closeTab = useCallback((tabId = activeTabId) => {
     setSessions((current) => {
@@ -258,6 +503,19 @@ export function App() {
     updateActiveSession((session) => updateSessionLocation(session, location));
   }, [updateActiveSession]);
 
+  const movePdfPage = useCallback((delta: number) => {
+    updateActiveSession((session) => {
+      if (session.format !== "pdf" || session.location.kind !== "page") {
+        return session;
+      }
+
+      const maxPage = session.pageCount ?? session.location.page;
+      const page = Math.min(maxPage, Math.max(1, session.location.page + delta));
+
+      return updateSessionLocation(session, { kind: "page", page });
+    });
+  }, [updateActiveSession]);
+
   const registry = useMemo(
     () =>
       createCommandRegistry({
@@ -283,6 +541,75 @@ export function App() {
     [activeSession, closeTab, createNewTab, openFilePicker, resetZoom, showHud, toggleBookmark, zoomBy]
   );
 
+  const readerShortcutHandlers = useMemo(
+    () => ({
+      "reader.previousPage": () => movePdfPage(-1),
+      "reader.nextPage": () => movePdfPage(1),
+      "reader.zoomIn": () => zoomBy(0.1),
+      "reader.zoomOut": () => zoomBy(-0.1),
+      "reader.openFind": () => setFindOpen(true),
+      "reader.toggleBookmark": toggleBookmark,
+      "reader.toggleSidebar": () => setSidebarOpen((value) => !value)
+    }),
+    [movePdfPage, toggleBookmark, zoomBy]
+  );
+  const readerShortcutBindings = useMemo(
+    () => defaultReaderShortcutBindings(preferences.shortcuts),
+    [preferences.shortcuts]
+  );
+  const shortcutPreferences = useMemo<ShortcutPreference[]>(() => [
+    ...registry.commands
+      .filter((command) => Boolean(command.shortcut))
+      .map((command) => ({
+        id: command.id,
+        command: command.label,
+        shortcut: command.shortcut ?? "",
+        enabled: command.enabled,
+        editable: false
+      })),
+    ...readerShortcutBindings.map((binding) => ({
+      id: binding.commandId,
+      command: readerShortcutLabel(binding.commandId),
+      shortcut: binding.shortcut,
+      enabled: binding.enabled !== false,
+      editable: true
+    }))
+  ], [readerShortcutBindings, registry.commands]);
+  const shortcutConflicts = useMemo<ShortcutConflict[]>(
+    () =>
+      findShortcutConflicts([
+        ...registry.commands
+          .filter((command) => Boolean(command.shortcut))
+          .map((command) => ({ commandId: command.id, shortcut: command.shortcut ?? "" })),
+        ...readerShortcutBindings
+      ]).map((conflict) => ({
+        shortcut: conflict.shortcut,
+        commandIds: conflict.commandIds,
+        message: `${conflict.shortcut} is assigned to multiple commands.`
+      })),
+    [readerShortcutBindings, registry.commands]
+  );
+  const updateShortcutPreference = useCallback((id: string, shortcut: string) => {
+    setPreferences((current) => ({
+      ...current,
+      shortcuts: [
+        ...current.shortcuts.filter((binding) => binding.commandId !== id),
+        { commandId: id, shortcut, enabled: true, source: "user" }
+      ]
+    }));
+  }, []);
+  const resetShortcutPreference = useCallback((id: string) => {
+    setPreferences((current) => ({
+      ...current,
+      shortcuts: current.shortcuts.filter((binding) => binding.commandId !== id)
+    }));
+  }, []);
+
+  useReaderShortcuts({
+    bindings: preferences.shortcuts,
+    handlers: readerShortcutHandlers
+  });
+
   useEffect(() => {
     setupTauriMenu((commandId: CommandId) => {
       window.dispatchEvent(new CustomEvent<CommandId>("smartreader:menu-command", { detail: commandId }));
@@ -299,6 +626,25 @@ export function App() {
       })
     );
   }, [activeTabId, preferences, sessions, sidebarOpen]);
+
+  useEffect(() => {
+    refreshCacheInfo();
+  }, [refreshCacheInfo]);
+
+  useEffect(() => {
+    const cache = createCurrentCacheEnvelope();
+
+    if (isDesktop) {
+      saveSmartReaderCache(cache).catch(() => undefined);
+      return;
+    }
+
+    try {
+      writeLocalSmartReaderCache(cache);
+    } catch {
+      // Local storage can be unavailable in private browser contexts.
+    }
+  }, [createCurrentCacheEnvelope, isDesktop]);
 
   useEffect(() => {
     if (activeSession?.status !== "ready") {
@@ -376,6 +722,10 @@ export function App() {
       }
 
       if (event.metaKey) {
+        if (!shouldHandleReaderShortcut(event)) {
+          return;
+        }
+
         const tabNumber = Number(event.key);
         if (tabNumber >= 1 && tabNumber <= 9 && sessions[tabNumber - 1]) {
           event.preventDefault();
@@ -502,7 +852,7 @@ export function App() {
       {hud ? <div className="reader-hud">{hud}</div> : null}
 
       {preferencesOpen ? (
-        <PreferencesDialog
+        <PreferencesPanel
           preferences={preferences}
           onChange={setPreferences}
           onClose={() => setPreferencesOpen(false)}
@@ -511,6 +861,36 @@ export function App() {
             saveRecentFiles(next);
             setRecentFiles(next);
           }}
+          cacheInfo={cacheInfo}
+          cacheStatus={cacheStatus}
+          onChooseCacheDirectory={chooseCacheDirectory}
+          onResetCacheDirectory={resetCacheDirectory}
+          onExportCache={exportCache}
+          onImportCache={importCache}
+          onApplyImportedCache={applyPendingImportedCache}
+          shortcuts={shortcutPreferences}
+          conflicts={shortcutConflicts}
+          onShortcutChange={updateShortcutPreference}
+          onShortcutReset={resetShortcutPreference}
+          wasm={{
+            settings: { enabled: preferences.wasm.enabled },
+            status: {
+              enabled: preferences.wasm.enabled && detectWasmFeatures().supported,
+              adapterStatus: "unavailable",
+              fallbackActive: true,
+              message: preferences.wasm.enabled
+                ? detectWasmFeatures().supported
+                  ? "WASM runtime is not wired yet; fallback adapters stay active."
+                  : "WASM is unavailable in this runtime; fallback adapters stay active."
+                : "WASM adapter disabled; fallback adapters stay active."
+            }
+          }}
+          onToggleWasm={(enabled) =>
+            setPreferences((current) => ({
+              ...current,
+              wasm: { ...current.wasm, enabled }
+            }))
+          }
         />
       ) : null}
     </main>
@@ -1464,131 +1844,6 @@ function EpubReader(props: {
   );
 }
 
-function PreferencesDialog(props: {
-  preferences: Preferences;
-  onChange: (preferences: Preferences) => void;
-  onClose: () => void;
-  onClearRecent: () => void;
-}) {
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={props.onClose}>
-      <section
-        className="preferences-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="preferences-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header>
-          <h1 id="preferences-title">Preferences</h1>
-          <button type="button" aria-label="Close preferences" onClick={props.onClose}>
-            ×
-          </button>
-        </header>
-        <div className="preferences-grid">
-          <fieldset>
-            <legend>General</legend>
-            <label>
-              <input
-                type="checkbox"
-                checked={props.preferences.reopenLastSession}
-                onChange={(event) =>
-                  props.onChange({ ...props.preferences, reopenLastSession: event.currentTarget.checked })
-                }
-              />
-              Reopen last session
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={props.preferences.rememberPosition}
-                onChange={(event) =>
-                  props.onChange({ ...props.preferences, rememberPosition: event.currentTarget.checked })
-                }
-              />
-              Remember position
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={props.preferences.defaultSidebarVisible}
-                onChange={(event) =>
-                  props.onChange({ ...props.preferences, defaultSidebarVisible: event.currentTarget.checked })
-                }
-              />
-              Show sidebar by default
-            </label>
-          </fieldset>
-          <fieldset>
-            <legend>Reading</legend>
-            <label>
-              PDF default fit
-              <select
-                value={props.preferences.defaultPdfFitMode}
-                onChange={(event) =>
-                  props.onChange({ ...props.preferences, defaultPdfFitMode: event.currentTarget.value as FitMode })
-                }
-              >
-                <option value="continuous">Continuous</option>
-                <option value="fit-width">Fit Width</option>
-                <option value="fit-page">Fit Page</option>
-                <option value="actual-size">Actual Size</option>
-              </select>
-            </label>
-            <label>
-              EPUB font size
-              <input
-                type="number"
-                min="14"
-                max="28"
-                value={props.preferences.epubFontSize}
-                onChange={(event) =>
-                  props.onChange({ ...props.preferences, epubFontSize: Number(event.currentTarget.value) })
-                }
-              />
-            </label>
-            <label>
-              EPUB theme
-              <select
-                value={props.preferences.epubTheme}
-                onChange={(event) =>
-                  props.onChange({ ...props.preferences, epubTheme: event.currentTarget.value as Preferences["epubTheme"] })
-                }
-              >
-                <option value="system">System</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </select>
-            </label>
-          </fieldset>
-          <fieldset>
-            <legend>Files</legend>
-            <label>
-              Recent retention
-              <input
-                type="number"
-                min="4"
-                max="30"
-                value={props.preferences.recentRetention}
-                onChange={(event) =>
-                  props.onChange({ ...props.preferences, recentRetention: Number(event.currentTarget.value) })
-                }
-              />
-            </label>
-            <button type="button" onClick={props.onClearRecent}>
-              Clear recent files
-            </button>
-          </fieldset>
-          <fieldset>
-            <legend>Shortcuts</legend>
-            <p>⌘O open, ⌘F find, ⌘B sidebar, ⌘D bookmark, ⌘L location, ⌘1-9 tabs.</p>
-          </fieldset>
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function ReaderLoading(props: { title: string; detail?: string }) {
   return (
     <div className="reader-loading">
@@ -1830,7 +2085,7 @@ function createPdfSearchHandler(
 }
 
 async function searchDesktopPdf(path: string, query: string): Promise<SearchResult[]> {
-  const results = await searchPdfDocument(path, query, 50);
+  const results = await searchPdfDocument(path, query);
 
   return results.map((result) => ({
     id: result.id,
@@ -1841,7 +2096,7 @@ async function searchDesktopPdf(path: string, query: string): Promise<SearchResu
 }
 
 async function searchDesktopEpub(path: string, query: string): Promise<SearchResult[]> {
-  const results = await searchEpubDocument(path, query, 50);
+  const results = await searchEpubDocument(path, query);
 
   return results.map((result) => ({
     id: result.id,
@@ -1987,29 +2242,7 @@ function resolveEpubPath(basePath: string, href: string): string {
 }
 
 async function searchEpub(chapters: EpubChapter[], query: string): Promise<SearchResult[]> {
-  const lowerQuery = query.toLowerCase();
-
-  return chapters.flatMap((chapter, index) => {
-    const matchIndex = chapter.text.toLowerCase().indexOf(lowerQuery);
-
-    if (matchIndex < 0) {
-      return [];
-    }
-
-    return [
-      {
-        id: `epub-search-${chapter.id}-${matchIndex}`,
-        label: chapter.label,
-        snippet: chapter.text.slice(Math.max(0, matchIndex - 40), matchIndex + query.length + 60),
-        location: {
-          kind: "epub",
-          chapterHref: chapter.href,
-          chapterLabel: chapter.label,
-          progress: chapters.length > 1 ? index / (chapters.length - 1) : 0
-        }
-      }
-    ];
-  });
+  return searchEpubChapters(chapters, query);
 }
 
 function escapeHtml(value: string): string {
@@ -2041,34 +2274,25 @@ async function renderPdfPage(page: PDFPageProxy, canvas: HTMLCanvasElement | nul
 }
 
 async function searchPdf(pdf: PDFDocumentProxy, query: string): Promise<SearchResult[]> {
-  const normalizedQuery = query.toLowerCase();
-  const results: SearchResult[] = [];
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const content = await page.getTextContent();
-    const text = content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
-    const index = text.toLowerCase().indexOf(normalizedQuery);
-
-    if (index >= 0) {
-      results.push({
-        id: `search-${pageNumber}-${index}`,
-        label: `Page ${pageNumber}`,
-        snippet: text.slice(Math.max(0, index - 40), index + query.length + 60),
-        location: { kind: "page", page: pageNumber }
-      });
-    }
-
-    if (results.length >= 50) {
-      break;
-    }
-  }
-
-  return results;
+  return searchPdfDocumentText(pdf, query);
 }
 
 function sameLocation(first: ReaderLocation, second: ReaderLocation): boolean {
   return JSON.stringify(first) === JSON.stringify(second);
+}
+
+function readerShortcutLabel(commandId: string): string {
+  const labels: Record<string, string> = {
+    "reader.previousPage": "Previous Page",
+    "reader.nextPage": "Next Page",
+    "reader.zoomIn": "Reader Zoom In",
+    "reader.zoomOut": "Reader Zoom Out",
+    "reader.openFind": "Reader Find",
+    "reader.toggleBookmark": "Reader Bookmark",
+    "reader.toggleSidebar": "Reader Sidebar"
+  };
+
+  return labels[commandId] ?? commandId;
 }
 
 function locationLabel(session?: DocumentSession): string {

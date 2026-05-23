@@ -10,7 +10,7 @@ use quick_xml::{
     events::{BytesStart, Event},
     Reader,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 use zip::ZipArchive;
 
@@ -24,8 +24,14 @@ const DOCUMENT_READ_CANCELLED_ERROR: &str =
     "SmartReader could not finish reading this document. Try reopening it.";
 const INVALID_EPUB_CONTAINER_ERROR: &str = "Invalid EPUB: missing container";
 const INVALID_EPUB_PACKAGE_ERROR: &str = "Invalid EPUB: missing package";
-const DEFAULT_EPUB_SEARCH_LIMIT: usize = 50;
-const MAX_EPUB_SEARCH_LIMIT: usize = 100;
+const CACHE_FILE_NAME: &str = "smartreader-cache.json";
+const CACHE_LOCATION_FILE_NAME: &str = "smartreader-cache-location.json";
+const CACHE_SCHEMA_VERSION: u64 = 1;
+const CACHE_DIRECTORY_ERROR: &str = "SmartReader cache path must be a directory";
+const CACHE_ACCESS_ERROR: &str = "SmartReader cannot access this cache location.";
+const CACHE_SCHEMA_ERROR: &str = "Invalid SmartReader cache schema.";
+
+type SmartReaderCacheEnvelope = serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 struct EpubDocumentDto {
@@ -97,6 +103,66 @@ struct PdfSearchResultDto {
     page: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CacheInfoDto {
+    default_path: String,
+    active_path: String,
+    is_custom: bool,
+    schema_version: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadCacheDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache: Option<SmartReaderCacheEnvelope>,
+    info: CacheInfoDto,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveCacheDto {
+    saved_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetCacheLocationDto {
+    active_path: String,
+    moved: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fallback_used: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportCacheDto {
+    path: String,
+    bytes_written: u64,
+    exported_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportCacheDto {
+    cache: SmartReaderCacheEnvelope,
+    imported_at: u64,
+    applied: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CachePaths {
+    default_dir: PathBuf,
+    state_dir: PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CustomCacheLocationDto {
+    path: String,
+}
+
 struct EpubPackage {
     title: Option<String>,
     chapters: Vec<EpubChapterMetadataDto>,
@@ -162,12 +228,11 @@ async fn open_pdf_document(path: String) -> Result<PdfDocumentDto, String> {
 async fn search_pdf_document(
     path: String,
     query: String,
-    limit: Option<usize>,
 ) -> Result<Vec<PdfSearchResultDto>, String> {
     let document_path = PathBuf::from(path);
 
     tauri::async_runtime::spawn_blocking(move || {
-        search_pdf_document_from_path(document_path, query, limit)
+        search_pdf_document_from_path(document_path, query)
     })
     .await
     .map_err(|_| DOCUMENT_READ_CANCELLED_ERROR.to_string())?
@@ -186,15 +251,65 @@ async fn read_epub_chapter(path: String, href: String) -> Result<EpubChapterDto,
 async fn search_epub_document(
     path: String,
     query: String,
-    limit: Option<usize>,
 ) -> Result<Vec<EpubSearchResultDto>, String> {
     let document_path = PathBuf::from(path);
 
     tauri::async_runtime::spawn_blocking(move || {
-        search_epub_document_from_path(document_path, query, limit)
+        search_epub_document_from_path(document_path, query)
     })
     .await
     .map_err(|_| DOCUMENT_READ_CANCELLED_ERROR.to_string())?
+}
+
+#[tauri::command]
+fn get_cache_info(app_handle: tauri::AppHandle) -> Result<CacheInfoDto, String> {
+    let paths = cache_paths_from_app(&app_handle);
+    cache_info_from_paths(&paths)
+}
+
+#[tauri::command]
+fn load_smartreader_cache(app_handle: tauri::AppHandle) -> Result<LoadCacheDto, String> {
+    let paths = cache_paths_from_app(&app_handle);
+    load_cache_from_paths(&paths)
+}
+
+#[tauri::command]
+fn save_smartreader_cache(
+    app_handle: tauri::AppHandle,
+    cache: SmartReaderCacheEnvelope,
+) -> Result<SaveCacheDto, String> {
+    let paths = cache_paths_from_app(&app_handle);
+    save_cache_to_paths(&paths, cache)
+}
+
+#[tauri::command]
+fn set_cache_location(
+    app_handle: tauri::AppHandle,
+    path: String,
+    move_existing: bool,
+) -> Result<SetCacheLocationDto, String> {
+    let paths = cache_paths_from_app(&app_handle);
+    set_cache_location_for_paths(&paths, PathBuf::from(path), move_existing)
+}
+
+#[tauri::command]
+fn export_smartreader_cache(
+    app_handle: tauri::AppHandle,
+    destination_path: String,
+    cache: Option<SmartReaderCacheEnvelope>,
+) -> Result<ExportCacheDto, String> {
+    let paths = cache_paths_from_app(&app_handle);
+    export_cache_from_paths(&paths, PathBuf::from(destination_path), cache)
+}
+
+#[tauri::command]
+fn import_smartreader_cache(
+    app_handle: tauri::AppHandle,
+    source_path: String,
+    apply: bool,
+) -> Result<ImportCacheDto, String> {
+    let paths = cache_paths_from_app(&app_handle);
+    import_cache_from_paths(&paths, PathBuf::from(source_path), apply)
 }
 
 fn read_supported_document(document_path: PathBuf) -> Result<Vec<u8>, String> {
@@ -231,6 +346,421 @@ fn read_document_bytes(document_path: &Path) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+fn cache_paths_from_app(app_handle: &tauri::AppHandle) -> CachePaths {
+    // Keep the custom cache pointer in app config so moving the cache directory cannot lose it.
+    let fallback_root = stable_cache_fallback_root();
+    let default_dir = app_handle
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| fallback_root.join("data"))
+        .join("cache");
+    let state_dir = app_handle
+        .path()
+        .app_config_dir()
+        .unwrap_or_else(|_| fallback_root.join("config"));
+
+    CachePaths {
+        default_dir,
+        state_dir,
+    }
+}
+
+fn stable_cache_fallback_root() -> PathBuf {
+    env::current_dir()
+        .unwrap_or_else(|_| env::temp_dir())
+        .join(".smartreader-state")
+}
+
+fn cache_info_from_paths(paths: &CachePaths) -> Result<CacheInfoDto, String> {
+    let custom_dir = read_custom_cache_location(paths)?;
+    let active_dir = custom_dir
+        .as_ref()
+        .cloned()
+        .unwrap_or_else(|| paths.default_dir.clone());
+
+    Ok(CacheInfoDto {
+        default_path: paths.default_dir.to_string_lossy().into_owned(),
+        active_path: active_dir.to_string_lossy().into_owned(),
+        is_custom: custom_dir.is_some(),
+        schema_version: CACHE_SCHEMA_VERSION,
+    })
+}
+
+fn load_cache_from_paths(paths: &CachePaths) -> Result<LoadCacheDto, String> {
+    let info = cache_info_from_paths(paths)?;
+    let cache_path = PathBuf::from(&info.active_path).join(CACHE_FILE_NAME);
+    let cache = if cache_path.exists() {
+        Some(read_cache_file(&cache_path)?)
+    } else {
+        None
+    };
+
+    Ok(LoadCacheDto { cache, info })
+}
+
+fn save_cache_to_paths(
+    paths: &CachePaths,
+    cache: SmartReaderCacheEnvelope,
+) -> Result<SaveCacheDto, String> {
+    validate_cache_envelope(&cache)?;
+    let info = cache_info_from_paths(paths)?;
+    let active_dir = PathBuf::from(info.active_path);
+    ensure_writable_directory(&active_dir)?;
+    write_cache_file(&active_dir.join(CACHE_FILE_NAME), &cache)?;
+
+    Ok(SaveCacheDto {
+        saved_at: unix_timestamp_seconds(),
+    })
+}
+
+fn set_cache_location_for_paths(
+    paths: &CachePaths,
+    new_dir: PathBuf,
+    move_existing: bool,
+) -> Result<SetCacheLocationDto, String> {
+    if new_dir.as_os_str().is_empty() {
+        let current_info = cache_info_from_paths(paths)?;
+        let current_cache_path = PathBuf::from(current_info.active_path).join(CACHE_FILE_NAME);
+        let default_cache_path = paths.default_dir.join(CACHE_FILE_NAME);
+
+        ensure_writable_directory(&paths.default_dir)?;
+        let mut moved = false;
+        if move_existing && current_cache_path.exists() && current_cache_path != default_cache_path
+        {
+            fs::copy(&current_cache_path, &default_cache_path)
+                .map_err(|_| CACHE_ACCESS_ERROR.to_string())?;
+            moved = true;
+        }
+        let location_path = paths.state_dir.join(CACHE_LOCATION_FILE_NAME);
+        if location_path.exists() {
+            fs::remove_file(location_path).map_err(|_| CACHE_ACCESS_ERROR.to_string())?;
+        }
+
+        return Ok(SetCacheLocationDto {
+            active_path: paths.default_dir.to_string_lossy().into_owned(),
+            moved,
+            fallback_used: Some(false),
+        });
+    }
+
+    ensure_writable_directory(&new_dir)?;
+
+    let current_info = cache_info_from_paths(paths)?;
+    let current_cache_path = PathBuf::from(current_info.active_path).join(CACHE_FILE_NAME);
+    let new_cache_path = new_dir.join(CACHE_FILE_NAME);
+    let mut moved = false;
+
+    if move_existing && current_cache_path.exists() {
+        fs::copy(&current_cache_path, &new_cache_path)
+            .map_err(|_| CACHE_ACCESS_ERROR.to_string())?;
+        moved = true;
+    }
+
+    write_custom_cache_location(paths, &new_dir)?;
+
+    Ok(SetCacheLocationDto {
+        active_path: new_dir.to_string_lossy().into_owned(),
+        moved,
+        fallback_used: None,
+    })
+}
+
+fn export_cache_from_paths(
+    paths: &CachePaths,
+    destination_path: PathBuf,
+    cache: Option<SmartReaderCacheEnvelope>,
+) -> Result<ExportCacheDto, String> {
+    if destination_path.exists() && destination_path.is_dir() {
+        return Err("SmartReader cache export path must be a file".to_string());
+    }
+
+    let cache = match cache {
+        Some(cache) => {
+            validate_cache_envelope(&cache)?;
+            cache
+        }
+        None => {
+            let info = cache_info_from_paths(paths)?;
+            let cache_path = PathBuf::from(info.active_path).join(CACHE_FILE_NAME);
+            read_cache_file(&cache_path)?
+        }
+    };
+    let bytes_written = write_cache_file(&destination_path, &cache)?;
+
+    Ok(ExportCacheDto {
+        path: destination_path.to_string_lossy().into_owned(),
+        bytes_written,
+        exported_at: unix_timestamp_seconds(),
+    })
+}
+
+fn import_cache_from_paths(
+    paths: &CachePaths,
+    source_path: PathBuf,
+    apply: bool,
+) -> Result<ImportCacheDto, String> {
+    let cache = read_cache_file(&source_path)?;
+
+    if apply {
+        save_cache_to_paths(paths, cache.clone())?;
+    }
+
+    Ok(ImportCacheDto {
+        cache,
+        imported_at: unix_timestamp_seconds(),
+        applied: apply,
+    })
+}
+
+fn read_cache_file(cache_path: &Path) -> Result<SmartReaderCacheEnvelope, String> {
+    let text = fs::read_to_string(cache_path).map_err(|_| CACHE_ACCESS_ERROR.to_string())?;
+    let cache: SmartReaderCacheEnvelope =
+        serde_json::from_str(&text).map_err(|_| CACHE_SCHEMA_ERROR.to_string())?;
+    validate_cache_envelope(&cache)?;
+    Ok(cache)
+}
+
+fn write_cache_file(cache_path: &Path, cache: &SmartReaderCacheEnvelope) -> Result<u64, String> {
+    validate_cache_envelope(cache)?;
+
+    if let Some(parent) = cache_path.parent() {
+        ensure_writable_directory(parent)?;
+    }
+
+    let bytes = serde_json::to_vec_pretty(cache).map_err(|_| CACHE_SCHEMA_ERROR.to_string())?;
+    let temp_path = cache_path.with_extension(format!("json.{}.tmp", unique_suffix()));
+    fs::write(&temp_path, &bytes).map_err(|_| CACHE_ACCESS_ERROR.to_string())?;
+    fs::rename(&temp_path, cache_path).map_err(|_| CACHE_ACCESS_ERROR.to_string())?;
+
+    Ok(bytes.len() as u64)
+}
+
+fn validate_cache_envelope(cache: &SmartReaderCacheEnvelope) -> Result<(), String> {
+    let Some(object) = cache.as_object() else {
+        return Err(CACHE_SCHEMA_ERROR.to_string());
+    };
+
+    if object
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        != Some(CACHE_SCHEMA_VERSION)
+    {
+        return Err(CACHE_SCHEMA_ERROR.to_string());
+    }
+
+    if object.keys().any(|key| !is_allowed_cache_key(key)) {
+        return Err(CACHE_SCHEMA_ERROR.to_string());
+    }
+
+    required_cache_object_field(object, "settings")?;
+    optional_cache_object_field(object, "preferences")?;
+    required_cache_array_field(object, "recentFiles")?;
+    required_cache_array_field(object, "readingProgress")?;
+    let session = required_cache_object_field(object, "session")?;
+    required_cache_array_field(session, "tabs")?;
+    let adapter_cache = required_cache_object_field(object, "adapterCache")?;
+    required_cache_array_field(adapter_cache, "searchIndexes")?;
+    optional_cache_string_field(object, "appVersion")?;
+    optional_cache_timestamp_field(object, "savedAt")?;
+    validate_cache_payload_value(cache)?;
+
+    Ok(())
+}
+
+fn required_cache_object_field<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<&'a serde_json::Map<String, serde_json::Value>, String> {
+    object
+        .get(key)
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| CACHE_SCHEMA_ERROR.to_string())
+}
+
+fn optional_cache_object_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<(), String> {
+    if let Some(value) = object.get(key) {
+        if !value.is_object() {
+            return Err(CACHE_SCHEMA_ERROR.to_string());
+        }
+    }
+
+    Ok(())
+}
+
+fn required_cache_array_field<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<&'a Vec<serde_json::Value>, String> {
+    object
+        .get(key)
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| CACHE_SCHEMA_ERROR.to_string())
+}
+
+fn optional_cache_string_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<(), String> {
+    if let Some(value) = object.get(key) {
+        if !value.is_string() {
+            return Err(CACHE_SCHEMA_ERROR.to_string());
+        }
+    }
+
+    Ok(())
+}
+
+fn optional_cache_timestamp_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<(), String> {
+    if let Some(value) = object.get(key) {
+        if !(value.is_string() || value.is_number()) {
+            return Err(CACHE_SCHEMA_ERROR.to_string());
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_cache_payload_value(value: &serde_json::Value) -> Result<(), String> {
+    match value {
+        serde_json::Value::Object(object) => {
+            for (key, value) in object {
+                if is_disallowed_cache_payload_key(key) {
+                    return Err(CACHE_SCHEMA_ERROR.to_string());
+                }
+                validate_cache_payload_value(value)?;
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                validate_cache_payload_value(value)?;
+            }
+        }
+        serde_json::Value::String(value) => {
+            if is_disallowed_cache_payload_string(value) {
+                return Err(CACHE_SCHEMA_ERROR.to_string());
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn is_disallowed_cache_payload_key(key: &str) -> bool {
+    let normalized = normalize_cache_key(key);
+    matches!(
+        normalized.as_str(),
+        "rawtext"
+            | "rawhtml"
+            | "rawcontent"
+            | "rawdocument"
+            | "objecturl"
+            | "objecturls"
+            | "pdfproxy"
+            | "pdfbytes"
+            | "epubbytes"
+            | "documentbytes"
+            | "filebytes"
+            | "bytes"
+            | "blob"
+            | "bloburl"
+            | "dataurl"
+            | "datauri"
+    )
+}
+
+fn normalize_cache_key(key: &str) -> String {
+    key.chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn is_disallowed_cache_payload_string(value: &str) -> bool {
+    let value = value.trim().to_ascii_lowercase();
+
+    value.starts_with("blob:")
+        || value.starts_with("data:application/pdf")
+        || value.starts_with("data:application/epub")
+        || value.starts_with("data:application/octet-stream")
+}
+
+fn is_allowed_cache_key(key: &str) -> bool {
+    matches!(
+        key,
+        "schemaVersion"
+            | "appVersion"
+            | "savedAt"
+            | "settings"
+            | "preferences"
+            | "recentFiles"
+            | "readingProgress"
+            | "session"
+            | "adapterCache"
+    )
+}
+
+fn ensure_writable_directory(path: &Path) -> Result<(), String> {
+    if path.exists() && !path.is_dir() {
+        return Err(CACHE_DIRECTORY_ERROR.to_string());
+    }
+
+    fs::create_dir_all(path).map_err(|_| CACHE_ACCESS_ERROR.to_string())?;
+    let probe_path = path.join(format!(".smartreader-write-test-{}", unique_suffix()));
+    fs::write(&probe_path, b"ok").map_err(|_| CACHE_ACCESS_ERROR.to_string())?;
+    fs::remove_file(probe_path).map_err(|_| CACHE_ACCESS_ERROR.to_string())?;
+
+    Ok(())
+}
+
+fn read_custom_cache_location(paths: &CachePaths) -> Result<Option<PathBuf>, String> {
+    let path = paths.state_dir.join(CACHE_LOCATION_FILE_NAME);
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let text = fs::read_to_string(path).map_err(|_| CACHE_ACCESS_ERROR.to_string())?;
+    let location: CustomCacheLocationDto =
+        serde_json::from_str(&text).map_err(|_| CACHE_SCHEMA_ERROR.to_string())?;
+    if location.path.trim().is_empty() {
+        return Err(CACHE_SCHEMA_ERROR.to_string());
+    }
+
+    Ok(Some(PathBuf::from(location.path)))
+}
+
+fn write_custom_cache_location(paths: &CachePaths, new_dir: &Path) -> Result<(), String> {
+    ensure_writable_directory(&paths.state_dir)?;
+    let location = CustomCacheLocationDto {
+        path: new_dir.to_string_lossy().into_owned(),
+    };
+    let text = serde_json::to_vec_pretty(&location).map_err(|_| CACHE_SCHEMA_ERROR.to_string())?;
+    fs::write(paths.state_dir.join(CACHE_LOCATION_FILE_NAME), text)
+        .map_err(|_| CACHE_ACCESS_ERROR.to_string())
+}
+
+fn unix_timestamp_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default()
+}
+
+fn unique_suffix() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+
+    format!("{}-{nanos}", std::process::id())
+}
+
 fn open_pdf_document_from_path(document_path: PathBuf) -> Result<PdfDocumentDto, String> {
     validate_pdf_path(&document_path)?;
 
@@ -249,19 +779,11 @@ fn open_pdf_document_from_path(document_path: PathBuf) -> Result<PdfDocumentDto,
 fn search_pdf_document_from_path(
     document_path: PathBuf,
     query: String,
-    limit: Option<usize>,
 ) -> Result<Vec<PdfSearchResultDto>, String> {
     validate_pdf_path(&document_path)?;
 
     let query = normalize_whitespace(&query);
     if query.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let limit = limit
-        .unwrap_or(DEFAULT_EPUB_SEARCH_LIMIT)
-        .min(MAX_EPUB_SEARCH_LIMIT);
-    if limit == 0 {
         return Ok(Vec::new());
     }
 
@@ -271,22 +793,21 @@ fn search_pdf_document_from_path(
     let mut results = Vec::new();
 
     for page_number in document.get_pages().keys() {
-        if results.len() >= limit {
-            break;
-        }
-
         let text = document.extract_text(&[*page_number]).unwrap_or_default();
         let normalized_text = normalize_whitespace(&text);
-        let Some(match_index) = normalized_text.to_lowercase().find(&lower_query) else {
-            continue;
-        };
+        let lower_text = normalized_text.to_lowercase();
+        let mut search_start = 0;
 
-        results.push(PdfSearchResultDto {
-            id: format!("pdf-search-{}-{}", page_number, match_index),
-            label: format!("Page {}", page_number),
-            snippet: snippet_around(&normalized_text, match_index, query.len()),
-            page: usize::try_from(*page_number).unwrap_or(usize::MAX),
-        });
+        while let Some(relative_index) = lower_text[search_start..].find(&lower_query) {
+            let match_index = search_start + relative_index;
+            results.push(PdfSearchResultDto {
+                id: format!("pdf-search-{}-{}", page_number, match_index),
+                label: format!("Page {}", page_number),
+                snippet: snippet_around(&normalized_text, match_index, query.len()),
+                page: usize::try_from(*page_number).unwrap_or(usize::MAX),
+            });
+            search_start = match_index + lower_query.len();
+        }
     }
 
     Ok(results)
@@ -425,19 +946,11 @@ fn read_epub_chapter_from_path(
 fn search_epub_document_from_path(
     document_path: PathBuf,
     query: String,
-    limit: Option<usize>,
 ) -> Result<Vec<EpubSearchResultDto>, String> {
     validate_epub_path(&document_path)?;
 
     let query = normalize_whitespace(&query);
     if query.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let limit = limit
-        .unwrap_or(DEFAULT_EPUB_SEARCH_LIMIT)
-        .min(MAX_EPUB_SEARCH_LIMIT);
-    if limit == 0 {
         return Ok(Vec::new());
     }
 
@@ -448,31 +961,29 @@ fn search_epub_document_from_path(
     let mut results = Vec::new();
 
     for chapter in &package.chapters {
-        if results.len() >= limit {
-            break;
-        }
-
         let raw = read_zip_text(&mut archive, &chapter.href)
             .map_err(|_| "Invalid EPUB: missing chapter".to_string())?;
         let sanitized_html = sanitize_epub_html(&raw);
         let text = text_from_sanitized_html(&sanitized_html);
         let lower_text = text.to_lowercase();
-        let Some(match_index) = lower_text.find(&lower_query) else {
-            continue;
-        };
+        let mut search_start = 0;
 
-        results.push(EpubSearchResultDto {
-            id: format!("epub-search-{}-{}", chapter.id, match_index),
-            label: chapter.label.clone(),
-            snippet: snippet_around(&text, match_index, query.len()),
-            href: chapter.href.clone(),
-            index: chapter.index,
-            progress: if chapter_count > 1 {
-                chapter.index as f64 / (chapter_count - 1) as f64
-            } else {
-                0.0
-            },
-        });
+        while let Some(relative_index) = lower_text[search_start..].find(&lower_query) {
+            let match_index = search_start + relative_index;
+            results.push(EpubSearchResultDto {
+                id: format!("epub-search-{}-{}", chapter.id, match_index),
+                label: chapter.label.clone(),
+                snippet: snippet_around(&text, match_index, query.len()),
+                href: chapter.href.clone(),
+                index: chapter.index,
+                progress: if chapter_count > 1 {
+                    chapter.index as f64 / (chapter_count - 1) as f64
+                } else {
+                    0.0
+                },
+            });
+            search_start = match_index + lower_query.len();
+        }
     }
 
     Ok(results)
@@ -1045,7 +1556,13 @@ pub fn run() {
             search_pdf_document,
             open_epub_document,
             read_epub_chapter,
-            search_epub_document
+            search_epub_document,
+            get_cache_info,
+            load_smartreader_cache,
+            save_smartreader_cache,
+            set_cache_location,
+            export_smartreader_cache,
+            import_smartreader_cache
         ])
         .build(tauri::generate_context!())
         .expect("error while building SmartReader")
@@ -1225,13 +1742,29 @@ mod tests {
         write_test_pdf(&path, &["Intro body", "Native PDF result"], false).unwrap();
 
         let results =
-            search_pdf_document_from_path(path.clone(), "Native PDF".to_string(), Some(10))
-                .unwrap();
+            search_pdf_document_from_path(path.clone(), "Native PDF".to_string()).unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].page, 2);
         assert_eq!(results[0].label, "Page 2");
         assert!(results[0].snippet.contains("Native PDF result"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn search_pdf_document_returns_all_matching_pages_without_limit() {
+        let path = test_path("search-all.pdf");
+        let page_texts = (0..120)
+            .map(|index| format!("unbounded pdf match {index}"))
+            .collect::<Vec<_>>();
+        let page_refs = page_texts.iter().map(String::as_str).collect::<Vec<_>>();
+        write_test_pdf(&path, &page_refs, false).unwrap();
+
+        let results = search_pdf_document_from_path(path.clone(), "unbounded".to_string()).unwrap();
+
+        assert_eq!(results.len(), 120);
+        assert_eq!(results[0].page, 1);
+        assert_eq!(results[119].page, 120);
         fs::remove_file(path).unwrap();
     }
 
@@ -1276,8 +1809,7 @@ mod tests {
         write_test_epub(&path, TestEpubOptions::default()).unwrap();
 
         let results =
-            search_epub_document_from_path(path.clone(), "Second chapter".to_string(), Some(10))
-                .unwrap();
+            search_epub_document_from_path(path.clone(), "Second chapter".to_string()).unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].label, "Chapter 2");
@@ -1288,34 +1820,185 @@ mod tests {
     }
 
     #[test]
-    fn search_epub_document_respects_limit() {
-        let path = test_path("search-limit.epub");
-        write_test_epub(&path, TestEpubOptions::default()).unwrap();
+    fn search_epub_document_returns_all_matches_without_limit() {
+        let path = test_path("search-all.epub");
+        write_test_epub(
+            &path,
+            TestEpubOptions {
+                chapter_count: 120,
+                ..TestEpubOptions::default()
+            },
+        )
+        .unwrap();
 
-        let results =
-            search_epub_document_from_path(path.clone(), "chapter".to_string(), Some(1)).unwrap();
+        let results = search_epub_document_from_path(path.clone(), "chapter".to_string()).unwrap();
 
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].href, "OPS/chapter-one.xhtml");
+        assert!(results.len() > 120);
+        assert_eq!(results[0].href, "OPS/chapter-1.xhtml");
+        assert_eq!(results.last().unwrap().href, "OPS/chapter-120.xhtml");
         fs::remove_file(path).unwrap();
     }
 
     #[test]
-    fn search_epub_document_rejects_empty_query_and_zero_limit_without_reading_chapters() {
+    fn search_epub_document_rejects_empty_query_without_reading_chapters() {
         let path = test_path("search-empty.epub");
         write_test_epub(&path, TestEpubOptions::default()).unwrap();
 
         assert!(
-            search_epub_document_from_path(path.clone(), "   ".to_string(), Some(10))
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            search_epub_document_from_path(path.clone(), "chapter".to_string(), Some(0))
+            search_epub_document_from_path(path.clone(), "   ".to_string())
                 .unwrap()
                 .is_empty()
         );
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn validate_cache_envelope_rejects_non_object_or_wrong_schema() {
+        assert!(validate_cache_envelope(&serde_json::json!(null)).is_err());
+        assert!(validate_cache_envelope(&serde_json::json!({"schemaVersion": 2})).is_err());
+        assert!(validate_cache_envelope(&serde_json::json!({"schemaVersion": 1})).is_err());
+        assert!(validate_cache_envelope(&serde_json::json!({
+            "schemaVersion": 1,
+            "pdfBytes": []
+        }))
+        .is_err());
+        assert!(validate_cache_envelope(&valid_test_cache()).is_ok());
+    }
+
+    #[test]
+    fn validate_cache_envelope_rejects_dangerous_nested_payloads() {
+        let mut object_url_cache = valid_test_cache();
+        object_url_cache["session"]["tabs"][0]["objectUrl"] = serde_json::json!("blob:document");
+        assert!(validate_cache_envelope(&object_url_cache).is_err());
+
+        let mut raw_text_cache = valid_test_cache();
+        raw_text_cache["adapterCache"]["searchIndexes"][0]["rawText"] =
+            serde_json::json!("full extracted document body");
+        assert!(validate_cache_envelope(&raw_text_cache).is_err());
+
+        let mut pdf_proxy_cache = valid_test_cache();
+        pdf_proxy_cache["adapterCache"]["pdfProxy"] = serde_json::json!({"pages": []});
+        assert!(validate_cache_envelope(&pdf_proxy_cache).is_err());
+    }
+
+    #[test]
+    fn validate_cache_envelope_rejects_invalid_required_field_shapes() {
+        let mut missing_tabs_cache = valid_test_cache();
+        missing_tabs_cache["session"] = serde_json::json!({});
+        assert!(validate_cache_envelope(&missing_tabs_cache).is_err());
+
+        let mut invalid_progress_cache = valid_test_cache();
+        invalid_progress_cache["readingProgress"] = serde_json::json!({});
+        assert!(validate_cache_envelope(&invalid_progress_cache).is_err());
+
+        let mut invalid_indexes_cache = valid_test_cache();
+        invalid_indexes_cache["adapterCache"] = serde_json::json!({});
+        assert!(validate_cache_envelope(&invalid_indexes_cache).is_err());
+    }
+
+    #[test]
+    fn validate_cache_directory_rejects_file_paths() {
+        let path = test_path("cache-file");
+        fs::write(&path, b"not a directory").unwrap();
+
+        let result = ensure_writable_directory(&path);
+
+        assert_eq!(
+            result.unwrap_err(),
+            "SmartReader cache path must be a directory"
+        );
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn save_and_load_cache_round_trip_valid_schema() {
+        let root = test_path("cache-round-trip");
+        let paths = test_cache_paths(&root);
+        let cache = valid_test_cache();
+
+        let saved = save_cache_to_paths(&paths, cache.clone()).unwrap();
+        let loaded = load_cache_from_paths(&paths).unwrap();
+
+        assert!(saved.saved_at > 0);
+        assert_eq!(loaded.cache, Some(cache));
+        assert_eq!(loaded.info.schema_version, 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn export_and_import_cache_validate_schema_and_apply_when_requested() {
+        let root = test_path("cache-import-export");
+        let paths = test_cache_paths(&root);
+        let source_cache = valid_test_cache();
+        save_cache_to_paths(&paths, source_cache.clone()).unwrap();
+        let export_path = root.join("backup").join("smartreader-cache.json");
+
+        let exported = export_cache_from_paths(&paths, export_path.clone(), None).unwrap();
+        let imported = import_cache_from_paths(&paths, export_path, true).unwrap();
+
+        assert!(exported.bytes_written > 0);
+        assert_eq!(imported.cache, source_cache);
+        assert!(imported.applied);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn invalid_import_does_not_overwrite_existing_cache() {
+        let root = test_path("cache-invalid-import");
+        let paths = test_cache_paths(&root);
+        let existing_cache = valid_test_cache();
+        save_cache_to_paths(&paths, existing_cache.clone()).unwrap();
+        let source_path = root.join("invalid-cache.json");
+        fs::write(&source_path, r#"{"schemaVersion":1}"#).unwrap();
+
+        let result = import_cache_from_paths(&paths, source_path, true);
+
+        assert_eq!(result.unwrap_err(), CACHE_SCHEMA_ERROR);
+        assert_eq!(
+            read_cache_file(&paths.default_dir.join(CACHE_FILE_NAME)).unwrap(),
+            existing_cache
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn set_cache_location_copies_existing_cache_without_removing_source() {
+        let root = test_path("cache-move");
+        let paths = test_cache_paths(&root);
+        let cache = valid_test_cache();
+        save_cache_to_paths(&paths, cache.clone()).unwrap();
+        let new_dir = root.join("custom-cache");
+
+        let result = set_cache_location_for_paths(&paths, new_dir.clone(), true).unwrap();
+
+        assert!(result.moved);
+        assert_eq!(result.active_path, new_dir.to_string_lossy());
+        assert!(paths.default_dir.join(CACHE_FILE_NAME).exists());
+        assert_eq!(
+            read_cache_file(&new_dir.join(CACHE_FILE_NAME)).unwrap(),
+            cache
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn set_cache_location_preserves_source_cache_when_move_fails() {
+        let root = test_path("cache-move-fails");
+        let paths = test_cache_paths(&root);
+        let cache = valid_test_cache();
+        save_cache_to_paths(&paths, cache.clone()).unwrap();
+        let new_dir = root.join("blocked-cache");
+        fs::create_dir_all(new_dir.join(CACHE_FILE_NAME)).unwrap();
+
+        let result = set_cache_location_for_paths(&paths, new_dir, true);
+
+        assert_eq!(result.unwrap_err(), CACHE_ACCESS_ERROR);
+        assert_eq!(
+            read_cache_file(&paths.default_dir.join(CACHE_FILE_NAME)).unwrap(),
+            cache
+        );
+        assert!(read_custom_cache_location(&paths).unwrap().is_none());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1402,9 +2085,60 @@ mod tests {
         ))
     }
 
+    fn test_cache_paths(root: &Path) -> CachePaths {
+        CachePaths {
+            default_dir: root.join("default-cache"),
+            state_dir: root.join("state"),
+        }
+    }
+
+    fn valid_test_cache() -> serde_json::Value {
+        serde_json::json!({
+            "schemaVersion": 1,
+            "appVersion": "0.1.0",
+            "savedAt": "2026-05-23T00:00:00Z",
+            "settings": {
+                "theme": "dark"
+            },
+            "preferences": {
+                "sidebarOpen": true
+            },
+            "recentFiles": [
+                {
+                    "path": "/tmp/book.pdf",
+                    "title": "book.pdf"
+                }
+            ],
+            "readingProgress": [
+                {
+                    "path": "/tmp/book.pdf",
+                    "page": 2
+                }
+            ],
+            "session": {
+                "tabs": [
+                    {
+                        "path": "/tmp/book.pdf",
+                        "title": "book.pdf"
+                    }
+                ],
+                "activeTabId": "tab-1"
+            },
+            "adapterCache": {
+                "searchIndexes": [
+                    {
+                        "path": "/tmp/book.pdf",
+                        "pageCount": 3
+                    }
+                ]
+            }
+        })
+    }
+
     struct TestEpubOptions {
         include_container: bool,
         include_package: bool,
+        chapter_count: usize,
     }
 
     impl Default for TestEpubOptions {
@@ -1412,6 +2146,7 @@ mod tests {
             Self {
                 include_container: true,
                 include_package: true,
+                chapter_count: 2,
             }
         }
     }
@@ -1435,43 +2170,106 @@ mod tests {
 
         if options.include_package {
             zip.start_file("OPS/package.opf", file_options)?;
-            zip.write_all(
-                br#"<?xml version="1.0"?>
+            let mut package = r#"<?xml version="1.0"?>
                 <package>
                     <metadata><dc:title>Rust Reader</dc:title></metadata>
                     <manifest>
-                        <item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>
-                        <item id="chapter-one" href="chapter-one.xhtml" media-type="application/xhtml+xml"/>
-                        <item id="chapter-two" href="chapter-two.xhtml" media-type="application/xhtml+xml"/>
-                    </manifest>
-                    <spine>
-                        <itemref idref="chapter-one"/>
-                        <itemref idref="chapter-two"/>
-                    </spine>
-                </package>"#,
-            )?;
+                        <item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>"#
+                .to_string();
+            for index in 0..options.chapter_count {
+                package.push_str(&format!(
+                    r#"<item id="{}" href="{}" media-type="application/xhtml+xml"/>"#,
+                    test_epub_chapter_id(index, options.chapter_count),
+                    test_epub_chapter_file(index, options.chapter_count)
+                ));
+            }
+            package.push_str("</manifest><spine>");
+            for index in 0..options.chapter_count {
+                package.push_str(&format!(
+                    r#"<itemref idref="{}"/>"#,
+                    test_epub_chapter_id(index, options.chapter_count)
+                ));
+            }
+            package.push_str("</spine></package>");
+            zip.write_all(package.as_bytes())?;
         }
 
         zip.start_file("OPS/nav.xhtml", file_options)?;
-        zip.write_all(
-            br##"<html><body><nav>
-                <ol>
-                    <li><a href="chapter-one.xhtml">Opening</a></li>
-                    <li><a href="chapter-two.xhtml">Chapter 2</a></li>
-                </ol>
-            </nav></body></html>"##,
-        )?;
+        let mut nav = "<html><body><nav><ol>".to_string();
+        for index in 0..options.chapter_count {
+            nav.push_str(&format!(
+                r#"<li><a href="{}">{}</a></li>"#,
+                test_epub_chapter_file(index, options.chapter_count),
+                test_epub_chapter_label(index, options.chapter_count)
+            ));
+        }
+        nav.push_str("</ol></nav></body></html>");
+        zip.write_all(nav.as_bytes())?;
 
-        zip.start_file("OPS/chapter-one.xhtml", file_options)?;
-        zip.write_all(br#"<html><body><h1>Opening</h1><p>First chapter</p></body></html>"#)?;
-
-        zip.start_file("OPS/chapter-two.xhtml", file_options)?;
-        zip.write_all(
-            br#"<html><body><h1>Chapter 2</h1><p>Second chapter</p><script>bad()</script></body></html>"#,
-        )?;
+        for index in 0..options.chapter_count {
+            zip.start_file(
+                format!(
+                    "OPS/{}",
+                    test_epub_chapter_file(index, options.chapter_count)
+                ),
+                file_options,
+            )?;
+            let label = test_epub_chapter_label(index, options.chapter_count);
+            let text = test_epub_chapter_text(index, options.chapter_count);
+            zip.write_all(
+                format!(
+                    "<html><body><h1>{label}</h1><p>{text}</p><script>bad()</script></body></html>"
+                )
+                .as_bytes(),
+            )?;
+        }
 
         zip.finish()?;
         Ok(())
+    }
+
+    fn test_epub_chapter_id(index: usize, total: usize) -> String {
+        if total == 2 {
+            match index {
+                0 => "chapter-one".to_string(),
+                1 => "chapter-two".to_string(),
+                _ => format!("chapter-{}", index + 1),
+            }
+        } else {
+            format!("chapter-{}", index + 1)
+        }
+    }
+
+    fn test_epub_chapter_file(index: usize, total: usize) -> String {
+        if total == 2 {
+            match index {
+                0 => "chapter-one.xhtml".to_string(),
+                1 => "chapter-two.xhtml".to_string(),
+                _ => format!("chapter-{}.xhtml", index + 1),
+            }
+        } else {
+            format!("chapter-{}.xhtml", index + 1)
+        }
+    }
+
+    fn test_epub_chapter_label(index: usize, total: usize) -> String {
+        if total == 2 && index == 0 {
+            "Opening".to_string()
+        } else {
+            format!("Chapter {}", index + 1)
+        }
+    }
+
+    fn test_epub_chapter_text(index: usize, total: usize) -> String {
+        if total == 2 {
+            match index {
+                0 => "First chapter".to_string(),
+                1 => "Second chapter".to_string(),
+                _ => format!("Chapter {} body", index + 1),
+            }
+        } else {
+            format!("Chapter {} chapter body", index + 1)
+        }
     }
 
     fn write_test_pdf(path: &Path, page_texts: &[&str], include_outline: bool) -> io::Result<()> {

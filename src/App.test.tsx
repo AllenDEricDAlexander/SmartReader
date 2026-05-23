@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import JSZip from "jszip";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { AppSessionSnapshot, DocumentSession } from "./types/reader";
+import type { AppSessionSnapshot, DocumentSession, SmartReaderCacheEnvelope } from "./types/reader";
 
 const pdfMocks = vi.hoisted(() => {
   const outlineItems = [
@@ -112,13 +112,38 @@ const tauriMocks = vi.hoisted(() => {
       page: 2
     }
   ]);
+  const getSmartReaderCacheInfo = vi.fn(async () => ({
+    defaultPath: "/Users/mario/Library/Application Support/SmartReader/cache",
+    activePath: "/Users/mario/Library/Application Support/SmartReader/cache",
+    isCustom: false,
+    schemaVersion: 1
+  }));
+  const saveSmartReaderCache = vi.fn(async () => undefined);
+  const setSmartReaderCacheLocation = vi.fn(async () => ({
+    activePath: "/Users/mario/Library/Application Support/SmartReader/cache",
+    moved: false
+  }));
+  const exportSmartReaderCacheFile = vi.fn(async () => ({
+    path: "/Users/mario/Downloads/smartreader-cache.json",
+    bytesWritten: 120,
+    exportedAt: 1
+  }));
+  const importSmartReaderCacheFile = vi.fn(async () => {
+    throw new Error("not staged");
+  });
   const readFileSource = vi.fn(async () => new ArrayBuffer(8));
 
   return {
     createDesktopSession,
+    exportSmartReaderCacheFile,
+    getSmartReaderCacheInfo,
+    importSmartReaderCacheFile,
     isDesktopRuntime: () => desktopRuntime,
     openEpubDocument,
     openPdfDocument,
+    openCacheDirectoryDialog: vi.fn(async () => undefined),
+    openCacheExportDialog: vi.fn(async () => undefined),
+    openCacheImportDialog: vi.fn(async () => undefined),
     openPendingDesktopFiles,
     listenForDesktopOpenFiles: vi.fn(async (openPath: (path: string) => void) => {
       desktopOpenHandler = openPath;
@@ -128,8 +153,10 @@ const tauriMocks = vi.hoisted(() => {
     openDesktopFileDialog: vi.fn(async () => undefined),
     readEpubChapter,
     readFileSource,
+    saveSmartReaderCache,
     searchEpubDocument,
     searchPdfDocument,
+    setSmartReaderCacheLocation,
     emitDesktopOpen: (path: string) => desktopOpenHandler?.(path),
     reset: () => {
       desktopOpenHandler = undefined;
@@ -137,19 +164,31 @@ const tauriMocks = vi.hoisted(() => {
       pendingPaths = ["/Users/mario/Books/start.pdf"];
       desktopRuntime = true;
       createDesktopSession.mockClear();
+      exportSmartReaderCacheFile.mockClear();
+      getSmartReaderCacheInfo.mockClear();
+      importSmartReaderCacheFile.mockClear();
       openEpubDocument.mockClear();
       openPdfDocument.mockClear();
       openPendingDesktopFiles.mockClear();
       readEpubChapter.mockClear();
       readFileSource.mockClear();
+      saveSmartReaderCache.mockClear();
       searchEpubDocument.mockClear();
       searchPdfDocument.mockClear();
+      setSmartReaderCacheLocation.mockClear();
     },
     setDesktopRuntime: (enabled: boolean) => {
       desktopRuntime = enabled;
     },
     setPendingPaths: (paths: string[]) => {
       pendingPaths = paths;
+    },
+    setCacheImportResult: (cache: unknown) => {
+      (importSmartReaderCacheFile as unknown as { mockResolvedValue: (value: unknown) => void }).mockResolvedValue({
+        cache,
+        importedAt: 1,
+        applied: false
+      });
     }
   };
 });
@@ -161,15 +200,23 @@ vi.mock("./platform/fileSources", async () => ({
 
 vi.mock("./platform/tauriBridge", () => ({
   createDesktopSession: tauriMocks.createDesktopSession,
+  exportSmartReaderCacheFile: tauriMocks.exportSmartReaderCacheFile,
+  getSmartReaderCacheInfo: tauriMocks.getSmartReaderCacheInfo,
+  importSmartReaderCacheFile: tauriMocks.importSmartReaderCacheFile,
   listenForDesktopOpenFiles: tauriMocks.listenForDesktopOpenFiles,
+  openCacheDirectoryDialog: tauriMocks.openCacheDirectoryDialog,
+  openCacheExportDialog: tauriMocks.openCacheExportDialog,
+  openCacheImportDialog: tauriMocks.openCacheImportDialog,
   openEpubDocument: tauriMocks.openEpubDocument,
   openPdfDocument: tauriMocks.openPdfDocument,
   openDesktopFileDialog: tauriMocks.openDesktopFileDialog,
   openPendingDesktopFiles: tauriMocks.openPendingDesktopFiles,
   readEpubChapter: tauriMocks.readEpubChapter,
   readFileSource: tauriMocks.readFileSource,
+  saveSmartReaderCache: tauriMocks.saveSmartReaderCache,
   searchEpubDocument: tauriMocks.searchEpubDocument,
   searchPdfDocument: tauriMocks.searchPdfDocument,
+  setSmartReaderCacheLocation: tauriMocks.setSmartReaderCacheLocation,
   setupTauriMenu: tauriMocks.setupTauriMenu
 }));
 
@@ -310,7 +357,7 @@ describe("App desktop open delivery", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
 
     await waitFor(() => {
-      expect(tauriMocks.searchPdfDocument).toHaveBeenCalledWith("/Users/mario/Books/start.pdf", "native", 50);
+      expect(tauriMocks.searchPdfDocument).toHaveBeenCalledWith("/Users/mario/Books/start.pdf", "native");
     });
     expect(await screen.findByText("Native PDF result")).toBeInTheDocument();
   });
@@ -464,9 +511,39 @@ describe("App desktop open delivery", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
 
     await waitFor(() => {
-      expect(tauriMocks.searchEpubDocument).toHaveBeenCalledWith("/Users/mario/Books/story.epub", "hidden", 50);
+      expect(tauriMocks.searchEpubDocument).toHaveBeenCalledWith("/Users/mario/Books/story.epub", "hidden");
     });
+
     expect(await screen.findByText("Hidden native result")).toBeInTheDocument();
+  });
+
+  it("does not persist an invalid imported cache before apply succeeds", async () => {
+    (tauriMocks.openCacheImportDialog as unknown as { mockResolvedValue: (value: string) => void }).mockResolvedValue(
+      "/Users/mario/Downloads/bad-cache.json"
+    );
+    tauriMocks.setCacheImportResult({
+      schemaVersion: 1,
+      settings: { recentRetention: "bad" },
+      recentFiles: [],
+      readingProgress: [],
+      session: { activeTabId: "bad", sidebarOpen: true, tabs: [] },
+      adapterCache: { searchIndexes: [] }
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "More" }));
+    tauriMocks.saveSmartReaderCache.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Import" }));
+
+    expect(await screen.findByText("Cache import is invalid.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Apply Imported Cache" })).not.toBeInTheDocument();
+    expect(
+      (tauriMocks.saveSmartReaderCache.mock.calls as unknown as Array<[SmartReaderCacheEnvelope]>).some(
+        ([cache]) => cache.session.activeTabId === "bad"
+      )
+    ).toBe(false);
   });
 });
 
@@ -513,7 +590,11 @@ function createSnapshot(activeTabId: string, page: number): AppSessionSnapshot {
       defaultPdfFitMode: "continuous",
       epubFontSize: 18,
       epubTheme: "system",
-      recentRetention: 12
+      recentRetention: 12,
+      cacheLocation: { mode: "default" },
+      search: { resultLimit: "unlimited", includePdf: true, includeEpub: true },
+      shortcuts: [],
+      wasm: { enabled: true }
     },
     sessions: [createSnapshotSession(activeTabId, "/Users/mario/Books/spec.pdf", page)]
   };

@@ -15,7 +15,11 @@ const preferences: Preferences = {
   defaultPdfFitMode: "continuous",
   epubFontSize: 18,
   epubTheme: "system",
-  recentRetention: 12
+  recentRetention: 12,
+  cacheLocation: { mode: "default" },
+  search: { resultLimit: "unlimited", includePdf: true, includeEpub: true },
+  shortcuts: [],
+  wasm: { enabled: true }
 };
 
 describe("app session persistence", () => {

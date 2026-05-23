@@ -121,6 +121,69 @@ export interface Preferences {
   epubFontSize: number;
   epubTheme: ReaderTheme;
   recentRetention: number;
+  cacheLocation: {
+    mode: "default" | "custom";
+    path?: string;
+  };
+  search: {
+    resultLimit: "unlimited";
+    includePdf: boolean;
+    includeEpub: boolean;
+  };
+  shortcuts: ShortcutBinding[];
+  wasm: {
+    enabled: boolean;
+    parserVersion?: string;
+    searchIndexVersion?: string;
+  };
+}
+
+export interface ShortcutBinding {
+  commandId: string;
+  shortcut: string;
+  enabled?: boolean;
+  source?: "default" | "user";
+}
+
+export type SmartReaderSettings = Preferences;
+
+export interface SmartReaderReadingProgress {
+  documentId: string;
+  title: string;
+  path?: string;
+  format: Exclude<DocumentFormat, "empty" | "unsupported">;
+  location: ReaderLocation;
+  updatedAt: number;
+}
+
+export interface SmartReaderSessionCache {
+  activeTabId: string;
+  sidebarOpen: boolean;
+  tabs: PersistedDocumentSession[];
+}
+
+export interface SmartReaderSearchIndexMetadata {
+  documentId: string;
+  path?: string;
+  format: Exclude<DocumentFormat, "empty" | "unsupported">;
+  adapter: "rust" | "wasm" | "pdfjs" | "jszip";
+  version: string;
+  updatedAt: number;
+}
+
+export interface SmartReaderAdapterCache {
+  searchIndexes: SmartReaderSearchIndexMetadata[];
+}
+
+export interface SmartReaderCacheEnvelope {
+  schemaVersion: 1;
+  appVersion?: string;
+  savedAt: string;
+  settings: SmartReaderSettings;
+  recentFiles: RecentFile[];
+  readingProgress: SmartReaderReadingProgress[];
+  session: SmartReaderSessionCache;
+  adapterCache: SmartReaderAdapterCache;
 }
 
 export type PersistedReaderFileSource = Extract<ReaderFileSource, { kind: "desktop-path" }> | { kind: "empty" };

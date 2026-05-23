@@ -1,7 +1,7 @@
 import { createAccessErrorSession, createDesktopPathFile, isTauriRuntime } from "./fileSources";
 import { createSessionFromFile } from "../state/documentSessions";
 import type { CommandId } from "../state/commandRegistry";
-import type { DocumentSession, ReaderFileSource } from "../types/reader";
+import type { DocumentSession, ReaderFileSource, SmartReaderCacheEnvelope } from "../types/reader";
 
 type TauriUnlisten = () => void;
 
@@ -61,6 +61,36 @@ export interface DesktopPdfSearchResult {
   page: number;
 }
 
+export interface DesktopCacheInfo {
+  defaultPath: string;
+  activePath: string;
+  isCustom: boolean;
+  schemaVersion: number;
+}
+
+export interface DesktopLoadCacheResult {
+  cache?: SmartReaderCacheEnvelope;
+  info: DesktopCacheInfo;
+}
+
+export interface DesktopSetCacheLocationResult {
+  activePath: string;
+  moved: boolean;
+  fallbackUsed?: boolean;
+}
+
+export interface DesktopExportCacheResult {
+  path: string;
+  bytesWritten: number;
+  exportedAt: number;
+}
+
+export interface DesktopImportCacheResult {
+  cache: SmartReaderCacheEnvelope;
+  importedAt: number;
+  applied: boolean;
+}
+
 const supportedExtensions = ["pdf", "epub"];
 const desktopOpenFileEvent = "smartreader://open-file";
 const supportedDocumentPath = /\.(pdf|epub)$/i;
@@ -75,6 +105,49 @@ export async function openDesktopFileDialog(): Promise<string | undefined> {
     multiple: false,
     directory: false,
     filters: [{ name: "Documents", extensions: supportedExtensions }]
+  });
+
+  return typeof selected === "string" ? selected : undefined;
+}
+
+export async function openCacheDirectoryDialog(): Promise<string | undefined> {
+  if (!isTauriRuntime()) {
+    return undefined;
+  }
+
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selected = await open({
+    multiple: false,
+    directory: true
+  });
+
+  return typeof selected === "string" ? selected : undefined;
+}
+
+export async function openCacheImportDialog(): Promise<string | undefined> {
+  if (!isTauriRuntime()) {
+    return undefined;
+  }
+
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selected = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "SmartReader Cache", extensions: ["json"] }]
+  });
+
+  return typeof selected === "string" ? selected : undefined;
+}
+
+export async function openCacheExportDialog(): Promise<string | undefined> {
+  if (!isTauriRuntime()) {
+    return undefined;
+  }
+
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const selected = await save({
+    defaultPath: "smartreader-cache.json",
+    filters: [{ name: "SmartReader Cache", extensions: ["json"] }]
   });
 
   return typeof selected === "string" ? selected : undefined;
@@ -108,12 +181,11 @@ export async function openPdfDocument(path: string): Promise<DesktopPdfDocument>
 
 export async function searchPdfDocument(
   path: string,
-  query: string,
-  limit?: number
+  query: string
 ): Promise<DesktopPdfSearchResult[]> {
   const { invoke } = await import("@tauri-apps/api/core");
 
-  return invoke<DesktopPdfSearchResult[]>("search_pdf_document", { path, query, limit });
+  return invoke<DesktopPdfSearchResult[]>("search_pdf_document", { path, query });
 }
 
 export async function openEpubDocument(path: string): Promise<DesktopEpubDocument> {
@@ -130,12 +202,56 @@ export async function readEpubChapter(path: string, href: string): Promise<Deskt
 
 export async function searchEpubDocument(
   path: string,
-  query: string,
-  limit?: number
+  query: string
 ): Promise<DesktopEpubSearchResult[]> {
   const { invoke } = await import("@tauri-apps/api/core");
 
-  return invoke<DesktopEpubSearchResult[]>("search_epub_document", { path, query, limit });
+  return invoke<DesktopEpubSearchResult[]>("search_epub_document", { path, query });
+}
+
+export async function getSmartReaderCacheInfo(): Promise<DesktopCacheInfo> {
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  return invoke<DesktopCacheInfo>("get_cache_info");
+}
+
+export async function loadSmartReaderCache(): Promise<DesktopLoadCacheResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  return invoke<DesktopLoadCacheResult>("load_smartreader_cache");
+}
+
+export async function saveSmartReaderCache(cache: SmartReaderCacheEnvelope): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  await invoke("save_smartreader_cache", { cache });
+}
+
+export async function setSmartReaderCacheLocation(
+  path: string,
+  moveExisting: boolean
+): Promise<DesktopSetCacheLocationResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  return invoke<DesktopSetCacheLocationResult>("set_cache_location", { path, moveExisting });
+}
+
+export async function exportSmartReaderCacheFile(
+  destinationPath: string,
+  cache?: SmartReaderCacheEnvelope
+): Promise<DesktopExportCacheResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  return invoke<DesktopExportCacheResult>("export_smartreader_cache", { destinationPath, cache });
+}
+
+export async function importSmartReaderCacheFile(
+  sourcePath: string,
+  apply: boolean
+): Promise<DesktopImportCacheResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  return invoke<DesktopImportCacheResult>("import_smartreader_cache", { sourcePath, apply });
 }
 
 export async function readFileSource(source: ReaderFileSource): Promise<ArrayBuffer> {
