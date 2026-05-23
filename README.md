@@ -34,6 +34,7 @@ SmartReader is a macOS-first local reader MVP for PDF and EPUB files. The curren
 - PDF.js via `pdfjs-dist`
 - JSZip for browser-file EPUB fallback parsing
 - Tauri 2 desktop shell with dialog plugin, validated Rust document-read commands, Rust PDF metadata/outline/search commands, Rust EPUB metadata/chapter/search commands, and Rust cache import/export/location commands
+- Bun for frontend dependency installation, script execution, tests, web builds, and Tauri command entry points
 - CSS modules are not used; styling is in `src/styles.css`
 
 ## Web Run, Test, And Build
@@ -41,13 +42,13 @@ SmartReader is a macOS-first local reader MVP for PDF and EPUB files. The curren
 Install dependencies:
 
 ```bash
-npm install
+bun install
 ```
 
 Start the local development server:
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 The dev server binds to `127.0.0.1` through the configured Vite script.
@@ -55,19 +56,19 @@ The dev server binds to `127.0.0.1` through the configured Vite script.
 Run tests:
 
 ```bash
-npm test
+bun run test
 ```
 
 Build the production web shell:
 
 ```bash
-npm run build
+bun run build
 ```
 
 Optional watch mode for tests:
 
 ```bash
-npm run test:watch
+bun run test:watch
 ```
 
 ## Desktop / Tauri Run And Build
@@ -75,22 +76,22 @@ npm run test:watch
 Run the macOS desktop app in development:
 
 ```bash
-npm run desktop:dev
+bun run desktop:dev
 ```
 
 Build the macOS desktop app bundle:
 
 ```bash
-npm run desktop:build
+bun run desktop:build
 ```
 
 The default desktop build target remains the macOS `.app` bundle. For explicit packaging flows:
 
 ```bash
-npm run desktop:build:app
-npm run desktop:build:dmg
-npm run desktop:build:debug
-npm run desktop:build:debug:dmg
+bun run desktop:build:app
+bun run desktop:build:dmg
+bun run desktop:build:debug
+bun run desktop:build:debug:dmg
 ```
 
 `desktop:build:app` produces only the `.app` bundle. `desktop:build:dmg` uses Tauri's native macOS bundler to produce a DMG installer. The debug variants keep the same bundle choices while building the Rust/Tauri shell with debug settings.
@@ -113,7 +114,7 @@ For the shared local desktop packaging entry point:
 ./scripts/build-desktop.sh dmg --debug
 ```
 
-`build-desktop.sh` uses the project Tauri CLI through npm and prints the generated artifact paths. `dmg` must run on macOS, `win` builds Windows `nsis` and `msi` installers on Windows, and `linux` builds `deb` and `rpm` packages on Linux with the required system packaging tools. `all` only builds targets supported by the current host OS and skips the other operating systems with an explicit message.
+`build-desktop.sh` uses the project Tauri CLI through Bun and prints the generated artifact paths. `dmg` must run on macOS, `win` builds Windows `nsis` and `msi` installers on Windows, and `linux` builds `deb` and `rpm` packages on Linux with the required system packaging tools. `all` only builds targets supported by the current host OS and skips the other operating systems with an explicit message.
 
 Tauri runs the same Vite frontend and uses Rust commands for validated PDF/EPUB document reads instead of exposing broad renderer filesystem permissions.
 
@@ -157,7 +158,7 @@ React Native/mobile remains a future platform track. The intended next platform 
 ## Current Limitations
 
 - The Tauri shell is present, but release signing/notarization is not configured.
-- DMG packaging is available through `npm run desktop:build:dmg` and `./scripts/build-desktop.sh dmg`, but it is not enabled in the default `desktop:build` target. The default desktop build still produces the macOS `.app` bundle.
+- DMG packaging is available through `bun run desktop:build:dmg` and `./scripts/build-desktop.sh dmg`, but it is not enabled in the default `desktop:build` target. The default desktop build still produces the macOS `.app` bundle.
 - Windows and Linux installer packaging is exposed through `./scripts/build-desktop.sh`, but those targets still require matching host operating systems and their native packaging toolchains.
 - PDFKit integration is not implemented; PDF rendering currently uses PDF.js.
 - EPUB support is an MVP DRM-free parser and renderer. It does not provide full EPUB3 compatibility, DRM handling, embedded asset rewriting, annotations, or advanced layout fidelity.

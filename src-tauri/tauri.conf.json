@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.smartreader.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev -- --port 5173",
+    "beforeDevCommand": "bun run dev -- --port 5173",
     "devUrl": "http://127.0.0.1:5173",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist"
   },
   "app": {

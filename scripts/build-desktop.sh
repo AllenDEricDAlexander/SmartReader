@@ -157,8 +157,8 @@ run_tauri_build() {
 
   echo
   echo "Building ${BUILD_MODE} ${bundle_target} package..."
-  echo "Tauri beforeBuildCommand will run npm run build."
-  npm "${tauri_args[@]}"
+  echo "Tauri beforeBuildCommand will run bun run build."
+  bun "${tauri_args[@]}"
 
   echo
   echo "${bundle_target} output:"
@@ -195,15 +195,6 @@ done
 if [[ -z "${TARGET_ARG}" ]]; then
   usage >&2
   exit 1
-fi
-
-require_command "npm" "Install Node.js/npm and retry."
-
-cd "${PROJECT_ROOT}"
-
-if [[ ! -d "${PROJECT_ROOT}/node_modules" ]]; then
-  echo "node_modules is missing. Installing project dependencies with npm install..."
-  npm install
 fi
 
 CURRENT_OS="$(host_os)"
@@ -264,6 +255,15 @@ case "${TARGET_ARG}" in
     esac
     ;;
 esac
+
+require_command "bun" "Install Bun from https://bun.sh/docs/installation and retry."
+
+cd "${PROJECT_ROOT}"
+
+if [[ ! -d "${PROJECT_ROOT}/node_modules" ]]; then
+  echo "node_modules is missing. Installing project dependencies with bun install..."
+  bun install
+fi
 
 for bundle_target in "${BUILD_TARGETS[@]}"; do
   run_tauri_build "${bundle_target}"
