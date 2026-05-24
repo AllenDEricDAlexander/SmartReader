@@ -66,6 +66,7 @@ export interface PreferencesDialogProps {
   onShortcutReset?: (id: string) => void;
   wasm: WasmPreferences;
   onToggleWasm: (enabled: boolean) => void;
+  onTogglePdfKit: (enabled: boolean) => void;
 }
 
 export function PreferencesDialog(props: PreferencesDialogProps) {
@@ -121,7 +122,12 @@ export function PreferencesDialog(props: PreferencesDialogProps) {
             onShortcutChange={props.onShortcutChange}
             onShortcutReset={props.onShortcutReset}
           />
-          <AdvancedPreferences wasm={props.wasm} onToggleWasm={props.onToggleWasm} />
+          <AdvancedPreferences
+            wasm={props.wasm}
+            pdfKitEnabled={props.preferences.pdfKit.enabled}
+            onToggleWasm={props.onToggleWasm}
+            onTogglePdfKit={props.onTogglePdfKit}
+          />
           <fieldset className="preferences-section preferences-section-compact">
             <legend>Recent</legend>
             <label>
@@ -366,7 +372,9 @@ function ShortcutsPreferences(props: {
 
 function AdvancedPreferences(props: {
   wasm: WasmPreferences;
+  pdfKitEnabled: boolean;
   onToggleWasm: (enabled: boolean) => void;
+  onTogglePdfKit: (enabled: boolean) => void;
 }) {
   const adapterStatus = visibleWasmAdapterStatus(props.wasm.status);
 
@@ -380,6 +388,14 @@ function AdvancedPreferences(props: {
           onChange={(event) => props.onToggleWasm(event.currentTarget.checked)}
         />
         Enable WASM adapter
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={props.pdfKitEnabled}
+          onChange={(event) => props.onTogglePdfKit(event.currentTarget.checked)}
+        />
+        Enable experimental PDFKit renderer
       </label>
       <div className="advanced-status-grid">
         <StatusPair label="Enabled" value={props.wasm.status.enabled ? "Yes" : "No"} />

@@ -41,6 +41,7 @@ import {
   openPendingDesktopFiles,
   readEpubChapter,
   readFileSource,
+  renderPdfPageImage,
   searchEpubDocument,
   searchPdfDocument,
   saveSmartReaderCache,
@@ -63,19 +64,27 @@ import {
   writeSmartReaderCache as writeLocalSmartReaderCache
 } from "./state/smartReaderCache";
 import { searchEpubChapters, searchPdfDocumentText } from "./lib/fallbackSearch";
-import { detectWasmFeatures } from "./lib/wasmAdapter";
+import {
+  createFallbackSearchAdapter,
+  createSearchWorkerRuntime,
+  createWasmSearchAdapter,
+  detectWasmFeatures
+} from "./lib/wasmAdapter";
 import type {
   Bookmark,
   DocumentSession,
+  EpubResourceMetadata,
   FitMode,
   OutlineItem,
   Preferences,
+  ReaderError,
   ReaderLocation,
   RecentFile,
   SearchResult,
   SidebarMode,
   SmartReaderCacheEnvelope
 } from "./types/reader";
+import type { SearchAdapter, SearchWorkerDocument, WasmAdapterState } from "./lib/wasmAdapter";
 
 const defaultPreferences: Preferences = {
   reopenLastSession: true,
@@ -88,7 +97,8 @@ const defaultPreferences: Preferences = {
   cacheLocation: { mode: "default" },
   search: { resultLimit: "unlimited", includePdf: true, includeEpub: true },
   shortcuts: [],
-  wasm: { enabled: true }
+  wasm: { enabled: true },
+  pdfKit: { enabled: false }
 };
 
 export function App() {
@@ -108,6 +118,7 @@ export function App() {
   const [hud, setHud] = useState("");
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferences, setPreferences] = useState(initialAppState.preferences);
+  const [wasmAdapterState, setWasmAdapterState] = useState<WasmAdapterState>({ status: "idle", ready: false });
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>(() => loadRecentFiles());
   const [cacheInfo, setCacheInfo] = useState<CacheInfo>(() => ({
     activePath: "Browser local storage",
@@ -119,6 +130,8 @@ export function App() {
   const documentCacheRef = useRef(new Map<string, LoadedReaderDocument>());
   const hudTimerRef = useRef<number | undefined>(undefined);
   const sessionsRef = useRef<DocumentSession[]>(initialAppState.sessions);
+  const searchAdapterInstanceRef = useRef<SearchAdapter | undefined>(undefined);
+  const searchAdapterRequestRef = useRef(0);
   const isDesktop = isTauriRuntime();
 
   const activeSession = sessions.find((session) => session.id === activeTabId);
@@ -422,6 +435,8 @@ export function App() {
       if (current.length === 1) {
         const empty = createEmptySession();
         setActiveTabId(empty.id);
+        searchAdapterInstanceRef.current?.dispose();
+        searchAdapterInstanceRef.current = undefined;
         searchAdapterRef.current = async () => [];
         return [empty];
       }
@@ -429,6 +444,8 @@ export function App() {
       const next = current.filter((session) => session.id !== tabId);
       if (tabId === activeTabId) {
         setActiveTabId(next[Math.max(0, index - 1)]?.id ?? next[0].id);
+        searchAdapterInstanceRef.current?.dispose();
+        searchAdapterInstanceRef.current = undefined;
         searchAdapterRef.current = async () => [];
       }
       return next;
@@ -479,6 +496,56 @@ export function App() {
     showHud("Bookmark updated");
   }, [showHud, updateActiveSession]);
 
+  const configureSearchAdapter = useCallback((
+    handler: (query: string) => Promise<SearchResult[]>,
+    wasmDocuments: SearchWorkerDocument[] = []
+  ) => {
+    const requestId = ++searchAdapterRequestRef.current;
+    searchAdapterInstanceRef.current?.dispose();
+
+    const fallback = createFallbackSearchAdapter(handler);
+
+    if (!preferences.wasm.enabled) {
+      fallback.init();
+      searchAdapterInstanceRef.current = fallback;
+      searchAdapterRef.current = (query) => fallback.search(query);
+      setWasmAdapterState({
+        status: "unavailable",
+        ready: false,
+        error: new Error("WASM adapter disabled.")
+      });
+      return;
+    }
+
+    const adapter = createWasmSearchAdapter({
+      fallback,
+      loadRuntime: wasmDocuments.length > 0
+        ? () => createSearchWorkerRuntime(wasmDocuments)
+        : undefined
+    });
+
+    searchAdapterInstanceRef.current = adapter;
+    searchAdapterRef.current = async (query) => {
+      const results = await adapter.search(query);
+      setWasmAdapterState({ ...adapter.state });
+      return results;
+    };
+
+    const initPromise = adapter.init();
+    setWasmAdapterState({ ...adapter.state });
+    initPromise
+      .then(() => {
+        if (requestId === searchAdapterRequestRef.current) {
+          setWasmAdapterState({ ...adapter.state });
+        }
+      })
+      .catch(() => {
+        if (requestId === searchAdapterRequestRef.current) {
+          setWasmAdapterState({ ...adapter.state });
+        }
+      });
+  }, [preferences.wasm.enabled]);
+
   const runSearch = useCallback(async (query: string) => {
     if (!query.trim()) {
       updateActiveSession((session) => ({ ...session, searchResults: [] }));
@@ -494,10 +561,12 @@ export function App() {
         searchResults: results
       }));
       setSidebarOpen(true);
+    } catch {
+      showHud("Search failed");
     } finally {
       setIsSearching(false);
     }
-  }, [updateActiveSession]);
+  }, [showHud, updateActiveSession]);
 
   const handleLocationChange = useCallback((location: ReaderLocation) => {
     updateActiveSession((session) => updateSessionLocation(session, location));
@@ -648,7 +717,10 @@ export function App() {
 
   useEffect(() => {
     if (activeSession?.status !== "ready") {
+      searchAdapterInstanceRef.current?.dispose();
+      searchAdapterInstanceRef.current = undefined;
       searchAdapterRef.current = async () => [];
+      setWasmAdapterState({ status: "idle", ready: false });
     }
   }, [activeSession?.id, activeSession?.status]);
 
@@ -706,6 +778,8 @@ export function App() {
         disposeSessionResources(session, document);
       });
       documentCacheRef.current.clear();
+      searchAdapterInstanceRef.current?.dispose();
+      searchAdapterInstanceRef.current = undefined;
       searchAdapterRef.current = async () => [];
     };
   }, []);
@@ -843,9 +917,7 @@ export function App() {
           onLocationChange={handleLocationChange}
           onOutlineChange={(outline) => updateActiveSession((session) => ({ ...session, outline }))}
           onPageCountChange={(pageCount) => updateActiveSession((session) => ({ ...session, pageCount }))}
-          onSearchReady={(handler) => {
-            searchAdapterRef.current = handler;
-          }}
+          onSearchReady={configureSearchAdapter}
         />
       </section>
 
@@ -876,19 +948,21 @@ export function App() {
             settings: { enabled: preferences.wasm.enabled },
             status: {
               enabled: preferences.wasm.enabled && detectWasmFeatures().supported,
-              adapterStatus: "unavailable",
-              fallbackActive: true,
-              message: preferences.wasm.enabled
-                ? detectWasmFeatures().supported
-                  ? "WASM runtime is not wired yet; fallback adapters stay active."
-                  : "WASM is unavailable in this runtime; fallback adapters stay active."
-                : "WASM adapter disabled; fallback adapters stay active."
+              adapterStatus: visibleWasmStatus(wasmAdapterState),
+              fallbackActive: wasmAdapterState.status !== "ready",
+              message: wasmStatusMessage(preferences.wasm.enabled, wasmAdapterState)
             }
           }}
           onToggleWasm={(enabled) =>
             setPreferences((current) => ({
               ...current,
               wasm: { ...current.wasm, enabled }
+            }))
+          }
+          onTogglePdfKit={(enabled) =>
+            setPreferences((current) => ({
+              ...current,
+              pdfKit: { enabled }
             }))
           }
         />
@@ -1236,7 +1310,7 @@ function ReaderViewport(props: {
   onLocationChange: (location: ReaderLocation) => void;
   onOutlineChange: (outline: OutlineItem[]) => void;
   onPageCountChange: (pageCount: number) => void;
-  onSearchReady: (handler: (query: string) => Promise<SearchResult[]>) => void;
+  onSearchReady: (handler: (query: string) => Promise<SearchResult[]>, wasmDocuments?: SearchWorkerDocument[]) => void;
 }) {
   const session = props.session;
 
@@ -1260,6 +1334,7 @@ function ReaderViewport(props: {
       {session.format === "pdf" ? (
         <PdfReader
           session={session}
+          preferences={props.preferences}
           documentCache={props.documentCache}
           onLocationChange={props.onLocationChange}
           onOutlineChange={props.onOutlineChange}
@@ -1362,17 +1437,27 @@ function ErrorState(props: {
 
 function PdfReader(props: {
   session: DocumentSession;
+  preferences: Preferences;
   documentCache: Map<string, LoadedReaderDocument>;
   onLocationChange: (location: ReaderLocation) => void;
   onOutlineChange: (outline: OutlineItem[]) => void;
   onPageCountChange: (pageCount: number) => void;
-  onSearchReady: (handler: (query: string) => Promise<SearchResult[]>) => void;
+  onSearchReady: (handler: (query: string) => Promise<SearchResult[]>, wasmDocuments?: SearchWorkerDocument[]) => void;
 }) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [pdf, setPdf] = useState<PDFDocumentProxy | undefined>(
     () => props.documentCache.get(props.session.id)?.pdf
   );
   const [error, setError] = useState("");
+  const [pdfKitNotice, setPdfKitNotice] = useState("");
+  const pdfKitPath =
+    props.preferences.pdfKit.enabled && props.session.fileSource.kind === "desktop-path"
+      ? props.session.fileSource.path
+      : undefined;
+
+  useEffect(() => {
+    setPdfKitNotice("");
+  }, [pdfKitPath]);
 
   useEffect(() => {
     let disposed = false;
@@ -1443,7 +1528,7 @@ function PdfReader(props: {
     return () => {
       disposed = true;
     };
-  }, [props.documentCache, props.session.id]);
+  }, [props.documentCache, props.onSearchReady, props.session.id]);
 
   useEffect(() => {
     if (!pdf || props.session.fitMode === "single" || props.session.location.kind !== "page") {
@@ -1478,14 +1563,17 @@ function PdfReader(props: {
 
   return (
     <div ref={canvasRef} className="pdf-canvas">
+      {pdfKitNotice ? <InlineReaderNotice message={pdfKitNotice} /> : null}
       {pageNumbers.map((pageNumber) => (
         <PdfPage
           key={`${props.session.id}-${pageNumber}`}
           pdf={pdf}
           pageNumber={pageNumber}
           zoom={zoomForFitMode(props.session.fitMode, props.session.zoom)}
+          pdfKitPath={pdfKitPath}
           renderImmediately={props.session.fitMode === "single" || Math.abs(pageNumber - currentPage) <= 1}
           onVisiblePage={handleVisiblePage}
+          onPdfKitFallback={() => setPdfKitNotice("PDFKit unavailable; using PDF.js.")}
         />
       ))}
     </div>
@@ -1496,12 +1584,15 @@ function PdfPage(props: {
   pdf: PDFDocumentProxy;
   pageNumber: number;
   zoom: number;
+  pdfKitPath?: string;
   renderImmediately: boolean;
   onVisiblePage: (pageNumber: number) => void;
+  onPdfKitFallback?: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pageRef = useRef<HTMLElement>(null);
   const [error, setError] = useState("");
+  const [imageDataUrl, setImageDataUrl] = useState("");
   const [loading, setLoading] = useState(true);
   const [shouldRender, setShouldRender] = useState(props.renderImmediately);
 
@@ -1542,7 +1633,22 @@ function PdfPage(props: {
 
       setLoading(true);
       setError("");
+      setImageDataUrl("");
       try {
+        if (props.pdfKitPath) {
+          try {
+            const image = await renderPdfPageImage(props.pdfKitPath, props.pageNumber, props.zoom);
+            if (cancelled) {
+              return;
+            }
+            setImageDataUrl(image.dataUrl);
+            setLoading(false);
+            return;
+          } catch {
+            props.onPdfKitFallback?.();
+          }
+        }
+
         const page = await props.pdf.getPage(props.pageNumber);
         if (cancelled) {
           return;
@@ -1559,7 +1665,7 @@ function PdfPage(props: {
     return () => {
       cancelled = true;
     };
-  }, [props.pageNumber, props.pdf, props.zoom, shouldRender]);
+  }, [props.pageNumber, props.pdf, props.pdfKitPath, props.zoom, shouldRender]);
 
   useEffect(() => {
     const element = pageRef.current;
@@ -1597,7 +1703,11 @@ function PdfPage(props: {
           </button>
         </div>
       ) : null}
-      <canvas ref={canvasRef} />
+      {imageDataUrl ? (
+        <img className="pdf-page-image" src={imageDataUrl} alt={`Page ${props.pageNumber}`} />
+      ) : (
+        <canvas ref={canvasRef} />
+      )}
       <span className="page-number">{props.pageNumber}</span>
     </article>
   );
@@ -1609,7 +1719,7 @@ function EpubReader(props: {
   documentCache: Map<string, LoadedReaderDocument>;
   onLocationChange: (location: ReaderLocation) => void;
   onOutlineChange: (outline: OutlineItem[]) => void;
-  onSearchReady: (handler: (query: string) => Promise<SearchResult[]>) => void;
+  onSearchReady: (handler: (query: string) => Promise<SearchResult[]>, wasmDocuments?: SearchWorkerDocument[]) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const metadataRequestRef = useRef(0);
@@ -1618,6 +1728,7 @@ function EpubReader(props: {
   const cachedEpub = props.documentCache.get(props.session.id)?.epub;
   const cachedMetadata = cachedEpub?.metadata;
   const [error, setError] = useState("");
+  const [readerError, setReaderError] = useState<ReaderError | undefined>();
   const [metadata, setMetadata] = useState<EpubDocumentMetadata | undefined>(() => cachedMetadata);
   const [activeChapterIndex, setActiveChapterIndex] = useState(() =>
     chapterIndexForLocation(cachedMetadata?.chapters ?? [], props.session.location)
@@ -1642,6 +1753,7 @@ function EpubReader(props: {
 
     async function loadEpub() {
       setError("");
+      setReaderError(undefined);
       setActiveChapter(undefined);
 
       const cached = props.documentCache.get(props.session.id)?.epub;
@@ -1651,7 +1763,10 @@ function EpubReader(props: {
         setActiveChapterIndex(activeIndex);
         setActiveChapter(cached.chapters.get(cached.metadata.chapters[activeIndex]?.href ?? ""));
         props.onOutlineChange(cached.metadata.outline);
-        props.onSearchReady(createEpubSearchHandler(props.session.fileSource, cached));
+        props.onSearchReady(
+          createEpubSearchHandler(props.session.fileSource, cached),
+          epubSearchWorkerDocuments(props.session.fileSource, cached)
+        );
         return;
       }
 
@@ -1678,10 +1793,13 @@ function EpubReader(props: {
         setActiveChapterIndex(activeIndex);
         setActiveChapter(loaded.chapters.get(loaded.metadata.chapters[activeIndex]?.href ?? ""));
         props.onOutlineChange(loaded.metadata.outline);
-        props.onSearchReady(createEpubSearchHandler(props.session.fileSource, loaded));
-      } catch {
+        props.onSearchReady(
+          createEpubSearchHandler(props.session.fileSource, loaded),
+          epubSearchWorkerDocuments(props.session.fileSource, loaded)
+        );
+      } catch (loadError) {
         if (!disposed && requestId === metadataRequestRef.current) {
-          setError("This EPUB could not be rendered.");
+          setReaderError(readerErrorFromEpubError(loadError));
         }
       }
     }
@@ -1691,7 +1809,7 @@ function EpubReader(props: {
       disposed = true;
       metadataRequestRef.current += 1;
     };
-  }, [props.documentCache, props.session.id]);
+  }, [props.documentCache, props.onSearchReady, props.session.id]);
 
   useEffect(() => {
     if (props.session.location.kind !== "epub" || !props.session.location.chapterHref) {
@@ -1769,11 +1887,14 @@ function EpubReader(props: {
         const nextChapter = desktopChapterToEpubChapter(loaded);
         epub.chapters.set(nextChapter.href, nextChapter);
         setActiveChapter(nextChapter);
-        props.onSearchReady(createEpubSearchHandler(props.session.fileSource, epub));
+        props.onSearchReady(
+          createEpubSearchHandler(props.session.fileSource, epub),
+          epubSearchWorkerDocuments(props.session.fileSource, epub)
+        );
       })
-      .catch(() => {
+      .catch((chapterError) => {
         if (!disposed && requestId === chapterRequestRef.current) {
-          setError("This EPUB could not be rendered.");
+          setReaderError(readerErrorFromEpubError(chapterError));
         }
       });
 
@@ -1781,7 +1902,11 @@ function EpubReader(props: {
       disposed = true;
       chapterRequestRef.current += 1;
     };
-  }, [activeChapterIndex, metadata, props.documentCache, props.session.fileSource, props.session.id]);
+  }, [activeChapterIndex, metadata, props.documentCache, props.onSearchReady, props.session.fileSource, props.session.id]);
+
+  if (readerError) {
+    return <InlineReaderError title={readerError.title} message={readerError.message} />;
+  }
 
   if (error) {
     return <InlineReaderError message={error} />;
@@ -1802,6 +1927,7 @@ function EpubReader(props: {
 
   const chapter = activeChapter;
   const chapterStatus = chapterProgressLabel(activeChapterIndex, metadata.chapters.length);
+  const resourceCount = chapter.resources.length;
   const chapterPercent = readingProgressPercent({
     kind: "epub",
     chapterHref: chapter.href,
@@ -1826,6 +1952,7 @@ function EpubReader(props: {
           <span className="epub-chapter-title">
             <strong>{chapter.label}</strong>
             <small>{chapterStatus}</small>
+            {resourceCount > 0 ? <small>{resourceCountLabel(resourceCount)}</small> : null}
           </span>
           <button
             type="button"
@@ -1856,10 +1983,21 @@ function ReaderLoading(props: { title: string; detail?: string }) {
   );
 }
 
-function InlineReaderError(props: { message: string }) {
+function InlineReaderError(props: { title?: string; message: string }) {
   return (
     <div className="inline-reader-error">
       <Icon name="warning" />
+      <span>
+        {"title" in props && props.title ? <strong>{props.title}</strong> : null}
+        {props.message}
+      </span>
+    </div>
+  );
+}
+
+function InlineReaderNotice(props: { message: string }) {
+  return (
+    <div className="inline-reader-notice" role="status">
       <span>{props.message}</span>
     </div>
   );
@@ -1872,6 +2010,7 @@ interface EpubChapter {
   index: number;
   html: string;
   text: string;
+  resources: EpubResourceMetadata[];
 }
 
 interface EpubDocumentMetadata {
@@ -1879,6 +2018,8 @@ interface EpubDocumentMetadata {
   title?: string;
   chapters: EpubChapterMetadata[];
   outline: OutlineItem[];
+  ncxHref?: string;
+  resources: EpubResourceMetadata[];
 }
 
 interface PdfDocumentMetadata {
@@ -2009,6 +2150,8 @@ function desktopDocumentToEpubMetadata(path: string, document: DesktopEpubDocume
     id: document.id || path,
     title: document.title,
     chapters: document.chapters,
+    ncxHref: document.ncxHref,
+    resources: safeEpubResources(document.resources),
     outline: document.outline.map((item) => {
       const chapter = typeof item.index === "number"
         ? document.chapters[item.index]
@@ -2033,6 +2176,7 @@ function chaptersToEpubMetadata(id: string, chapters: EpubChapter[]): EpubDocume
   return {
     id,
     chapters,
+    resources: [],
     outline: chapters.map((chapter) => ({
       id: chapter.id,
       title: chapter.label,
@@ -2054,8 +2198,34 @@ function desktopChapterToEpubChapter(chapter: Awaited<ReturnType<typeof readEpub
     label: chapter.label,
     index: chapter.index,
     html: chapter.sanitizedHtml,
-    text: chapter.text
+    text: chapter.text,
+    resources: safeEpubResources(chapter.resources)
   };
+}
+
+function epubSearchWorkerDocuments(
+  source: DocumentSession["fileSource"],
+  epub: EpubDocumentCache
+): SearchWorkerDocument[] {
+  if (source.kind !== "browser-file") {
+    return [];
+  }
+
+  return Array.from(epub.chapters.values())
+    .filter((chapter) => chapter.text.trim())
+    .map((chapter) => ({
+      id: chapter.id,
+      label: chapter.label,
+      text: chapter.text,
+      location: {
+        kind: "epub",
+        chapterHref: chapter.href,
+        chapterLabel: chapter.label,
+        progress: epub.metadata.chapters.length > 1
+          ? chapter.index / (epub.metadata.chapters.length - 1)
+          : 0
+      }
+    }));
 }
 
 function createEpubSearchHandler(
@@ -2162,7 +2332,8 @@ async function parseEpub(data: ArrayBuffer): Promise<EpubChapter[]> {
       label: navLabels.get(manifestItem.href) ?? `Chapter ${index + 1}`,
       index,
       html: "",
-      text: ""
+      text: "",
+      resources: []
     });
   });
 
@@ -2179,7 +2350,8 @@ async function parseEpub(data: ArrayBuffer): Promise<EpubChapter[]> {
       return {
         ...chapter,
         html: sanitizeEpubHtml(body?.innerHTML || `<p>${escapeHtml(raw)}</p>`),
-        text: body?.textContent?.replace(/\s+/g, " ").trim() ?? ""
+        text: body?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+        resources: []
       };
     })
   );
@@ -2243,6 +2415,52 @@ function resolveEpubPath(basePath: string, href: string): string {
 
 async function searchEpub(chapters: EpubChapter[], query: string): Promise<SearchResult[]> {
   return searchEpubChapters(chapters, query);
+}
+
+function safeEpubResources(resources: EpubResourceMetadata[] | undefined): EpubResourceMetadata[] {
+  return (resources ?? []).filter((resource) => {
+    const href = resource.href.trim().toLowerCase();
+    const rewrittenUrl = resource.rewrittenUrl?.trim();
+
+    if (!href || href.startsWith("http:") || href.startsWith("https:") || href.startsWith("javascript:")) {
+      return false;
+    }
+
+    return !rewrittenUrl || isSafeRewrittenResourceUrl(rewrittenUrl);
+  }).map((resource) => ({
+    id: resource.id,
+    href: resource.href,
+    mediaType: resource.mediaType,
+    rewrittenUrl: resource.rewrittenUrl
+  }));
+}
+
+function isSafeRewrittenResourceUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "asset:" || url.protocol === "blob:";
+  } catch {
+    return false;
+  }
+}
+
+function readerErrorFromEpubError(error: unknown): ReaderError {
+  const message = error instanceof Error ? error.message : String(error);
+  const lowerMessage = message.toLowerCase();
+
+  if (lowerMessage.includes("encrypted") || lowerMessage.includes("drm")) {
+    return {
+      kind: "encrypted-document",
+      title: "Encrypted EPUB",
+      message: "SmartReader cannot open DRM-protected EPUB files."
+    };
+  }
+
+  return {
+    kind: "renderer-failed",
+    title: "Unable to open EPUB",
+    message: "This EPUB could not be rendered."
+  };
 }
 
 function escapeHtml(value: string): string {
@@ -2363,8 +2581,46 @@ function readerStatusLabel(session?: DocumentSession): string {
   return "";
 }
 
+function visibleWasmStatus(state: WasmAdapterState): "ready" | "loading" | "fallback" | "unavailable" | "error" {
+  if (state.status === "idle") {
+    return "unavailable";
+  }
+
+  return state.status;
+}
+
+function wasmStatusMessage(enabled: boolean, state: WasmAdapterState): string {
+  if (!enabled) {
+    return "WASM adapter disabled; fallback adapters stay active.";
+  }
+
+  if (!detectWasmFeatures().supported) {
+    return "WASM is unavailable in this runtime; fallback adapters stay active.";
+  }
+
+  if (state.status === "ready") {
+    return "WASM worker search is ready.";
+  }
+
+  if (state.status === "loading") {
+    return "WASM worker search is loading.";
+  }
+
+  if (state.status === "fallback" || state.status === "error") {
+    return state.error?.message
+      ? `WASM worker failed: ${state.error.message}. Fallback adapters stay active.`
+      : "WASM worker failed; fallback adapters stay active.";
+  }
+
+  return "No indexed text payload is available for WASM; fallback adapters stay active.";
+}
+
 function chapterProgressLabel(index: number, total: number): string {
   return total > 0 ? `Chapter ${index + 1} of ${total}` : "Chapter";
+}
+
+function resourceCountLabel(count: number): string {
+  return count === 1 ? "1 resource available" : `${count} resources available`;
 }
 
 function readingProgressPercent(location: ReaderLocation): number {

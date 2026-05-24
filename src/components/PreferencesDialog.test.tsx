@@ -14,7 +14,8 @@ const preferences: PreferencesDialogProps["preferences"] = {
   cacheLocation: { mode: "default" },
   search: { resultLimit: "unlimited", includePdf: true, includeEpub: true },
   shortcuts: [],
-  wasm: { enabled: true }
+  wasm: { enabled: true },
+  pdfKit: { enabled: false }
 };
 
 function renderDialog(overrides: Partial<PreferencesDialogProps> = {}) {
@@ -74,6 +75,7 @@ function renderDialog(overrides: Partial<PreferencesDialogProps> = {}) {
       }
     },
     onToggleWasm: vi.fn(),
+    onTogglePdfKit: vi.fn(),
     ...overrides
   };
 
@@ -229,5 +231,14 @@ describe("PreferencesDialog", () => {
 
     expect(props.onShortcutChange).toHaveBeenCalledWith("file.open", "Meta+Shift+O");
     expect(props.onShortcutReset).toHaveBeenCalledWith("file.open");
+  });
+
+  it("routes the experimental PDFKit renderer preference separately from WASM", () => {
+    const props = renderDialog();
+
+    fireEvent.click(screen.getByLabelText("Enable experimental PDFKit renderer"));
+
+    expect(props.onTogglePdfKit).toHaveBeenCalledWith(true);
+    expect(props.onToggleWasm).not.toHaveBeenCalled();
   });
 });

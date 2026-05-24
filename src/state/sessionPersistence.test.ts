@@ -19,7 +19,8 @@ const preferences: Preferences = {
   cacheLocation: { mode: "default" },
   search: { resultLimit: "unlimited", includePdf: true, includeEpub: true },
   shortcuts: [],
-  wasm: { enabled: true }
+  wasm: { enabled: true },
+  pdfKit: { enabled: false }
 };
 
 describe("app session persistence", () => {

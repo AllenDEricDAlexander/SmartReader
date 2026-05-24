@@ -53,6 +53,13 @@ export interface SearchResult {
   location: ReaderLocation;
 }
 
+export interface EpubResourceMetadata {
+  id?: string;
+  href: string;
+  mediaType?: string;
+  rewrittenUrl?: string;
+}
+
 export interface Bookmark {
   id: string;
   title: string;
@@ -135,6 +142,9 @@ export interface Preferences {
     enabled: boolean;
     parserVersion?: string;
     searchIndexVersion?: string;
+  };
+  pdfKit: {
+    enabled: boolean;
   };
 }
 

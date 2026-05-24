@@ -1,7 +1,12 @@
 import { createAccessErrorSession, createDesktopPathFile, isTauriRuntime } from "./fileSources";
 import { createSessionFromFile } from "../state/documentSessions";
 import type { CommandId } from "../state/commandRegistry";
-import type { DocumentSession, ReaderFileSource, SmartReaderCacheEnvelope } from "../types/reader";
+import type {
+  DocumentSession,
+  EpubResourceMetadata,
+  ReaderFileSource,
+  SmartReaderCacheEnvelope
+} from "../types/reader";
 
 type TauriUnlisten = () => void;
 
@@ -25,11 +30,14 @@ export interface DesktopEpubDocument {
   title?: string;
   chapters: DesktopEpubChapterMetadata[];
   outline: DesktopEpubOutlineItem[];
+  ncxHref?: string;
+  resources?: EpubResourceMetadata[];
 }
 
 export interface DesktopEpubChapter extends DesktopEpubChapterMetadata {
   sanitizedHtml: string;
   text: string;
+  resources?: EpubResourceMetadata[];
 }
 
 export interface DesktopEpubSearchResult {
@@ -59,6 +67,27 @@ export interface DesktopPdfSearchResult {
   label: string;
   snippet: string;
   page: number;
+}
+
+export interface DesktopPdfPageImage {
+  page: number;
+  width: number;
+  height: number;
+  scale: number;
+  dataUrl: string;
+  renderer: "pdfkit";
+}
+
+interface DesktopPdfKitRasterResult {
+  supported: boolean;
+  status: string;
+  page: number;
+  width: number;
+  height: number;
+  scale: number;
+  mimeType?: string;
+  byteCount: number;
+  bytes?: number[] | Uint8Array;
 }
 
 export interface DesktopCacheInfo {
@@ -186,6 +215,44 @@ export async function searchPdfDocument(
   const { invoke } = await import("@tauri-apps/api/core");
 
   return invoke<DesktopPdfSearchResult[]>("search_pdf_document", { path, query });
+}
+
+export async function renderPdfPageImage(
+  path: string,
+  page: number,
+  scale: number
+): Promise<DesktopPdfPageImage> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const image = await invoke<DesktopPdfKitRasterResult>("render_pdf_page_pdfkit", {
+    path,
+    page,
+    scale,
+    output: "bytes"
+  });
+
+  if (!image.supported || !image.bytes) {
+    throw new Error(image.status || "PDFKit is unavailable.");
+  }
+
+  return {
+    page: image.page,
+    width: image.width,
+    height: image.height,
+    scale: image.scale,
+    dataUrl: `data:${image.mimeType ?? "image/png"};base64,${bytesToBase64(image.bytes)}`,
+    renderer: "pdfkit"
+  };
+}
+
+function bytesToBase64(bytes: number[] | Uint8Array): string {
+  const values = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let binary = "";
+
+  for (let index = 0; index < values.length; index += 0x8000) {
+    binary += String.fromCharCode(...values.subarray(index, index + 0x8000));
+  }
+
+  return btoa(binary);
 }
 
 export async function openEpubDocument(path: string): Promise<DesktopEpubDocument> {

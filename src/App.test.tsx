@@ -2,7 +2,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import JSZip from "jszip";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { AppSessionSnapshot, DocumentSession, SmartReaderCacheEnvelope } from "./types/reader";
+import type {
+  AppSessionSnapshot,
+  DocumentSession,
+  EpubResourceMetadata,
+  SmartReaderCacheEnvelope
+} from "./types/reader";
+import type { SearchWorkerDocument } from "./lib/wasmAdapter";
 
 const pdfMocks = vi.hoisted(() => {
   const outlineItems = [
@@ -84,7 +90,8 @@ const tauriMocks = vi.hoisted(() => {
     label: "Chapter One",
     index: 0,
     sanitizedHtml: "<p>Native chapter body</p>",
-    text: "Native chapter body"
+    text: "Native chapter body",
+    resources: [] as EpubResourceMetadata[]
   }));
   const searchEpubDocument = vi.fn(async () => [
     {
@@ -112,6 +119,14 @@ const tauriMocks = vi.hoisted(() => {
       page: 2
     }
   ]);
+  const renderPdfPageImage = vi.fn(async () => ({
+    page: 1,
+    width: 640,
+    height: 900,
+    scale: 1,
+    dataUrl: "data:image/png;base64,pdfkit",
+    renderer: "pdfkit"
+  }));
   const getSmartReaderCacheInfo = vi.fn(async () => ({
     defaultPath: "/Users/mario/Library/Application Support/SmartReader/cache",
     activePath: "/Users/mario/Library/Application Support/SmartReader/cache",
@@ -153,6 +168,7 @@ const tauriMocks = vi.hoisted(() => {
     openDesktopFileDialog: vi.fn(async () => undefined),
     readEpubChapter,
     readFileSource,
+    renderPdfPageImage,
     saveSmartReaderCache,
     searchEpubDocument,
     searchPdfDocument,
@@ -172,6 +188,7 @@ const tauriMocks = vi.hoisted(() => {
       openPendingDesktopFiles.mockClear();
       readEpubChapter.mockClear();
       readFileSource.mockClear();
+      renderPdfPageImage.mockClear();
       saveSmartReaderCache.mockClear();
       searchEpubDocument.mockClear();
       searchPdfDocument.mockClear();
@@ -213,6 +230,7 @@ vi.mock("./platform/tauriBridge", () => ({
   openPendingDesktopFiles: tauriMocks.openPendingDesktopFiles,
   readEpubChapter: tauriMocks.readEpubChapter,
   readFileSource: tauriMocks.readFileSource,
+  renderPdfPageImage: tauriMocks.renderPdfPageImage,
   saveSmartReaderCache: tauriMocks.saveSmartReaderCache,
   searchEpubDocument: tauriMocks.searchEpubDocument,
   searchPdfDocument: tauriMocks.searchPdfDocument,
@@ -251,6 +269,11 @@ describe("App desktop open delivery", () => {
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn()
+    });
+    Object.defineProperty(window, "Worker", {
+      configurable: true,
+      writable: true,
+      value: createSearchWorkerMock()
     });
   });
 
@@ -362,6 +385,23 @@ describe("App desktop open delivery", () => {
     expect(await screen.findByText("Native PDF result")).toBeInTheDocument();
   });
 
+  it("uses experimental PDFKit rendering for desktop PDFs and falls back to PDF.js when rasterization fails", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    tauriMocks.renderPdfPageImage.mockRejectedValueOnce(new Error("pdfkit failed"));
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.click(screen.getByLabelText("More"));
+    fireEvent.click(screen.getByLabelText("Enable experimental PDFKit renderer"));
+
+    await waitFor(() => {
+      expect(tauriMocks.renderPdfPageImage).toHaveBeenCalledWith("/Users/mario/Books/start.pdf", 1, expect.any(Number));
+    });
+    expect(await screen.findByText("PDFKit unavailable; using PDF.js.")).toBeInTheDocument();
+    expect(pdfMocks.getDocument).toHaveBeenCalled();
+  });
+
   it("hydrates the last desktop session on startup", async () => {
     tauriMocks.setPendingPaths([]);
     localStorage.setItem("smartreader.appSession.v1", JSON.stringify(createSnapshot("pdf-1", 9)));
@@ -445,7 +485,8 @@ describe("App desktop open delivery", () => {
         label: "Chapter One",
         index: 0,
         sanitizedHtml: "<p>Late chapter body</p>",
-        text: "Late chapter body"
+        text: "Late chapter body",
+        resources: [] as EpubResourceMetadata[]
       });
     });
 
@@ -495,6 +536,64 @@ describe("App desktop open delivery", () => {
     expect(screen.queryByText("Browser chapter one body")).not.toBeInTheDocument();
   });
 
+  it("reports a ready WASM worker adapter and searches browser EPUB payloads through it", async () => {
+    tauriMocks.setDesktopRuntime(false);
+    tauriMocks.setPendingPaths([]);
+    tauriMocks.readFileSource.mockResolvedValueOnce(await createBrowserEpubFixture());
+
+    render(<App />);
+
+    fireEvent.drop(screen.getByRole("main"), {
+      dataTransfer: {
+        files: [new File(["epub"], "browser.epub", { type: "application/epub+zip" })]
+      }
+    });
+
+    await screen.findByText("Browser chapter one body");
+    fireEvent.click(screen.getByLabelText("More"));
+    expect(await screen.findByText("WASM worker search is ready.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Find"));
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "chapter two" }
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+
+    expect(await screen.findByText("WASM: Browser chapter two body")).toBeInTheDocument();
+  });
+
+  it("shows WASM fallback status when worker wasm init fails", async () => {
+    Object.defineProperty(window, "Worker", {
+      configurable: true,
+      writable: true,
+      value: createSearchWorkerMock({ failInit: true })
+    });
+    tauriMocks.setDesktopRuntime(false);
+    tauriMocks.setPendingPaths([]);
+    tauriMocks.readFileSource.mockResolvedValueOnce(await createBrowserEpubFixture());
+
+    render(<App />);
+
+    fireEvent.drop(screen.getByRole("main"), {
+      dataTransfer: {
+        files: [new File(["epub"], "browser.epub", { type: "application/epub+zip" })]
+      }
+    });
+
+    await screen.findByText("Browser chapter one body");
+    fireEvent.click(screen.getByLabelText("More"));
+    expect(await screen.findByText("WASM worker failed: wasm init failed. Fallback adapters stay active.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Find"));
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "chapter two" }
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+
+    expect(await screen.findByText("Browser chapter two body")).toBeInTheDocument();
+    expect(screen.queryByText("WASM: Browser chapter two body")).not.toBeInTheDocument();
+  });
+
   it("searches desktop EPUB content through Rust for unvisited chapters", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
 
@@ -515,6 +614,49 @@ describe("App desktop open delivery", () => {
     });
 
     expect(await screen.findByText("Hidden native result")).toBeInTheDocument();
+  });
+
+  it("shows encrypted EPUB errors without attempting a DRM bypass", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/locked.epub"]);
+    tauriMocks.openEpubDocument.mockRejectedValueOnce(new Error("encrypted EPUB package"));
+
+    render(<App />);
+
+    expect(await screen.findByText("Encrypted EPUB")).toBeInTheDocument();
+    expect(screen.getByText("SmartReader cannot open DRM-protected EPUB files.")).toBeInTheDocument();
+    expect(tauriMocks.readEpubChapter).not.toHaveBeenCalled();
+  });
+
+  it("shows sanitized EPUB resource metadata without exposing rewritten URLs", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
+    tauriMocks.readEpubChapter.mockResolvedValueOnce({
+      id: "chapter-1",
+      href: "OPS/chapter-1.xhtml",
+      label: "Chapter One",
+      index: 0,
+      sanitizedHtml: "<p>Native chapter body</p>",
+      text: "Native chapter body",
+      resources: [
+        {
+          id: "image-1",
+          href: "OPS/images/cover.png",
+          mediaType: "image/png",
+          rewrittenUrl: "asset://localhost/cover.png"
+        },
+        {
+          id: "remote",
+          href: "https://evil.example/track.png",
+          mediaType: "image/png",
+          rewrittenUrl: "https://evil.example/track.png"
+        }
+      ]
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("1 resource available")).toBeInTheDocument();
+    expect(screen.queryByText("asset://localhost/cover.png")).not.toBeInTheDocument();
+    expect(screen.queryByText("https://evil.example/track.png")).not.toBeInTheDocument();
   });
 
   it("does not persist an invalid imported cache before apply succeeds", async () => {
@@ -594,9 +736,66 @@ function createSnapshot(activeTabId: string, page: number): AppSessionSnapshot {
       cacheLocation: { mode: "default" },
       search: { resultLimit: "unlimited", includePdf: true, includeEpub: true },
       shortcuts: [],
-      wasm: { enabled: true }
+      wasm: { enabled: true },
+      pdfKit: { enabled: false }
     },
     sessions: [createSnapshotSession(activeTabId, "/Users/mario/Books/spec.pdf", page)]
+  };
+}
+
+function createSearchWorkerMock(options: { failInit?: boolean } = {}) {
+  return class SearchWorkerMock {
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    private documents: SearchWorkerDocument[] = [];
+
+    postMessage(message: {
+      id: number;
+      type: string;
+      documents?: SearchWorkerDocument[];
+      query?: string;
+    }) {
+      queueMicrotask(() => {
+        if (message.type === "init") {
+          if (options.failInit) {
+            this.onmessage?.({ data: { id: message.id, type: "error", error: "wasm init failed" } } as MessageEvent);
+            return;
+          }
+
+          this.documents = message.documents ?? [];
+          this.onmessage?.({ data: { id: message.id, type: "ready" } } as MessageEvent);
+          return;
+        }
+
+        if (message.type === "search") {
+          const query = (message.query ?? "").toLowerCase();
+          const results = this.documents.flatMap((document) => {
+            const found = [];
+            const text = document.text.toLowerCase();
+            let searchStart = 0;
+            let index = text.indexOf(query, searchStart);
+
+            while (index >= 0) {
+              found.push({
+                id: `wasm-${document.id}-${index}`,
+                label: document.label,
+                snippet: `WASM: ${document.text}`,
+                location: document.location
+              });
+              searchStart = index + query.length;
+              index = text.indexOf(query, searchStart);
+            }
+
+            return found;
+          });
+
+          this.onmessage?.({ data: { id: message.id, type: "results", results } } as MessageEvent);
+        }
+      });
+    }
+
+    terminate() {
+      this.documents = [];
+    }
   };
 }
 

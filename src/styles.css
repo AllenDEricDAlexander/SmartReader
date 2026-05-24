@@ -591,7 +591,8 @@ button {
   overflow: hidden;
 }
 
-.pdf-page-frame canvas {
+.pdf-page-frame canvas,
+.pdf-page-image {
   display: block;
   max-width: min(100%, calc(100vw - 360px));
   height: auto !important;
@@ -645,6 +646,12 @@ button {
 .inline-reader-error {
   min-height: 100%;
   color: var(--muted);
+}
+
+.inline-reader-notice {
+  min-height: 34px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .reader-loading {

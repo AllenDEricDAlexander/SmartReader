@@ -27,7 +27,8 @@ const preferences: Preferences = {
   cacheLocation: { mode: "default" },
   search: { resultLimit: "unlimited", includePdf: true, includeEpub: true },
   shortcuts: [],
-  wasm: { enabled: true }
+  wasm: { enabled: true },
+  pdfKit: { enabled: false }
 };
 
 const recentFile: RecentFile = {
@@ -141,6 +142,7 @@ describe("smart reader cache", () => {
     );
 
     expect(raw).toContain("\"schemaVersion\":1");
+    expect(raw).toContain("\"pdfKit\":{\"enabled\":false}");
     expect(raw).not.toContain("raw document");
     expect(raw).not.toContain("blob:smartreader-test");
     expect(raw).not.toContain("full chapter text");
@@ -236,6 +238,25 @@ describe("smart reader cache", () => {
     expect(exported).not.toContain("pdfProxy");
     expect(exported).not.toContain("parser leak");
     expect(exported).not.toContain("rawPayload");
+  });
+
+  it("imports old version 1 cache settings without pdfKit and defaults the setting off", () => {
+    const { pdfKit: _pdfKit, ...oldSettings } = preferences;
+    const imported = importSmartReaderCache(
+      JSON.stringify({
+        schemaVersion: 1,
+        appVersion: "0.1.0",
+        savedAt: "2026-05-23T00:00:00.000Z",
+        settings: oldSettings,
+        recentFiles: [recentFile],
+        readingProgress: [progress],
+        session,
+        adapterCache: { searchIndexes: [] }
+      })
+    );
+
+    expect(imported).toBeDefined();
+    expect(imported?.settings.pdfKit.enabled).toBe(false);
   });
 
   it("deep-sanitizes nested reader locations before re-export", () => {

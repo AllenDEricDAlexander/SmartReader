@@ -16,8 +16,11 @@ use zip::ZipArchive;
 
 use lopdf::{Document as PdfDocument, Object, ObjectId, Outline};
 
+mod pdfkit;
+
 const OPEN_FILE_EVENT: &str = "smartreader://open-file";
 const UNSUPPORTED_DOCUMENT_ERROR: &str = "Unsupported document format";
+const ENCRYPTED_DOCUMENT_ERROR: &str = "encrypted-document";
 const DOCUMENT_ACCESS_ERROR: &str =
     "SmartReader cannot access this file path. Choose the file again to reopen it.";
 const DOCUMENT_READ_CANCELLED_ERROR: &str =
@@ -39,6 +42,7 @@ struct EpubDocumentDto {
     title: Option<String>,
     chapters: Vec<EpubChapterMetadataDto>,
     outline: Vec<EpubOutlineItemDto>,
+    resources: Vec<EpubManifestResourceDto>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -60,6 +64,18 @@ struct EpubOutlineItemDto {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct EpubManifestResourceDto {
+    id: String,
+    href: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    media_type: Option<String>,
+    properties: Vec<String>,
+    spine: bool,
+    encrypted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct EpubChapterDto {
     id: String,
     href: String,
@@ -67,6 +83,7 @@ struct EpubChapterDto {
     index: usize,
     sanitized_html: String,
     text: String,
+    resources: Vec<EpubManifestResourceDto>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -101,6 +118,41 @@ struct PdfSearchResultDto {
     label: String,
     snippet: String,
     page: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PdfRasterPageRequest {
+    page: usize,
+    scale: Option<f64>,
+    output: Option<PdfRasterOutputKind>,
+    max_pixels: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum PdfRasterOutputKind {
+    Bytes,
+    TempFile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PdfRasterPageDto {
+    supported: bool,
+    status: String,
+    path: String,
+    page: usize,
+    width: u32,
+    height: u32,
+    scale: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mime_type: Option<String>,
+    byte_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bytes: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temp_path: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -167,6 +219,7 @@ struct EpubPackage {
     title: Option<String>,
     chapters: Vec<EpubChapterMetadataDto>,
     outline: Vec<EpubOutlineItemDto>,
+    resources: Vec<EpubManifestResourceDto>,
 }
 
 struct PendingOpenFiles {
@@ -233,6 +286,29 @@ async fn search_pdf_document(
 
     tauri::async_runtime::spawn_blocking(move || {
         search_pdf_document_from_path(document_path, query)
+    })
+    .await
+    .map_err(|_| DOCUMENT_READ_CANCELLED_ERROR.to_string())?
+}
+
+#[tauri::command]
+async fn render_pdf_page_pdfkit(
+    path: String,
+    page: usize,
+    scale: Option<f64>,
+    output: Option<PdfRasterOutputKind>,
+    max_pixels: Option<u64>,
+) -> Result<PdfRasterPageDto, String> {
+    let document_path = PathBuf::from(path);
+    let request = PdfRasterPageRequest {
+        page,
+        scale,
+        output,
+        max_pixels,
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        render_pdf_page_pdfkit_from_path(document_path, request)
     })
     .await
     .map_err(|_| DOCUMENT_READ_CANCELLED_ERROR.to_string())?
@@ -813,6 +889,14 @@ fn search_pdf_document_from_path(
     Ok(results)
 }
 
+fn render_pdf_page_pdfkit_from_path(
+    document_path: PathBuf,
+    request: PdfRasterPageRequest,
+) -> Result<PdfRasterPageDto, String> {
+    validate_pdf_path(&document_path)?;
+    pdfkit::render_pdf_page_pdfkit_from_path(document_path, request)
+}
+
 fn validate_pdf_path(document_path: &Path) -> Result<(), String> {
     if !is_supported_pdf_path(document_path) {
         return Err(UNSUPPORTED_DOCUMENT_ERROR.to_string());
@@ -911,6 +995,7 @@ fn open_epub_document_from_path(document_path: PathBuf) -> Result<EpubDocumentDt
         title: package.title,
         chapters: package.chapters,
         outline: package.outline,
+        resources: package.resources,
     })
 }
 
@@ -930,6 +1015,7 @@ fn read_epub_chapter_from_path(
         .ok_or_else(|| "Invalid EPUB: missing chapter".to_string())?;
     let raw = read_zip_text(&mut archive, &chapter.href)
         .map_err(|_| "Invalid EPUB: missing chapter".to_string())?;
+    let resources = chapter_resource_metadata(&chapter.href, &raw, &package.resources);
     let sanitized_html = sanitize_epub_html(&raw);
     let text = text_from_sanitized_html(&sanitized_html);
 
@@ -940,6 +1026,7 @@ fn read_epub_chapter_from_path(
         index: chapter.index,
         sanitized_html,
         text,
+        resources,
     })
 }
 
@@ -1015,10 +1102,14 @@ fn read_epub_package(archive: &mut ZipArchive<fs::File>) -> Result<EpubPackage, 
         .map_err(|_| INVALID_EPUB_CONTAINER_ERROR.to_string())?;
     let package_path = parse_container_package_path(&container)
         .ok_or_else(|| INVALID_EPUB_CONTAINER_ERROR.to_string())?;
+    let encrypted_paths = read_epub_encrypted_paths(archive)?;
+    if encrypted_paths.contains(&package_path) {
+        return Err(ENCRYPTED_DOCUMENT_ERROR.to_string());
+    }
     let package_text = read_zip_text(archive, &package_path)
         .map_err(|_| INVALID_EPUB_PACKAGE_ERROR.to_string())?;
 
-    parse_epub_package(archive, &package_path, &package_text)
+    parse_epub_package(archive, &package_path, &package_text, &encrypted_paths)
 }
 
 fn read_zip_text(archive: &mut ZipArchive<fs::File>, path: &str) -> io::Result<String> {
@@ -1026,6 +1117,50 @@ fn read_zip_text(archive: &mut ZipArchive<fs::File>, path: &str) -> io::Result<S
     let mut text = String::new();
     file.read_to_string(&mut text)?;
     Ok(text)
+}
+
+fn read_epub_encrypted_paths(archive: &mut ZipArchive<fs::File>) -> Result<Vec<String>, String> {
+    if archive.by_name("META-INF/rights.xml").is_ok() {
+        return Err(ENCRYPTED_DOCUMENT_ERROR.to_string());
+    }
+
+    if archive.by_name("META-INF/encryption.xml").is_err() {
+        return Ok(Vec::new());
+    }
+
+    let encryption_text = read_zip_text(archive, "META-INF/encryption.xml")
+        .map_err(|_| ENCRYPTED_DOCUMENT_ERROR.to_string())?;
+    let encrypted_paths = parse_epub_encryption_paths(&encryption_text);
+
+    if encrypted_paths.is_empty() {
+        Err(ENCRYPTED_DOCUMENT_ERROR.to_string())
+    } else {
+        Ok(encrypted_paths)
+    }
+}
+
+fn parse_epub_encryption_paths(encryption_text: &str) -> Vec<String> {
+    let mut reader = xml_reader(encryption_text);
+    let mut paths = Vec::new();
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(start)) | Ok(Event::Empty(start))
+                if tag_matches(start.name().as_ref(), "CipherReference") =>
+            {
+                if let Some(uri) = xml_attr(&start, "URI") {
+                    let path = normalize_epub_href(&uri);
+                    if !path.is_empty() && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+
+    paths
 }
 
 fn parse_container_package_path(container: &str) -> Option<String> {
@@ -1048,6 +1183,7 @@ fn parse_epub_package(
     archive: &mut ZipArchive<fs::File>,
     package_path: &str,
     package_text: &str,
+    encrypted_paths: &[String],
 ) -> Result<EpubPackage, String> {
     let base_path = epub_base_path(package_path);
     let mut reader = xml_reader(package_text);
@@ -1056,6 +1192,7 @@ fn parse_epub_package(
     let mut manifest: HashMap<String, ManifestItem> = HashMap::new();
     let mut spine_ids = Vec::new();
     let mut nav_path = None;
+    let mut spine_toc_id = None;
 
     loop {
         match reader.read_event() {
@@ -1064,23 +1201,28 @@ fn parse_epub_package(
             {
                 if let (Some(id), Some(href)) = (xml_attr(&start, "id"), xml_attr(&start, "href")) {
                     let resolved_href = resolve_epub_path(&base_path, &href);
-                    if xml_attr(&start, "properties")
-                        .map(|properties| {
-                            properties
-                                .split_whitespace()
-                                .any(|property| property == "nav")
-                        })
-                        .unwrap_or(false)
-                    {
+                    let properties = xml_attr(&start, "properties")
+                        .map(|properties| split_epub_properties(&properties))
+                        .unwrap_or_default();
+                    let media_type = xml_attr(&start, "media-type");
+                    if properties.iter().any(|property| property == "nav") {
                         nav_path = Some(resolved_href.clone());
                     }
                     manifest.insert(
-                        id,
+                        id.clone(),
                         ManifestItem {
+                            id,
                             href: resolved_href,
+                            media_type,
+                            properties,
                         },
                     );
                 }
+            }
+            Ok(Event::Start(start)) | Ok(Event::Empty(start))
+                if tag_matches(start.name().as_ref(), "spine") =>
+            {
+                spine_toc_id = xml_attr(&start, "toc");
             }
             Ok(Event::Start(start)) | Ok(Event::Empty(start))
                 if tag_matches(start.name().as_ref(), "itemref") =>
@@ -1109,21 +1251,40 @@ fn parse_epub_package(
         }
     }
 
-    let nav_labels = nav_path
-        .as_deref()
-        .and_then(|path| {
-            read_zip_text(archive, path)
-                .ok()
-                .map(|nav| (path.to_string(), nav))
-        })
-        .map(|(path, nav)| parse_epub_nav(&path, &nav))
-        .unwrap_or_default();
+    if nav_path
+        .as_ref()
+        .map(|path| encrypted_paths.contains(path))
+        .unwrap_or(false)
+    {
+        return Err(ENCRYPTED_DOCUMENT_ERROR.to_string());
+    }
+
+    let ncx_path = spine_toc_id
+        .and_then(|id| manifest.get(&id).map(|item| item.href.clone()))
+        .or_else(|| {
+            manifest
+                .values()
+                .find(|item| item.media_type.as_deref() == Some("application/x-dtbncx+xml"))
+                .map(|item| item.href.clone())
+        });
+    if ncx_path
+        .as_ref()
+        .map(|path| encrypted_paths.contains(path))
+        .unwrap_or(false)
+    {
+        return Err(ENCRYPTED_DOCUMENT_ERROR.to_string());
+    }
+
+    let nav_labels = read_epub_nav_items(archive, nav_path.as_deref(), ncx_path.as_deref())?;
     let mut chapters = Vec::new();
 
     for (index, idref) in spine_ids.iter().enumerate() {
         let Some(item) = manifest.get(idref) else {
             continue;
         };
+        if encrypted_paths.contains(&item.href) {
+            return Err(ENCRYPTED_DOCUMENT_ERROR.to_string());
+        }
         let href = item.href.clone();
         let label = nav_labels
             .iter()
@@ -1154,12 +1315,138 @@ fn parse_epub_package(
             level: item.level,
         })
         .collect();
+    let resources = manifest
+        .values()
+        .map(|item| EpubManifestResourceDto {
+            id: item.id.clone(),
+            href: item.href.clone(),
+            media_type: item.media_type.clone(),
+            properties: item.properties.clone(),
+            spine: spine_ids.iter().any(|idref| idref == &item.id),
+            encrypted: encrypted_paths.contains(&item.href),
+        })
+        .collect();
 
     Ok(EpubPackage {
         title,
         chapters,
         outline,
+        resources,
     })
+}
+
+fn read_epub_nav_items(
+    archive: &mut ZipArchive<fs::File>,
+    nav_path: Option<&str>,
+    ncx_path: Option<&str>,
+) -> Result<Vec<NavItem>, String> {
+    if let Some(path) = nav_path {
+        if let Ok(nav) = read_zip_text(archive, path) {
+            let nav_items = parse_epub_nav(path, &nav);
+            if !nav_items.is_empty() {
+                return Ok(nav_items);
+            }
+        }
+    }
+
+    if let Some(path) = ncx_path {
+        if let Ok(ncx) = read_zip_text(archive, path) {
+            return Ok(parse_epub_ncx(path, &ncx));
+        }
+    }
+
+    Ok(Vec::new())
+}
+
+fn split_epub_properties(properties: &str) -> Vec<String> {
+    properties
+        .split_whitespace()
+        .filter(|property| !property.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn chapter_resource_metadata(
+    chapter_href: &str,
+    chapter_html: &str,
+    resources: &[EpubManifestResourceDto],
+) -> Vec<EpubManifestResourceDto> {
+    let referenced_hrefs = referenced_epub_resource_hrefs(chapter_href, chapter_html);
+
+    resources
+        .iter()
+        .filter(|resource| !resource.spine && referenced_hrefs.contains(&resource.href))
+        .cloned()
+        .collect()
+}
+
+fn referenced_epub_resource_hrefs(chapter_href: &str, chapter_html: &str) -> Vec<String> {
+    let base_path = epub_base_path(chapter_href);
+    let mut reader = xml_reader(chapter_html);
+    reader.config_mut().trim_text(false);
+    reader.config_mut().check_end_names = false;
+    let mut hrefs = Vec::new();
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(start)) | Ok(Event::Empty(start)) => {
+                collect_epub_resource_attrs(&base_path, &start, &mut hrefs);
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+
+    hrefs
+}
+
+fn collect_epub_resource_attrs(base_path: &str, start: &BytesStart<'_>, hrefs: &mut Vec<String>) {
+    for attribute in start.attributes().with_checks(false).flatten() {
+        let name = xml_name(attribute.key.as_ref());
+        let Ok(value) = attribute.unescape_value() else {
+            continue;
+        };
+        let value = value.trim();
+
+        match name {
+            "href" | "poster" | "src" => push_epub_resource_href(base_path, value, hrefs),
+            "srcset" => {
+                for candidate in value.split(',') {
+                    let candidate = candidate.split_whitespace().next().unwrap_or("");
+                    push_epub_resource_href(base_path, candidate, hrefs);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn push_epub_resource_href(base_path: &str, href: &str, hrefs: &mut Vec<String>) {
+    let href = href.trim();
+    if href.is_empty() || href.starts_with('#') || has_epub_href_scheme(href) {
+        return;
+    }
+
+    let path = resolve_epub_path(base_path, href.split('#').next().unwrap_or(""));
+    if !path.is_empty() && !hrefs.contains(&path) {
+        hrefs.push(path);
+    }
+}
+
+fn has_epub_href_scheme(href: &str) -> bool {
+    let scheme_end = href.find(':');
+    let path_start = match (href.find('/'), href.find('#')) {
+        (Some(slash), Some(fragment)) => Some(slash.min(fragment)),
+        (Some(slash), None) => Some(slash),
+        (None, Some(fragment)) => Some(fragment),
+        (None, None) => None,
+    };
+
+    match (scheme_end, path_start) {
+        (Some(scheme_end), Some(path_start)) => scheme_end < path_start,
+        (Some(_), None) => true,
+        _ => false,
+    }
 }
 
 fn parse_epub_nav(nav_path: &str, nav_text: &str) -> Vec<NavItem> {
@@ -1197,6 +1484,69 @@ fn parse_epub_nav(nav_path: &str, nav_text: &str) -> Vec<NavItem> {
                             title,
                             level: list_depth.saturating_sub(1),
                         });
+                    }
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+
+    nav_items
+}
+
+fn parse_epub_ncx(ncx_path: &str, ncx_text: &str) -> Vec<NavItem> {
+    let base_path = epub_base_path(ncx_path);
+    let mut reader = xml_reader(ncx_text);
+    let mut nav_items = Vec::new();
+    let mut points = Vec::<NcxPoint>::new();
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(start)) if tag_matches(start.name().as_ref(), "navPoint") => {
+                points.push(NcxPoint::default());
+            }
+            Ok(Event::Start(start)) | Ok(Event::Empty(start))
+                if tag_matches(start.name().as_ref(), "content") =>
+            {
+                if let Some(point) = points.last_mut() {
+                    point.href = xml_attr(&start, "src")
+                        .map(|href| href.split('#').next().unwrap_or("").to_string())
+                        .filter(|href| !href.is_empty())
+                        .map(|href| resolve_epub_path(&base_path, &href));
+                }
+            }
+            Ok(Event::Start(start)) if tag_matches(start.name().as_ref(), "text") => {
+                if let Some(point) = points.last_mut() {
+                    point.in_label = true;
+                    point.title.clear();
+                }
+            }
+            Ok(Event::Text(text)) => {
+                if let Some(point) = points.last_mut() {
+                    if point.in_label {
+                        point
+                            .title
+                            .push_str(text.decode().unwrap_or_default().as_ref());
+                    }
+                }
+            }
+            Ok(Event::End(end)) if tag_matches(end.name().as_ref(), "text") => {
+                if let Some(point) = points.last_mut() {
+                    point.in_label = false;
+                }
+            }
+            Ok(Event::End(end)) if tag_matches(end.name().as_ref(), "navPoint") => {
+                if let Some(point) = points.pop() {
+                    if let Some(href) = point.href {
+                        let title = normalize_whitespace(&point.title);
+                        if !title.is_empty() {
+                            nav_items.push(NavItem {
+                                href,
+                                title,
+                                level: points.len(),
+                            });
+                        }
                     }
                 }
             }
@@ -1532,8 +1882,12 @@ fn next_char_boundary(text: &str, mut index: usize) -> usize {
     index
 }
 
+#[derive(Clone)]
 struct ManifestItem {
+    id: String,
     href: String,
+    media_type: Option<String>,
+    properties: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -1541,6 +1895,13 @@ struct NavItem {
     href: String,
     title: String,
     level: usize,
+}
+
+#[derive(Default)]
+struct NcxPoint {
+    href: Option<String>,
+    title: String,
+    in_label: bool,
 }
 
 pub fn run() {
@@ -1554,6 +1915,7 @@ pub fn run() {
             read_document,
             open_pdf_document,
             search_pdf_document,
+            render_pdf_page_pdfkit,
             open_epub_document,
             read_epub_chapter,
             search_epub_document,
@@ -1769,6 +2131,43 @@ mod tests {
     }
 
     #[test]
+    fn render_pdf_page_pdfkit_reports_platform_status() {
+        let path = test_path("raster.pdf");
+        write_test_pdf(&path, &["Raster body"], false).unwrap();
+
+        let result = render_pdf_page_pdfkit_from_path(
+            path.clone(),
+            PdfRasterPageRequest {
+                page: 1,
+                scale: Some(0.25),
+                output: Some(PdfRasterOutputKind::Bytes),
+                max_pixels: Some(1_000_000),
+            },
+        )
+        .unwrap();
+
+        if cfg!(target_os = "macos") {
+            assert!(result.supported);
+            assert_eq!(result.status, "rendered");
+            assert_eq!(result.page, 1);
+            assert_eq!(result.mime_type.as_deref(), Some("image/png"));
+            assert!(result
+                .bytes
+                .as_ref()
+                .map(|bytes| !bytes.is_empty())
+                .unwrap_or(false));
+            assert!(result.width > 0);
+            assert!(result.height > 0);
+        } else {
+            assert!(!result.supported);
+            assert_eq!(result.status, "unsupported-platform");
+            assert!(result.bytes.is_none());
+        }
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn open_epub_document_extracts_manifest_spine_and_nav() {
         let path = test_path("book.epub");
         write_test_epub(&path, TestEpubOptions::default()).unwrap();
@@ -1788,6 +2187,108 @@ mod tests {
     }
 
     #[test]
+    fn open_epub_document_returns_manifest_resource_metadata() {
+        let path = test_path("resources.epub");
+        write_test_epub(
+            &path,
+            TestEpubOptions {
+                include_extra_resource: true,
+                ..TestEpubOptions::default()
+            },
+        )
+        .unwrap();
+
+        let document = open_epub_document_from_path(path.clone()).unwrap();
+
+        let cover = document
+            .resources
+            .iter()
+            .find(|resource| resource.id == "cover-image")
+            .unwrap();
+        assert_eq!(cover.href, "OPS/images/cover.png");
+        assert_eq!(cover.media_type.as_deref(), Some("image/png"));
+        assert!(!cover.spine);
+        assert!(!cover.encrypted);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn open_epub_document_uses_ncx_when_epub3_nav_missing() {
+        let path = test_path("ncx.epub");
+        write_test_epub(
+            &path,
+            TestEpubOptions {
+                include_nav: false,
+                include_ncx: true,
+                ..TestEpubOptions::default()
+            },
+        )
+        .unwrap();
+
+        let document = open_epub_document_from_path(path.clone()).unwrap();
+
+        assert_eq!(document.chapters[0].label, "NCX Opening");
+        assert_eq!(document.outline.len(), 2);
+        assert_eq!(document.outline[0].title, "NCX Opening");
+        assert_eq!(document.outline[0].href, "OPS/chapter-one.xhtml");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn open_epub_document_rejects_rights_xml_as_encrypted_document() {
+        let path = test_path("rights.epub");
+        write_test_epub(
+            &path,
+            TestEpubOptions {
+                include_rights: true,
+                ..TestEpubOptions::default()
+            },
+        )
+        .unwrap();
+
+        let result = open_epub_document_from_path(path.clone());
+
+        assert_eq!(result.unwrap_err(), ENCRYPTED_DOCUMENT_ERROR);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn open_epub_document_rejects_encrypted_spine_resource() {
+        let path = test_path("encrypted-spine.epub");
+        write_test_epub(
+            &path,
+            TestEpubOptions {
+                encrypted_resources: vec!["OPS/chapter-one.xhtml"],
+                ..TestEpubOptions::default()
+            },
+        )
+        .unwrap();
+
+        let result = open_epub_document_from_path(path.clone());
+
+        assert_eq!(result.unwrap_err(), ENCRYPTED_DOCUMENT_ERROR);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn read_epub_chapter_rejects_encrypted_chapter_resource() {
+        let path = test_path("encrypted-chapter.epub");
+        write_test_epub(
+            &path,
+            TestEpubOptions {
+                encrypted_resources: vec!["OPS/chapter-two.xhtml"],
+                ..TestEpubOptions::default()
+            },
+        )
+        .unwrap();
+
+        let result = read_epub_chapter_from_path(path.clone(), "OPS/chapter-two.xhtml".to_string());
+
+        assert_eq!(result.unwrap_err(), ENCRYPTED_DOCUMENT_ERROR);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn read_epub_chapter_reads_and_sanitizes_one_requested_chapter() {
         let path = test_path("chapter.epub");
         write_test_epub(&path, TestEpubOptions::default()).unwrap();
@@ -1800,6 +2301,40 @@ mod tests {
         assert!(chapter.sanitized_html.contains("Second chapter"));
         assert!(!chapter.sanitized_html.contains("First chapter"));
         assert!(chapter.text.contains("Second chapter"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn read_epub_chapter_returns_safe_resource_metadata() {
+        let path = test_path("chapter-resources.epub");
+        write_test_epub(
+            &path,
+            TestEpubOptions {
+                include_extra_resource: true,
+                include_chapter_resource_reference: true,
+                ..TestEpubOptions::default()
+            },
+        )
+        .unwrap();
+
+        let chapter =
+            read_epub_chapter_from_path(path.clone(), "OPS/chapter-one.xhtml".to_string()).unwrap();
+
+        assert_eq!(chapter.resources.len(), 1);
+        assert_eq!(chapter.resources[0].id, "cover-image");
+        assert_eq!(chapter.resources[0].href, "OPS/images/cover.png");
+        assert_eq!(
+            chapter.resources[0].media_type.as_deref(),
+            Some("image/png")
+        );
+        assert!(!chapter.resources[0].spine);
+        assert!(!chapter.resources[0].encrypted);
+        let chapter_json = serde_json::to_value(&chapter).unwrap();
+        let resource = &chapter_json["resources"][0];
+        assert!(resource.get("bytes").is_none());
+        assert!(resource.get("payload").is_none());
+        assert!(resource.get("rawPayload").is_none());
+        assert!(resource.get("data").is_none());
         fs::remove_file(path).unwrap();
     }
 
@@ -2138,6 +2673,12 @@ mod tests {
     struct TestEpubOptions {
         include_container: bool,
         include_package: bool,
+        include_nav: bool,
+        include_ncx: bool,
+        include_rights: bool,
+        include_extra_resource: bool,
+        include_chapter_resource_reference: bool,
+        encrypted_resources: Vec<&'static str>,
         chapter_count: usize,
     }
 
@@ -2146,6 +2687,12 @@ mod tests {
             Self {
                 include_container: true,
                 include_package: true,
+                include_nav: true,
+                include_ncx: false,
+                include_rights: false,
+                include_extra_resource: false,
+                include_chapter_resource_reference: false,
+                encrypted_resources: Vec::new(),
                 chapter_count: 2,
             }
         }
@@ -2173,9 +2720,23 @@ mod tests {
             let mut package = r#"<?xml version="1.0"?>
                 <package>
                     <metadata><dc:title>Rust Reader</dc:title></metadata>
-                    <manifest>
-                        <item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>"#
+                    <manifest>"#
                 .to_string();
+            if options.include_nav {
+                package.push_str(
+                    r#"<item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>"#,
+                );
+            }
+            if options.include_ncx {
+                package.push_str(
+                    r#"<item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/>"#,
+                );
+            }
+            if options.include_extra_resource {
+                package.push_str(
+                    r#"<item id="cover-image" href="images/cover.png" media-type="image/png" properties="cover-image"/>"#,
+                );
+            }
             for index in 0..options.chapter_count {
                 package.push_str(&format!(
                     r#"<item id="{}" href="{}" media-type="application/xhtml+xml"/>"#,
@@ -2183,7 +2744,11 @@ mod tests {
                     test_epub_chapter_file(index, options.chapter_count)
                 ));
             }
-            package.push_str("</manifest><spine>");
+            if options.include_ncx {
+                package.push_str(r#"</manifest><spine toc="toc">"#);
+            } else {
+                package.push_str("</manifest><spine>");
+            }
             for index in 0..options.chapter_count {
                 package.push_str(&format!(
                     r#"<itemref idref="{}"/>"#,
@@ -2194,17 +2759,55 @@ mod tests {
             zip.write_all(package.as_bytes())?;
         }
 
-        zip.start_file("OPS/nav.xhtml", file_options)?;
-        let mut nav = "<html><body><nav><ol>".to_string();
-        for index in 0..options.chapter_count {
-            nav.push_str(&format!(
-                r#"<li><a href="{}">{}</a></li>"#,
-                test_epub_chapter_file(index, options.chapter_count),
-                test_epub_chapter_label(index, options.chapter_count)
-            ));
+        if options.include_rights {
+            zip.start_file("META-INF/rights.xml", file_options)?;
+            zip.write_all(br#"<?xml version="1.0"?><rights/>"#)?;
         }
-        nav.push_str("</ol></nav></body></html>");
-        zip.write_all(nav.as_bytes())?;
+
+        if !options.encrypted_resources.is_empty() {
+            zip.start_file("META-INF/encryption.xml", file_options)?;
+            let mut encryption = r#"<?xml version="1.0"?><encryption>"#.to_string();
+            for resource in &options.encrypted_resources {
+                encryption.push_str(&format!(
+                    r#"<EncryptedData><CipherData><CipherReference URI="{resource}"/></CipherData></EncryptedData>"#
+                ));
+            }
+            encryption.push_str("</encryption>");
+            zip.write_all(encryption.as_bytes())?;
+        }
+
+        if options.include_nav {
+            zip.start_file("OPS/nav.xhtml", file_options)?;
+            let mut nav = "<html><body><nav><ol>".to_string();
+            for index in 0..options.chapter_count {
+                nav.push_str(&format!(
+                    r#"<li><a href="{}">{}</a></li>"#,
+                    test_epub_chapter_file(index, options.chapter_count),
+                    test_epub_chapter_label(index, options.chapter_count)
+                ));
+            }
+            nav.push_str("</ol></nav></body></html>");
+            zip.write_all(nav.as_bytes())?;
+        }
+
+        if options.include_ncx {
+            zip.start_file("OPS/toc.ncx", file_options)?;
+            let mut ncx = r#"<?xml version="1.0"?><ncx><navMap>"#.to_string();
+            for index in 0..options.chapter_count {
+                ncx.push_str(&format!(
+                    r#"<navPoint><navLabel><text>{}</text></navLabel><content src="{}"/></navPoint>"#,
+                    test_epub_ncx_chapter_label(index, options.chapter_count),
+                    test_epub_chapter_file(index, options.chapter_count)
+                ));
+            }
+            ncx.push_str("</navMap></ncx>");
+            zip.write_all(ncx.as_bytes())?;
+        }
+
+        if options.include_extra_resource {
+            zip.start_file("OPS/images/cover.png", file_options)?;
+            zip.write_all(b"png-placeholder")?;
+        }
 
         for index in 0..options.chapter_count {
             zip.start_file(
@@ -2216,9 +2819,14 @@ mod tests {
             )?;
             let label = test_epub_chapter_label(index, options.chapter_count);
             let text = test_epub_chapter_text(index, options.chapter_count);
+            let resource_html = if options.include_chapter_resource_reference && index == 0 {
+                r#"<img src="images/cover.png" alt="cover"/>"#
+            } else {
+                ""
+            };
             zip.write_all(
                 format!(
-                    "<html><body><h1>{label}</h1><p>{text}</p><script>bad()</script></body></html>"
+                    "<html><body><h1>{label}</h1><p>{text}</p>{resource_html}<script>bad()</script></body></html>"
                 )
                 .as_bytes(),
             )?;
@@ -2257,6 +2865,14 @@ mod tests {
             "Opening".to_string()
         } else {
             format!("Chapter {}", index + 1)
+        }
+    }
+
+    fn test_epub_ncx_chapter_label(index: usize, total: usize) -> String {
+        if total == 2 && index == 0 {
+            "NCX Opening".to_string()
+        } else {
+            format!("NCX Chapter {}", index + 1)
         }
     }
 

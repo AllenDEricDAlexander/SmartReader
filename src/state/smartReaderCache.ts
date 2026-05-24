@@ -191,6 +191,9 @@ function sanitizeSettings(settings: SmartReaderSettings): SmartReaderSettings | 
       enabled: settings.wasm.enabled,
       parserVersion: settings.wasm.parserVersion,
       searchIndexVersion: settings.wasm.searchIndexVersion
+    },
+    pdfKit: {
+      enabled: settings.pdfKit?.enabled ?? false
     }
   };
 }
@@ -477,7 +480,8 @@ function isSettings(value: unknown): value is SmartReaderSettings {
     isRecord(value.wasm) &&
     typeof value.wasm.enabled === "boolean" &&
     (value.wasm.parserVersion === undefined || typeof value.wasm.parserVersion === "string") &&
-    (value.wasm.searchIndexVersion === undefined || typeof value.wasm.searchIndexVersion === "string")
+    (value.wasm.searchIndexVersion === undefined || typeof value.wasm.searchIndexVersion === "string") &&
+    (value.pdfKit === undefined || (isRecord(value.pdfKit) && typeof value.pdfKit.enabled === "boolean"))
   );
 }
 
