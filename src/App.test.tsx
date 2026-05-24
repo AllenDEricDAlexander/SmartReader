@@ -15,6 +15,7 @@ const pdfMocks = vi.hoisted(() => {
     { title: "Intro", dest: [{ num: 1, gen: 0 }], items: [] },
     { title: "Later chapter", dest: [{ num: 2, gen: 0 }], items: [] }
   ];
+  const getViewport = vi.fn(() => ({ width: 640, height: 900 }));
   const getPageIndex = vi.fn(async (ref: { num: number }) => Math.max(0, ref.num - 1));
   const getDocument = vi.fn(() => ({
     promise: Promise.resolve({
@@ -23,7 +24,7 @@ const pdfMocks = vi.hoisted(() => {
       getDestination: vi.fn(async () => null),
       getPageIndex,
       getPage: vi.fn(async () => ({
-        getViewport: () => ({ width: 640, height: 900 }),
+        getViewport,
         getTextContent: vi.fn(async () => ({ items: [] })),
         render: vi.fn(() => ({ promise: Promise.resolve() }))
       })),
@@ -31,7 +32,7 @@ const pdfMocks = vi.hoisted(() => {
     })
   }));
 
-  return { getDocument, getPageIndex, outlineItems };
+  return { getDocument, getPageIndex, getViewport, outlineItems };
 });
 
 const tauriMocks = vi.hoisted(() => {
@@ -253,6 +254,7 @@ describe("App desktop open delivery", () => {
     localStorage.clear();
     tauriMocks.reset();
     pdfMocks.getDocument.mockClear();
+    pdfMocks.getViewport.mockClear();
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
       writable: true,
@@ -365,6 +367,302 @@ describe("App desktop open delivery", () => {
     await waitFor(() => {
       expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
     });
+  });
+
+  it("updates the visible PDF page from scrolling without forcing a page snap", async () => {
+    const visiblePages = installVisiblePageObserver();
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 0;
+    });
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    (HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mockClear();
+
+    await waitFor(() => {
+      expect(visiblePages.has(2)).toBe(true);
+    });
+    visiblePages.show(2);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
+    });
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("keeps explicit PDF next and previous shortcuts as hard page jumps", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 0;
+    });
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    (HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mockClear();
+
+    fireEvent.keyDown(document, { key: "ArrowRight" });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
+    });
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+
+    (HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mockClear();
+    fireEvent.keyDown(document, { key: "ArrowLeft" });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Page or location")).toHaveValue("1");
+    });
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it("zooms a PDF from a trackpad pinch wheel gesture and keeps zoom bounded", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 0;
+    });
+
+    render(<App />);
+
+    const reader = await screen.findByLabelText("start.pdf reader");
+    await waitFor(() => {
+      expect(pdfMocks.getViewport).toHaveBeenCalledWith({ scale: 1.35 });
+    });
+
+    fireEvent.wheel(reader, { ctrlKey: true, deltaY: -120, clientX: 300, clientY: 240 });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "110%" })).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(pdfMocks.getViewport).toHaveBeenCalledWith({ scale: 1.4850000000000003 });
+    });
+
+    for (let index = 0; index < 40; index += 1) {
+      fireEvent.wheel(reader, { ctrlKey: true, deltaY: -120, clientX: 300, clientY: 240 });
+    }
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "300%" })).toBeInTheDocument();
+    });
+
+    for (let index = 0; index < 80; index += 1) {
+      fireEvent.wheel(reader, { ctrlKey: true, deltaY: 120, clientX: 300, clientY: 240 });
+    }
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "50%" })).toBeInTheDocument();
+    });
+  });
+
+  it("coalesces pinch wheel zoom updates until the next animation frame", async () => {
+    let animationFrame: FrameRequestCallback | undefined;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      animationFrame = callback;
+      return 1;
+    });
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    const reader = await screen.findByLabelText("start.pdf reader");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "100%" })).toBeInTheDocument();
+    });
+
+    fireEvent.wheel(reader, { ctrlKey: true, deltaY: -120, clientX: 300, clientY: 240 });
+    fireEvent.wheel(reader, { ctrlKey: true, deltaY: -120, clientX: 300, clientY: 240 });
+
+    expect(screen.getByRole("button", { name: "100%" })).toBeInTheDocument();
+
+    await act(async () => {
+      animationFrame?.(0);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "120%" })).toBeInTheDocument();
+    });
+  });
+
+  it("cancels a stale PDF.js render task instead of showing a render failure", async () => {
+    tauriMocks.setDesktopRuntime(false);
+    tauriMocks.setPendingPaths([]);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 0;
+    });
+    const firstRender = createControlledRenderTask();
+    const secondRender = createControlledRenderTask();
+    const pageRender = vi.fn()
+      .mockReturnValueOnce(firstRender.task)
+      .mockReturnValueOnce(secondRender.task);
+    pdfMocks.getDocument.mockImplementationOnce(() => ({
+      promise: Promise.resolve({
+        numPages: 1,
+        getOutline: vi.fn(async () => []),
+        getDestination: vi.fn(async () => null),
+        getPageIndex: pdfMocks.getPageIndex,
+        getPage: vi.fn(async () => ({
+          getViewport: pdfMocks.getViewport,
+          getTextContent: vi.fn(async () => ({ items: [] })),
+          render: pageRender
+        })),
+        destroy: vi.fn()
+      })
+    }));
+
+    render(<App />);
+
+    fireEvent.drop(screen.getByRole("main"), {
+      dataTransfer: {
+        files: [new File(["%PDF-1.7"], "local.pdf", { type: "application/pdf" })]
+      }
+    });
+
+    const reader = await screen.findByLabelText("local.pdf reader");
+    await waitFor(() => {
+      expect(pageRender).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.wheel(reader, { ctrlKey: true, deltaY: -120, clientX: 300, clientY: 240 });
+
+    await waitFor(() => {
+      expect(firstRender.cancel).toHaveBeenCalled();
+    });
+
+    await act(async () => {
+      firstRender.reject(Object.assign(new Error("stale render failed"), { name: "RenderingCancelledException" }));
+      secondRender.resolve();
+    });
+
+    expect(screen.queryByText("Page render failed.")).not.toBeInTheDocument();
+  });
+
+  it("separates outline expand toggles from title jumps and hides collapsed descendants", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    tauriMocks.openPdfDocument.mockResolvedValueOnce({
+      id: "/Users/mario/Books/start.pdf",
+      pageCount: 4,
+      outline: [
+        { id: "outline-parent", title: "Getting Started", page: 1, level: 0 },
+        { id: "outline-child", title: "Install", page: 2, level: 1 },
+        { id: "outline-grandchild", title: "Verify", page: 3, level: 2 },
+        { id: "outline-next", title: "Reference", page: 4, level: 0 }
+      ]
+    });
+
+    render(<App />);
+
+    await screen.findByRole("button", { name: "Getting Started" });
+    expect(screen.getByRole("button", { name: "Install" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Getting Started" }));
+
+    expect(screen.queryByRole("button", { name: "Install" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Verify" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Page or location")).toHaveValue("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Getting Started" }));
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
+    });
+  });
+
+  it("does not carry collapsed outline state into another document with reused outline ids", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    tauriMocks.openPdfDocument
+      .mockResolvedValueOnce({
+        id: "/Users/mario/Books/start.pdf",
+        pageCount: 3,
+        outline: [
+          { id: "shared-parent", title: "First Parent", page: 1, level: 0 },
+          { id: "shared-child", title: "First Child", page: 2, level: 1 }
+        ]
+      })
+      .mockResolvedValueOnce({
+        id: "/Users/mario/Books/second.pdf",
+        pageCount: 3,
+        outline: [
+          { id: "shared-parent", title: "Second Parent", page: 1, level: 0 },
+          { id: "shared-child", title: "Second Child", page: 2, level: 1 }
+        ]
+      });
+
+    render(<App />);
+
+    await screen.findByRole("button", { name: "First Parent" });
+    fireEvent.click(screen.getByRole("button", { name: "Collapse First Parent" }));
+    expect(screen.queryByRole("button", { name: "First Child" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      tauriMocks.emitDesktopOpen("/Users/mario/Books/second.pdf");
+    });
+
+    await screen.findByRole("button", { name: "Second Parent" });
+    expect(screen.getByRole("button", { name: "Second Child" })).toBeInTheDocument();
+  });
+
+  it("keeps orphaned jumped-level outline rows visible when collapsing the previous row", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    tauriMocks.openPdfDocument.mockResolvedValueOnce({
+      id: "/Users/mario/Books/start.pdf",
+      pageCount: 4,
+      outline: [
+        { id: "outline-parent", title: "Parent", page: 1, level: 0 },
+        { id: "outline-child", title: "Child", page: 2, level: 1 },
+        { id: "outline-orphan", title: "Jumped Orphan", page: 3, level: 3 },
+        { id: "outline-next", title: "Next Root", page: 4, level: 0 }
+      ]
+    });
+
+    render(<App />);
+
+    await screen.findByRole("button", { name: "Parent" });
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Parent" }));
+
+    expect(screen.queryByRole("button", { name: "Child" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Jumped Orphan" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next Root" })).toBeInTheDocument();
+  });
+
+  it("debounces cache persistence during visible page progress updates", async () => {
+    const visiblePages = installVisiblePageObserver();
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    await waitFor(() => {
+      expect(visiblePages.has(2)).toBe(true);
+    });
+
+    vi.useFakeTimers();
+    try {
+      tauriMocks.saveSmartReaderCache.mockClear();
+
+      act(() => {
+        visiblePages.show(2);
+      });
+
+      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
+      expect(tauriMocks.saveSmartReaderCache).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(350);
+      });
+
+      expect(tauriMocks.saveSmartReaderCache).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("searches desktop PDF content through Rust", async () => {
@@ -796,6 +1094,78 @@ function createSearchWorkerMock(options: { failInit?: boolean } = {}) {
     terminate() {
       this.documents = [];
     }
+  };
+}
+
+function installVisiblePageObserver() {
+  const callbacks = new Map<number, IntersectionObserverCallback>();
+
+  class VisiblePageObserver implements IntersectionObserver {
+    readonly root: Element | Document | null = null;
+    readonly rootMargin = "0px";
+    readonly thresholds = [0.45];
+
+    constructor(private readonly callback: IntersectionObserverCallback) {}
+
+    disconnect() {}
+
+    observe(element: Element) {
+      const pageNumber = Number((element as HTMLElement).dataset.pageNumber);
+      if (Number.isFinite(pageNumber)) {
+        callbacks.set(pageNumber, this.callback);
+      }
+    }
+
+    takeRecords(): IntersectionObserverEntry[] {
+      return [];
+    }
+
+    unobserve() {}
+  }
+
+  Object.defineProperty(window, "IntersectionObserver", {
+    configurable: true,
+    writable: true,
+    value: VisiblePageObserver
+  });
+
+  return {
+    has(pageNumber: number) {
+      return callbacks.has(pageNumber);
+    },
+    show(pageNumber: number) {
+      const callback = callbacks.get(pageNumber);
+      if (!callback) {
+        throw new Error(`No observer registered for page ${pageNumber}`);
+      }
+
+      callback([
+        {
+          isIntersecting: true,
+          intersectionRatio: 0.5
+        } as IntersectionObserverEntry
+      ], {} as IntersectionObserver);
+    }
+  };
+}
+
+function createControlledRenderTask() {
+  let resolvePromise: () => void = () => undefined;
+  let rejectPromise: (error: unknown) => void = () => undefined;
+  const promise = new Promise<void>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  const cancel = vi.fn();
+
+  return {
+    task: {
+      promise,
+      cancel
+    },
+    cancel,
+    resolve: resolvePromise,
+    reject: rejectPromise
   };
 }
 

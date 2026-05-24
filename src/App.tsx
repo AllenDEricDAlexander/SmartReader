@@ -101,6 +101,13 @@ const defaultPreferences: Preferences = {
   pdfKit: { enabled: false }
 };
 
+const CACHE_SAVE_DEBOUNCE_MS = 300;
+
+interface PdfRenderTask {
+  promise: Promise<unknown>;
+  cancel: () => void;
+}
+
 export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const locationInputRef = useRef<HTMLInputElement>(null);
@@ -129,9 +136,23 @@ export function App() {
   const [pendingImportedCache, setPendingImportedCache] = useState<SmartReaderCacheEnvelope | undefined>();
   const documentCacheRef = useRef(new Map<string, LoadedReaderDocument>());
   const hudTimerRef = useRef<number | undefined>(undefined);
+  const cacheSaveTimerRef = useRef<number | undefined>(undefined);
+  const pendingCacheSaveRef = useRef<{ cache: SmartReaderCacheEnvelope; isDesktop: boolean } | undefined>(undefined);
+  const pinchZoomFrameRef = useRef<number | undefined>(undefined);
+  const pinchZoomDeltaRef = useRef(0);
+  const pinchZoomAnchorRef = useRef<{
+    container: HTMLElement;
+    sessionId: string;
+    previousZoom: number;
+    anchorX: number;
+    anchorY: number;
+    pointerX: number;
+    pointerY: number;
+  } | undefined>(undefined);
   const sessionsRef = useRef<DocumentSession[]>(initialAppState.sessions);
   const searchAdapterInstanceRef = useRef<SearchAdapter | undefined>(undefined);
   const searchAdapterRequestRef = useRef(0);
+  const [pdfScrollRevision, setPdfScrollRevision] = useState(0);
   const isDesktop = isTauriRuntime();
 
   const activeSession = sessions.find((session) => session.id === activeTabId);
@@ -231,6 +252,30 @@ export function App() {
       adapterCache: { searchIndexes: [] }
     });
   }, [activeTabId, preferences, recentFiles, sessions, sidebarOpen]);
+
+  const flushPendingCacheSave = useCallback(() => {
+    const pendingSave = pendingCacheSaveRef.current;
+    if (!pendingSave) {
+      return;
+    }
+
+    pendingCacheSaveRef.current = undefined;
+    if (cacheSaveTimerRef.current) {
+      window.clearTimeout(cacheSaveTimerRef.current);
+      cacheSaveTimerRef.current = undefined;
+    }
+
+    if (pendingSave.isDesktop) {
+      saveSmartReaderCache(pendingSave.cache).catch(() => undefined);
+      return;
+    }
+
+    try {
+      writeLocalSmartReaderCache(pendingSave.cache);
+    } catch {
+      // Local storage can be unavailable in private browser contexts.
+    }
+  }, []);
 
   const applyImportedCache = useCallback((cache: SmartReaderCacheEnvelope) => {
     const safeCache = validateSmartReaderCacheEnvelope(cache);
@@ -466,6 +511,72 @@ export function App() {
     });
   }, [showHud, updateActiveSession]);
 
+  const handleReaderPinchZoom = useCallback((event: React.WheelEvent<HTMLElement>) => {
+    if (!event.ctrlKey || !activeSession || activeSession.status !== "ready" || activeSession.format !== "pdf") {
+      return;
+    }
+
+    event.preventDefault();
+
+    const container = event.currentTarget;
+    const rect = container.getBoundingClientRect();
+    const pointerX = event.clientX - rect.left;
+    const pointerY = event.clientY - rect.top;
+    pinchZoomDeltaRef.current += event.deltaY < 0 ? 0.1 : -0.1;
+    pinchZoomAnchorRef.current = {
+      container,
+      sessionId: activeSession.id,
+      previousZoom: activeSession.zoom,
+      anchorX: container.scrollLeft + pointerX,
+      anchorY: container.scrollTop + pointerY,
+      pointerX,
+      pointerY
+    };
+
+    if (pinchZoomFrameRef.current !== undefined) {
+      return;
+    }
+
+    pinchZoomFrameRef.current = -1;
+    const frameId = window.requestAnimationFrame(() => {
+      const anchor = pinchZoomAnchorRef.current;
+      const delta = pinchZoomDeltaRef.current;
+      pinchZoomFrameRef.current = undefined;
+      pinchZoomAnchorRef.current = undefined;
+      pinchZoomDeltaRef.current = 0;
+
+      if (!anchor || delta === 0) {
+        return;
+      }
+
+      const nextZoom = clampZoom(anchor.previousZoom + delta);
+      updateActiveSession((session) => {
+        if (session.id !== anchor.sessionId || session.status !== "ready" || session.format !== "pdf") {
+          return session;
+        }
+
+        return updateSessionZoom(
+          session.fitMode === "continuous" ? session : { ...session, fitMode: "continuous" },
+          session.zoom + delta
+        );
+      });
+      showHud(`${Math.round(nextZoom * 100)}%`);
+
+      if (nextZoom === anchor.previousZoom) {
+        return;
+      }
+
+      const zoomRatio = nextZoom / anchor.previousZoom;
+      anchor.container.scrollTo?.({
+        left: Math.max(0, anchor.anchorX * zoomRatio - anchor.pointerX),
+        top: Math.max(0, anchor.anchorY * zoomRatio - anchor.pointerY)
+      });
+    });
+    if (pinchZoomFrameRef.current === -1) {
+      pinchZoomFrameRef.current = frameId;
+    }
+  }, [activeSession, showHud, updateActiveSession]);
+
   const resetZoom = useCallback(() => {
     updateActiveSession((session) => updateSessionZoom(session, 1));
     showHud("100%");
@@ -572,7 +683,13 @@ export function App() {
     updateActiveSession((session) => updateSessionLocation(session, location));
   }, [updateActiveSession]);
 
+  const jumpToLocation = useCallback((location: ReaderLocation) => {
+    setPdfScrollRevision((revision) => revision + 1);
+    updateActiveSession((session) => updateSessionLocation(session, location));
+  }, [updateActiveSession]);
+
   const movePdfPage = useCallback((delta: number) => {
+    setPdfScrollRevision((revision) => revision + 1);
     updateActiveSession((session) => {
       if (session.format !== "pdf" || session.location.kind !== "page") {
         return session;
@@ -701,19 +818,32 @@ export function App() {
   }, [refreshCacheInfo]);
 
   useEffect(() => {
+    if (cacheSaveTimerRef.current) {
+      window.clearTimeout(cacheSaveTimerRef.current);
+    }
+
     const cache = createCurrentCacheEnvelope();
+    pendingCacheSaveRef.current = { cache, isDesktop };
+    cacheSaveTimerRef.current = window.setTimeout(() => {
+      flushPendingCacheSave();
+    }, CACHE_SAVE_DEBOUNCE_MS);
 
-    if (isDesktop) {
-      saveSmartReaderCache(cache).catch(() => undefined);
-      return;
-    }
+    return () => {
+      if (cacheSaveTimerRef.current) {
+        window.clearTimeout(cacheSaveTimerRef.current);
+        cacheSaveTimerRef.current = undefined;
+      }
+    };
+  }, [createCurrentCacheEnvelope, flushPendingCacheSave, isDesktop]);
 
-    try {
-      writeLocalSmartReaderCache(cache);
-    } catch {
-      // Local storage can be unavailable in private browser contexts.
+  useEffect(() => () => {
+    flushPendingCacheSave();
+
+    if (pinchZoomFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(pinchZoomFrameRef.current);
+      pinchZoomFrameRef.current = undefined;
     }
-  }, [createCurrentCacheEnvelope, isDesktop]);
+  }, [flushPendingCacheSave]);
 
   useEffect(() => {
     if (activeSession?.status !== "ready") {
@@ -866,7 +996,7 @@ export function App() {
         onPreferences={() => setPreferencesOpen(true)}
         onFitMode={(fitMode) => updateActiveSession((session) => updateSessionFitMode(session, fitMode))}
         onLocationSubmit={(location) => {
-          updateActiveSession((session) => updateSessionLocation(session, location));
+          jumpToLocation(location);
           showHud(locationToStatus(location, activeSession?.pageCount));
         }}
       />
@@ -886,7 +1016,7 @@ export function App() {
           <ReaderSidebar
             session={activeSession}
             onModeChange={(mode) => updateActiveSession((session) => updateSessionSidebarMode(session, mode))}
-            onJump={(location) => updateActiveSession((session) => updateSessionLocation(session, location))}
+            onJump={jumpToLocation}
           />
         ) : null}
 
@@ -895,6 +1025,7 @@ export function App() {
           recentFiles={recentFiles}
           preferences={preferences}
           documentCache={documentCacheRef.current}
+          scrollRevision={pdfScrollRevision}
           onOpen={openFilePicker}
           onOpenRecent={async (recent) => {
             if (recent.access === "desktop-path" && isDesktop) {
@@ -918,6 +1049,7 @@ export function App() {
           onOutlineChange={(outline) => updateActiveSession((session) => ({ ...session, outline }))}
           onPageCountChange={(pageCount) => updateActiveSession((session) => ({ ...session, pageCount }))}
           onSearchReady={configureSearchAdapter}
+          onPinchZoom={handleReaderPinchZoom}
         />
       </section>
 
@@ -1222,6 +1354,28 @@ function SidebarRows(props: {
   onJump: (location: ReaderLocation) => void;
 }) {
   const session = props.session;
+  const [collapsedOutlineIds, setCollapsedOutlineIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    setCollapsedOutlineIds(new Set());
+  }, [session?.id]);
+
+  useEffect(() => {
+    setCollapsedOutlineIds((current) => {
+      if (current.size === 0 || !session?.outline.length) {
+        return current.size === 0 ? current : new Set();
+      }
+
+      const validIds = new Set(session.outline.map((item) => item.id));
+      const next = new Set(Array.from(current).filter((id) => validIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [session?.outline]);
+
+  const outlineRows = useMemo(
+    () => session?.status === "ready" ? visibleOutlineRows(session.outline, collapsedOutlineIds) : [],
+    [collapsedOutlineIds, session?.outline, session?.status]
+  );
 
   if (!session || session.status !== "ready") {
     return <p className="empty-note">Open a PDF or EPUB to show navigation.</p>;
@@ -1232,17 +1386,73 @@ function SidebarRows(props: {
       return <p className="empty-note">No outline in this document.</p>;
     }
 
-    return session.outline.map((item) => (
-      <button
-        key={item.id}
-        className={`sidebar-row ${sameLocation(item.location, session.location) ? "active" : ""}`}
-        type="button"
-        style={{ paddingLeft: `${12 + (item.level ?? 0) * 14}px` }}
-        onClick={() => props.onJump(item.location)}
-      >
-        {item.title}
-      </button>
-    ));
+    return outlineRows.map(({ item, level, hasChildren }) => {
+      const collapsed = collapsedOutlineIds.has(item.id);
+
+      return (
+        <div
+          key={item.id}
+          className={`sidebar-row ${sameLocation(item.location, session.location) ? "active" : ""}`}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "18px minmax(0, 1fr)",
+            alignItems: "center",
+            gap: "4px",
+            paddingLeft: `${12 + level * 14}px`
+          }}
+        >
+          {hasChildren ? (
+            <button
+              type="button"
+              aria-label={`${collapsed ? "Expand" : "Collapse"} ${item.title}`}
+              aria-expanded={!collapsed}
+              onClick={() => {
+                setCollapsedOutlineIds((current) => {
+                  const next = new Set(current);
+                  if (next.has(item.id)) {
+                    next.delete(item.id);
+                  } else {
+                    next.add(item.id);
+                  }
+                  return next;
+                });
+              }}
+              style={{
+                border: 0,
+                background: "transparent",
+                color: "inherit",
+                cursor: "pointer",
+                font: "inherit",
+                padding: 0
+              }}
+            >
+              {collapsed ? "›" : "⌄"}
+            </button>
+          ) : (
+            <span aria-hidden="true" />
+          )}
+          <button
+            type="button"
+            onClick={() => props.onJump(item.location)}
+            style={{
+              minWidth: 0,
+              border: 0,
+              background: "transparent",
+              color: "inherit",
+              cursor: "pointer",
+              font: "inherit",
+              overflow: "hidden",
+              padding: 0,
+              textAlign: "left",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap"
+            }}
+          >
+            {item.title}
+          </button>
+        </div>
+      );
+    });
   }
 
   if (props.mode === "thumbnails") {
@@ -1303,6 +1513,7 @@ function ReaderViewport(props: {
   recentFiles: RecentFile[];
   preferences: Preferences;
   documentCache: Map<string, LoadedReaderDocument>;
+  scrollRevision: number;
   onOpen: () => void;
   onOpenRecent: (recent: RecentFile) => void;
   onRemoveRecent: (path: string) => void;
@@ -1311,6 +1522,7 @@ function ReaderViewport(props: {
   onOutlineChange: (outline: OutlineItem[]) => void;
   onPageCountChange: (pageCount: number) => void;
   onSearchReady: (handler: (query: string) => Promise<SearchResult[]>, wasmDocuments?: SearchWorkerDocument[]) => void;
+  onPinchZoom: (event: React.WheelEvent<HTMLElement>) => void;
 }) {
   const session = props.session;
 
@@ -1330,12 +1542,18 @@ function ReaderViewport(props: {
   }
 
   return (
-    <section className="reader-viewport" tabIndex={0} aria-label={`${session.title} reader`}>
+    <section
+      className="reader-viewport"
+      tabIndex={0}
+      aria-label={`${session.title} reader`}
+      onWheel={props.onPinchZoom}
+    >
       {session.format === "pdf" ? (
         <PdfReader
           session={session}
           preferences={props.preferences}
           documentCache={props.documentCache}
+          scrollRevision={props.scrollRevision}
           onLocationChange={props.onLocationChange}
           onOutlineChange={props.onOutlineChange}
           onPageCountChange={props.onPageCountChange}
@@ -1439,12 +1657,14 @@ function PdfReader(props: {
   session: DocumentSession;
   preferences: Preferences;
   documentCache: Map<string, LoadedReaderDocument>;
+  scrollRevision: number;
   onLocationChange: (location: ReaderLocation) => void;
   onOutlineChange: (outline: OutlineItem[]) => void;
   onPageCountChange: (pageCount: number) => void;
   onSearchReady: (handler: (query: string) => Promise<SearchResult[]>, wasmDocuments?: SearchWorkerDocument[]) => void;
 }) {
   const canvasRef = useRef<HTMLDivElement>(null);
+  const lastScrollRevisionRef = useRef<number | undefined>(undefined);
   const [pdf, setPdf] = useState<PDFDocumentProxy | undefined>(
     () => props.documentCache.get(props.session.id)?.pdf
   );
@@ -1535,17 +1755,26 @@ function PdfReader(props: {
       return;
     }
 
+    if (lastScrollRevisionRef.current === props.scrollRevision) {
+      return;
+    }
+
+    lastScrollRevisionRef.current = props.scrollRevision;
     window.requestAnimationFrame(() => {
       const pageFrame = canvasRef.current?.querySelector<HTMLElement>(
         `[data-page-number="${props.session.location.kind === "page" ? props.session.location.page : 1}"]`
       );
       pageFrame?.scrollIntoView?.({ block: "start" });
     });
-  }, [pdf, props.session.id, props.session.location]);
+  }, [pdf, props.scrollRevision, props.session.fitMode, props.session.id, props.session.location]);
 
   const handleVisiblePage = useCallback((pageNumber: number) => {
+    if (props.session.location.kind === "page" && props.session.location.page === pageNumber) {
+      return;
+    }
+
     props.onLocationChange({ kind: "page", page: pageNumber });
-  }, [props.onLocationChange]);
+  }, [props.onLocationChange, props.session.location]);
 
   if (error) {
     return <InlineReaderError message={error} />;
@@ -1625,6 +1854,7 @@ function PdfPage(props: {
 
   useEffect(() => {
     let cancelled = false;
+    let renderTask: PdfRenderTask | undefined;
 
     async function renderPage() {
       if (!shouldRender) {
@@ -1653,9 +1883,23 @@ function PdfPage(props: {
         if (cancelled) {
           return;
         }
-        await renderPdfPage(page, canvasRef.current, props.zoom);
+        renderTask = renderPdfPage(page, canvasRef.current, props.zoom);
+        if (!renderTask) {
+          if (!cancelled) {
+            setLoading(false);
+          }
+          return;
+        }
+        await renderTask.promise;
+        if (cancelled) {
+          return;
+        }
         setLoading(false);
-      } catch {
+      } catch (renderError) {
+        if (cancelled || isPdfRenderCancelled(renderError)) {
+          return;
+        }
+
         setError("Page render failed.");
         setLoading(false);
       }
@@ -1664,6 +1908,11 @@ function PdfPage(props: {
     renderPage();
     return () => {
       cancelled = true;
+      try {
+        renderTask?.cancel();
+      } catch {
+        // PDF.js render cancellation can throw if the task has already finished.
+      }
     };
   }, [props.pageNumber, props.pdf, props.pdfKitPath, props.zoom, shouldRender]);
 
@@ -2471,7 +2720,7 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-async function renderPdfPage(page: PDFPageProxy, canvas: HTMLCanvasElement | null, zoom: number) {
+function renderPdfPage(page: PDFPageProxy, canvas: HTMLCanvasElement | null, zoom: number): PdfRenderTask | undefined {
   if (!canvas) {
     return;
   }
@@ -2488,7 +2737,21 @@ async function renderPdfPage(page: PDFPageProxy, canvas: HTMLCanvasElement | nul
   canvas.style.width = `${viewport.width}px`;
   canvas.style.height = `${viewport.height}px`;
 
-  await page.render({ canvas, canvasContext: context, viewport }).promise;
+  return page.render({ canvas, canvasContext: context, viewport }) as PdfRenderTask;
+}
+
+function isPdfRenderCancelled(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const name = "name" in error ? String(error.name) : "";
+  const message = "message" in error ? String(error.message).toLowerCase() : "";
+  return name === "RenderingCancelledException" || message.includes("cancel");
+}
+
+function clampZoom(zoom: number): number {
+  return Math.min(3, Math.max(0.5, Number(zoom.toFixed(2))));
 }
 
 async function searchPdf(pdf: PDFDocumentProxy, query: string): Promise<SearchResult[]> {
@@ -2497,6 +2760,54 @@ async function searchPdf(pdf: PDFDocumentProxy, query: string): Promise<SearchRe
 
 function sameLocation(first: ReaderLocation, second: ReaderLocation): boolean {
   return JSON.stringify(first) === JSON.stringify(second);
+}
+
+function visibleOutlineRows(
+  outline: OutlineItem[],
+  collapsedIds: Set<string>
+): Array<{ item: OutlineItem; level: number; hasChildren: boolean }> {
+  const normalized = normalizeOutlineRows(outline);
+  const rows: Array<{ item: OutlineItem; level: number; hasChildren: boolean }> = [];
+  let hiddenBelowLevel: number | undefined;
+
+  normalized.forEach((row) => {
+    if (hiddenBelowLevel !== undefined) {
+      if (row.level > hiddenBelowLevel) {
+        return;
+      }
+
+      hiddenBelowLevel = undefined;
+    }
+
+    rows.push(row);
+
+    if (collapsedIds.has(row.item.id)) {
+      hiddenBelowLevel = row.level;
+    }
+  });
+
+  return rows;
+}
+
+function normalizeOutlineRows(outline: OutlineItem[]): Array<{ item: OutlineItem; level: number; hasChildren: boolean }> {
+  const normalized: Array<{ item: OutlineItem; level: number; hasChildren: boolean }> = [];
+
+  outline.forEach((item, index) => {
+    const rawLevel = outlineLevel(item);
+    const previousLevel = normalized[index - 1]?.level ?? 0;
+    const level = index === 0 || rawLevel > previousLevel + 1 ? 0 : rawLevel;
+
+    normalized.push({ item, level, hasChildren: false });
+  });
+
+  return normalized.map((row, index) => ({
+    ...row,
+    hasChildren: Boolean(normalized[index + 1] && normalized[index + 1].level === row.level + 1)
+  }));
+}
+
+function outlineLevel(item: OutlineItem): number {
+  return Math.max(0, item.level ?? 0);
 }
 
 function readerShortcutLabel(commandId: string): string {
