@@ -2370,6 +2370,7 @@ function PdfPage(props: {
           return;
         }
 
+        console.error("PDF page render failed", renderError);
         setError("Page render failed.");
         setLoading(false);
       }
@@ -2962,8 +2963,8 @@ function desktopDocumentToPdfMetadata(path: string, document: DesktopPdfDocument
 async function loadPdfJs(): Promise<typeof import("pdfjs-dist")> {
   if (!pdfJsModule) {
     pdfJsModule = Promise.all([
-      import("pdfjs-dist"),
-      import("pdfjs-dist/build/pdf.worker.mjs?url")
+      import("pdfjs-dist/legacy/build/pdf.mjs"),
+      import("pdfjs-dist/legacy/build/pdf.worker.mjs?url")
     ]).then(([pdfjs, worker]) => {
       pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
       return pdfjs;

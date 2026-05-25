@@ -7,7 +7,7 @@ SmartReader is a macOS-first local reader MVP for PDF and EPUB files. The curren
 - Desktop utility-style layout with tabs, compact toolbar, collapsible sidebar, and document-first reader surface.
 - Warm paper-inspired macOS utility styling with compact chrome, subtle document shadows, responsive sidebar behavior, and narrow-window toolbar simplification.
 - Local PDF and EPUB open entry points through browser file selection, drag/drop, and Tauri native file dialog.
-- PDF reader path backed by PDF.js, lazy-loaded behind the reader boundary, with an experimental macOS PDFKit raster path available behind a preference flag for desktop-path PDFs.
+- PDF reader path backed by the PDF.js legacy build for older macOS WebView compatibility, lazy-loaded behind the reader boundary, with an experimental macOS PDFKit raster path available behind a preference flag for desktop-path PDFs.
 - Desktop PDF open validation, page-count metadata, outline extraction, and unbounded path-backed search are backed by Rust/Tauri commands.
 - EPUB reader path backed by Rust lazy metadata/chapter commands for Tauri desktop files, with NCX fallback, resource metadata, and legal DRM/encryption detection. JSZip remains the browser-file EPUB fallback.
 - Sidebar modes for contents, windowed PDF thumbnails, bookmarks, and windowed search results.
@@ -37,7 +37,7 @@ SmartReader is a macOS-first local reader MVP for PDF and EPUB files. The curren
 - TypeScript
 - Vite
 - Vitest
-- PDF.js via `pdfjs-dist`
+- PDF.js via `pdfjs-dist` legacy build for desktop WebView compatibility
 - JSZip for browser-file EPUB fallback parsing
 - A bundled minimal WebAssembly search runtime loaded through a Vite module worker
 - Tauri 2 desktop shell with dialog plugin, validated Rust document-read commands, Rust PDF metadata/outline/search/PDFKit-raster commands, Rust EPUB metadata/chapter/search commands, and Rust cache import/export/location commands
@@ -150,6 +150,7 @@ Tauri runs the same Vite frontend and uses Rust commands for validated PDF/EPUB 
 - Large search result lists and PDF thumbnail lists are also window-rendered so the sidebar mounts only rows near the current scroll viewport. Search results remain unlimited at the data level; the UI avoids mounting all rows at once.
 - EPUB chapter scroll updates are debounced during ordinary scrolling and flushed when changing chapters or unmounting, reducing high-frequency session/recent/cache writes while preserving the latest chapter position.
 - Desktop PDF opening validates the path and reads page-count/outline metadata in Rust before React renders pages. The default renderer still uses PDF.js canvas output for visible page painting.
+- SmartReader loads the PDF.js legacy build and legacy worker so packaged Tauri apps keep PDF page rendering compatible with older macOS WKWebView runtimes.
 - The experimental macOS PDFKit renderer can rasterize desktop-path PDF pages through a bounded Rust/Tauri command. It is opt-in, macOS-only, and falls back to PDF.js if the command is unavailable or fails.
 - Desktop-path PDF thumbnail previews reuse the bounded macOS PDFKit raster command for individual visible pages, with per-page failure placeholders so one failed thumbnail does not affect the main reader.
 - Desktop PDF search uses a Rust command that returns all matching pages for path-backed desktop PDFs, so React does not scan page text for those files.

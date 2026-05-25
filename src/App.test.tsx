@@ -17,7 +17,7 @@ const pdfMocks = vi.hoisted(() => {
   ];
   const getViewport = vi.fn(() => ({ width: 640, height: 900 }));
   const getPageIndex = vi.fn(async (ref: { num: number }) => Math.max(0, ref.num - 1));
-  const getDocument = vi.fn(() => ({
+  const createDocumentTask = () => ({
     promise: Promise.resolve({
       numPages: 2,
       getOutline: vi.fn(async () => outlineItems),
@@ -30,9 +30,11 @@ const pdfMocks = vi.hoisted(() => {
       })),
       destroy: vi.fn()
     })
-  }));
+  });
+  const getDocument = vi.fn(createDocumentTask);
+  const modernGetDocument = vi.fn(createDocumentTask);
 
-  return { getDocument, getPageIndex, getViewport, outlineItems };
+  return { getDocument, getPageIndex, getViewport, modernGetDocument, outlineItems };
 });
 
 const tauriMocks = vi.hoisted(() => {
@@ -245,11 +247,20 @@ vi.mock("./platform/tauriBridge", () => ({
 
 vi.mock("pdfjs-dist", () => ({
   GlobalWorkerOptions: {},
-  getDocument: pdfMocks.getDocument
+  getDocument: pdfMocks.modernGetDocument
 }));
 
 vi.mock("pdfjs-dist/build/pdf.worker.mjs?url", () => ({
   default: "/pdf.worker.mjs"
+}));
+
+vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
+  GlobalWorkerOptions: {},
+  getDocument: pdfMocks.getDocument
+}));
+
+vi.mock("pdfjs-dist/legacy/build/pdf.worker.mjs?url", () => ({
+  default: "/pdf.worker.legacy.mjs"
 }));
 
 describe("App desktop open delivery", () => {
@@ -258,6 +269,7 @@ describe("App desktop open delivery", () => {
     localStorage.clear();
     tauriMocks.reset();
     pdfMocks.getDocument.mockClear();
+    pdfMocks.modernGetDocument.mockClear();
     pdfMocks.getViewport.mockClear();
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
@@ -341,6 +353,17 @@ describe("App desktop open delivery", () => {
     expect(await screen.findByText("Intro")).toBeInTheDocument();
     expect(screen.getByText("Later chapter")).toBeInTheDocument();
     expect(tauriMocks.openPdfDocument).toHaveBeenCalledWith("/Users/mario/Books/start.pdf");
+  });
+
+  it("loads PDF pages through the PDF.js legacy build for older WebViews", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(pdfMocks.getDocument).toHaveBeenCalled();
+    });
+    expect(pdfMocks.modernGetDocument).not.toHaveBeenCalled();
   });
 
   it("scrolls to a clicked PDF outline page after the location changes", async () => {
