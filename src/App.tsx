@@ -4,6 +4,7 @@ import JSZip from "jszip";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import {
   createEmptySession,
+  createSessionFromRecentFile,
   createSessionFromFile,
   updateSessionFitMode,
   updateSessionLocation,
@@ -12,6 +13,23 @@ import {
 } from "./state/documentSessions";
 import { createCommandRegistry, shortcutFromKeyboardEvent } from "./state/commandRegistry";
 import type { CommandId } from "./state/commandRegistry";
+import {
+  canNavigateBack,
+  canNavigateForward,
+  createNavigationHistory,
+  navigateBack,
+  navigateForward,
+  removeNavigationHistory,
+  recordNavigation
+} from "./state/navigationHistory";
+import type { NavigationHistory } from "./state/navigationHistory";
+import {
+  createSearchSelection,
+  removeSearchSelection,
+  selectNextSearchResult,
+  selectPreviousSearchResult
+} from "./state/searchSelection";
+import type { SearchSelection } from "./state/searchSelection";
 import {
   clearRecentFiles,
   loadRecentFiles,
@@ -106,6 +124,14 @@ const defaultPreferences: Preferences = {
 const OUTLINE_ROW_HEIGHT = 34;
 const OUTLINE_OVERSCAN_ROWS = 8;
 const OUTLINE_FALLBACK_VIEWPORT_HEIGHT = 420;
+const THUMBNAIL_ROW_HEIGHT = 76;
+const THUMBNAIL_OVERSCAN_ROWS = 2;
+const THUMBNAIL_FALLBACK_VIEWPORT_HEIGHT = 420;
+const THUMBNAIL_SCALE = 0.18;
+const SEARCH_RESULT_ROW_HEIGHT = 58;
+const SEARCH_RESULT_OVERSCAN_ROWS = 8;
+const SEARCH_RESULT_FALLBACK_VIEWPORT_HEIGHT = 420;
+const EPUB_SCROLL_SAVE_DELAY_MS = 250;
 
 const outlineWindowStyle: CSSProperties = {
   position: "relative"
@@ -167,6 +193,8 @@ export function App() {
   }));
   const [cacheStatus, setCacheStatus] = useState<CacheStatus>({ state: "idle" });
   const [pendingImportedCache, setPendingImportedCache] = useState<SmartReaderCacheEnvelope | undefined>();
+  const [navigationHistories, setNavigationHistories] = useState<Record<string, NavigationHistory>>({});
+  const [searchSelections, setSearchSelections] = useState<Record<string, SearchSelection>>({});
   const documentCacheRef = useRef(new Map<string, LoadedReaderDocument>());
   const hudTimerRef = useRef<number | undefined>(undefined);
   const cacheSaveTimerRef = useRef<number | undefined>(undefined);
@@ -190,10 +218,28 @@ export function App() {
 
   const activeSession = sessions.find((session) => session.id === activeTabId);
   const activeLocationKey = activeSession ? JSON.stringify(activeSession.location) : "";
+  const activeNavigationHistory = activeSession
+    ? navigationHistories[activeSession.id] ?? createNavigationHistory()
+    : createNavigationHistory();
+  const activeSearchSelection = activeSession ? searchSelections[activeSession.id] : undefined;
 
   useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
+
+  useEffect(() => {
+    setSessions((current) => {
+      const next = current.map((session) => applyEpubPreferencesToSession(session, preferences));
+      return next.every((session, index) => session === current[index]) ? current : next;
+    });
+  }, [preferences.epubFontSize, preferences.epubTheme]);
+
+  useEffect(() => {
+    setSessions((current) => {
+      const next = current.map((session) => applyPdfPreferencesToSession(session, preferences));
+      return next.every((session, index) => session === current[index]) ? current : next;
+    });
+  }, [preferences.defaultPdfFitMode]);
 
   const updateActiveSession = useCallback((updater: (session: DocumentSession) => DocumentSession) => {
     setSessions((current) =>
@@ -246,16 +292,31 @@ export function App() {
   }, [preferences.recentRetention]);
 
   const addSession = useCallback((session: DocumentSession) => {
+    const preparedSession = applyPreferencesToSession(session, preferences);
+    let insertedSession = true;
+
     setSessions((current) => {
+      const existing = preparedSession.filePath
+        ? current.find((item) => item.filePath === preparedSession.filePath && item.status !== "empty")
+        : undefined;
+
+      if (existing) {
+        insertedSession = false;
+        setActiveTabId(existing.id);
+        return current;
+      }
+
       const next = current.some((item) => item.status === "empty")
-        ? current.map((item) => (item.id === activeTabId && item.status === "empty" ? session : item))
-        : [...current, session];
+        ? current.map((item) => (item.id === activeTabId && item.status === "empty" ? preparedSession : item))
+        : [...current, preparedSession];
 
       return next;
     });
-    setActiveTabId(session.id);
-    recordSessionRecent(session);
-  }, [activeTabId, recordSessionRecent]);
+    if (insertedSession) {
+      setActiveTabId(preparedSession.id);
+      recordSessionRecent(preparedSession);
+    }
+  }, [activeTabId, preferences, recordSessionRecent]);
 
   const createCurrentCacheEnvelope = useCallback(() => {
     const snapshot = createAppSessionSnapshot({
@@ -347,6 +408,22 @@ export function App() {
     addSession(session);
   }, [addSession]);
   openDesktopPathRef.current = openDesktopPath;
+
+  const openRecentFile = useCallback(async (recent: RecentFile) => {
+    if (recent.access === "desktop-path" && isDesktop) {
+      const existing = sessions.find((session) => session.filePath === recent.path && session.status !== "empty");
+      if (existing) {
+        setActiveTabId(existing.id);
+        return;
+      }
+
+      const validatedSession = await createDesktopSession(recent.path);
+      addSession(validatedSession.status === "ready" ? createSessionFromRecentFile(recent) : validatedSession);
+      return;
+    }
+
+    addSession(createAccessErrorSession(recent.path));
+  }, [addSession, isDesktop, sessions]);
 
   const openFilePicker = useCallback(async () => {
     if (isDesktop) {
@@ -509,6 +586,8 @@ export function App() {
 
       disposeSessionResources(closingSession, documentCacheRef.current.get(tabId));
       documentCacheRef.current.delete(tabId);
+      setNavigationHistories((currentHistories) => removeNavigationHistory(currentHistories, tabId));
+      setSearchSelections((currentSelections) => removeSearchSelection(currentSelections, tabId));
 
       if (current.length === 1) {
         const empty = createEmptySession();
@@ -691,26 +770,44 @@ export function App() {
   }, [preferences.wasm.enabled]);
 
   const runSearch = useCallback(async (query: string) => {
-    if (!query.trim()) {
+    const trimmedQuery = query.trim();
+
+    if (!trimmedQuery) {
       updateActiveSession((session) => ({ ...session, searchResults: [] }));
+      if (activeSession) {
+        setSearchSelections((current) => {
+          const next = { ...current };
+          delete next[activeSession.id];
+          return next;
+        });
+      }
       return;
     }
 
     setIsSearching(true);
     try {
-      const results = await searchAdapterRef.current(query.trim());
+      const results = await searchAdapterRef.current(trimmedQuery);
       updateActiveSession((session) => ({
         ...session,
         sidebarMode: "search",
         searchResults: results
       }));
+      if (activeSession) {
+        const selection = createSearchSelection(trimmedQuery, results);
+        setSearchSelections((current) => ({ ...current, [activeSession.id]: selection }));
+        if (results[selection.currentIndex]) {
+          jumpToLocation(results[selection.currentIndex].location);
+        } else {
+          showHud("No results");
+        }
+      }
       setSidebarOpen(true);
     } catch {
       showHud("Search failed");
     } finally {
       setIsSearching(false);
     }
-  }, [showHud, updateActiveSession]);
+  }, [activeSession, showHud, updateActiveSession]);
 
   const handleLocationChange = useCallback((location: ReaderLocation) => {
     updateActiveSession((session) => updateSessionLocation(session, location));
@@ -718,8 +815,52 @@ export function App() {
 
   const jumpToLocation = useCallback((location: ReaderLocation) => {
     setPdfScrollRevision((revision) => revision + 1);
-    updateActiveSession((session) => updateSessionLocation(session, location));
+    updateActiveSession((session) => {
+      setNavigationHistories((current) => ({
+        ...current,
+        [session.id]: recordNavigation(current[session.id] ?? createNavigationHistory(), session.location, location)
+      }));
+      return updateSessionLocation(session, location);
+    });
   }, [updateActiveSession]);
+
+  const navigateHistoryBack = useCallback(() => {
+    if (!activeSession) {
+      return;
+    }
+
+    const result = navigateBack(activeNavigationHistory, activeSession.location);
+    setNavigationHistories((current) => ({ ...current, [activeSession.id]: result.history }));
+    setPdfScrollRevision((revision) => revision + 1);
+    updateActiveSession((session) => updateSessionLocation(session, result.location));
+  }, [activeNavigationHistory, activeSession, updateActiveSession]);
+
+  const navigateHistoryForward = useCallback(() => {
+    if (!activeSession) {
+      return;
+    }
+
+    const result = navigateForward(activeNavigationHistory, activeSession.location);
+    setNavigationHistories((current) => ({ ...current, [activeSession.id]: result.history }));
+    setPdfScrollRevision((revision) => revision + 1);
+    updateActiveSession((session) => updateSessionLocation(session, result.location));
+  }, [activeNavigationHistory, activeSession, updateActiveSession]);
+
+  const selectSearchResult = useCallback((direction: "next" | "previous") => {
+    if (!activeSession || activeSession.searchResults.length === 0 || !activeSearchSelection) {
+      showHud("No results");
+      return;
+    }
+
+    const nextSelection = direction === "next"
+      ? selectNextSearchResult(activeSearchSelection, activeSession.searchResults)
+      : selectPreviousSearchResult(activeSearchSelection, activeSession.searchResults);
+    const result = activeSession.searchResults[nextSelection.currentIndex];
+    setSearchSelections((current) => ({ ...current, [activeSession.id]: nextSelection }));
+    if (result) {
+      jumpToLocation(result.location);
+    }
+  }, [activeSearchSelection, activeSession, jumpToLocation, showHud]);
 
   const movePdfPage = useCallback((delta: number) => {
     setPdfScrollRevision((revision) => revision + 1);
@@ -730,8 +871,13 @@ export function App() {
 
       const maxPage = session.pageCount ?? session.location.page;
       const page = Math.min(maxPage, Math.max(1, session.location.page + delta));
+      const location = { kind: "page" as const, page };
+      setNavigationHistories((current) => ({
+        ...current,
+        [session.id]: recordNavigation(current[session.id] ?? createNavigationHistory(), session.location, location)
+      }));
 
-      return updateSessionLocation(session, { kind: "page", page });
+      return updateSessionLocation(session, location);
     });
   }, [updateActiveSession]);
 
@@ -745,19 +891,30 @@ export function App() {
           createEmptyTab: createNewTab,
           toggleSidebar: () => setSidebarOpen((value) => !value),
           openFind: () => setFindOpen(true),
-          findNext: () => showHud("Next result"),
-          findPrevious: () => showHud("Previous result"),
+          findNext: () => selectSearchResult("next"),
+          findPrevious: () => selectSearchResult("previous"),
           zoomIn: () => zoomBy(0.1),
           zoomOut: () => zoomBy(-0.1),
           resetZoom,
           toggleBookmark,
           openPreferences: () => setPreferencesOpen(true),
           focusLocationInput: () => locationInputRef.current?.focus(),
-          navigateBack: () => showHud("Back"),
-          navigateForward: () => showHud("Forward")
+          navigateBack: navigateHistoryBack,
+          navigateForward: navigateHistoryForward
         }
       }),
-    [activeSession, closeTab, createNewTab, openFilePicker, resetZoom, showHud, toggleBookmark, zoomBy]
+    [
+      activeSession,
+      closeTab,
+      createNewTab,
+      navigateHistoryBack,
+      navigateHistoryForward,
+      openFilePicker,
+      resetZoom,
+      selectSearchResult,
+      toggleBookmark,
+      zoomBy
+    ]
   );
 
   const readerShortcutHandlers = useMemo(
@@ -1027,6 +1184,10 @@ export function App() {
         onOpenFind={() => setFindOpen(true)}
         onToggleBookmark={toggleBookmark}
         onPreferences={() => setPreferencesOpen(true)}
+        onNavigateBack={navigateHistoryBack}
+        onNavigateForward={navigateHistoryForward}
+        canNavigateBack={canNavigateBack(activeNavigationHistory)}
+        canNavigateForward={canNavigateForward(activeNavigationHistory)}
         onFitMode={(fitMode) => updateActiveSession((session) => updateSessionFitMode(session, fitMode))}
         onLocationSubmit={(location) => {
           jumpToLocation(location);
@@ -1040,6 +1201,14 @@ export function App() {
           isSearching={isSearching}
           onChange={setFindQuery}
           onSubmit={() => runSearch(findQuery)}
+          onClear={() => {
+            setFindQuery("");
+            runSearch("");
+          }}
+          onNext={() => selectSearchResult("next")}
+          onPrevious={() => selectSearchResult("previous")}
+          currentIndex={activeSearchSelection?.currentIndex ?? -1}
+          total={activeSearchSelection?.total ?? activeSession?.searchResults.length ?? 0}
           onClose={() => setFindOpen(false)}
         />
       ) : null}
@@ -1060,14 +1229,7 @@ export function App() {
           documentCache={documentCacheRef.current}
           scrollRevision={pdfScrollRevision}
           onOpen={openFilePicker}
-          onOpenRecent={async (recent) => {
-            if (recent.access === "desktop-path" && isDesktop) {
-              await openDesktopPath(recent.path);
-              return;
-            }
-
-            addSession(createAccessErrorSession(recent.path));
-          }}
+          onOpenRecent={openRecentFile}
           onRemoveRecent={(path) => {
             const next = recentFiles.filter((recent) => recent.path !== path);
             saveRecentFiles(next);
@@ -1079,9 +1241,12 @@ export function App() {
             setRecentFiles(next);
           }}
           onLocationChange={handleLocationChange}
+          onNavigate={jumpToLocation}
           onOutlineChange={(outline) => updateActiveSession((session) => ({ ...session, outline }))}
           onPageCountChange={(pageCount) => updateActiveSession((session) => ({ ...session, pageCount }))}
           onSearchReady={configureSearchAdapter}
+          searchQuery={findQuery}
+          searchSelection={activeSearchSelection}
           onPinchZoom={handleReaderPinchZoom}
         />
       </section>
@@ -1205,6 +1370,10 @@ function CommandToolbar(props: {
   onOpenFind: () => void;
   onToggleBookmark: () => void;
   onPreferences: () => void;
+  onNavigateBack: () => void;
+  onNavigateForward: () => void;
+  canNavigateBack: boolean;
+  canNavigateForward: boolean;
   onFitMode: (fitMode: FitMode) => void;
   onLocationSubmit: (location: ReaderLocation) => void;
 }) {
@@ -1226,15 +1395,15 @@ function CommandToolbar(props: {
         className="history-control"
         label="Back"
         icon="back"
-        disabled={!hasDocument}
-        onClick={() => undefined}
+        disabled={!hasDocument || !props.canNavigateBack}
+        onClick={props.onNavigateBack}
       />
       <ToolbarButton
         className="history-control"
         label="Forward"
         icon="forward"
-        disabled={!hasDocument}
-        onClick={() => undefined}
+        disabled={!hasDocument || !props.canNavigateForward}
+        onClick={props.onNavigateForward}
       />
       <form
         className="location-form"
@@ -1324,8 +1493,15 @@ function FindBar(props: {
   isSearching: boolean;
   onChange: (query: string) => void;
   onSubmit: () => void;
+  onClear: () => void;
+  onNext: () => void;
+  onPrevious: () => void;
+  currentIndex: number;
+  total: number;
   onClose: () => void;
 }) {
+  const hasResults = props.total > 0 && props.currentIndex >= 0;
+
   return (
     <form
       className="find-bar"
@@ -1341,8 +1517,25 @@ function FindBar(props: {
         aria-label="Find in document"
         placeholder="Find in document"
         value={props.query}
-        onChange={(event) => props.onChange(event.currentTarget.value)}
+        onChange={(event) => {
+          props.onChange(event.currentTarget.value);
+          if (!event.currentTarget.value) {
+            props.onClear();
+          }
+        }}
       />
+      <span className="find-count" aria-live="polite">
+        {hasResults ? props.currentIndex + 1 : 0} / {props.total}
+      </span>
+      <button type="button" aria-label="Previous result" disabled={!hasResults} onClick={props.onPrevious}>
+        Previous
+      </button>
+      <button type="button" aria-label="Next result" disabled={!hasResults} onClick={props.onNext}>
+        Next
+      </button>
+      <button type="button" aria-label="Clear find" disabled={!props.query} onClick={props.onClear}>
+        Clear
+      </button>
       <button type="submit">{props.isSearching ? "Searching" : "Find"}</button>
       <button type="button" aria-label="Close find" onClick={props.onClose}>
         ×
@@ -1410,6 +1603,30 @@ function ReaderSidebar(props: {
       </div>
     </aside>
   );
+}
+
+function visibleRowRange(
+  total: number,
+  rowHeight: number,
+  scrollTop: number,
+  viewportHeight: number,
+  overscanRows: number
+): { start: number; end: number } {
+  if (total <= 0) {
+    return { start: 0, end: 0 };
+  }
+
+  const windowSize = Math.ceil(viewportHeight / rowHeight) + overscanRows * 2;
+  const maxStart = Math.max(0, total - windowSize);
+  const start = Math.min(
+    Math.max(0, Math.floor(scrollTop / rowHeight) - overscanRows),
+    maxStart
+  );
+
+  return {
+    start,
+    end: Math.min(total, start + windowSize)
+  };
 }
 
 function SidebarRows(props: {
@@ -1504,17 +1721,14 @@ function SidebarRows(props: {
       return <p className="empty-note">Thumbnails are available for PDFs.</p>;
     }
 
-    return Array.from({ length: Math.min(session.pageCount ?? 0, 24) }, (_, index) => (
-      <button
-        key={index}
-        className={`thumbnail-row ${session.location.kind === "page" && session.location.page === index + 1 ? "active" : ""}`}
-        type="button"
-        onClick={() => props.onJump({ kind: "page", page: index + 1 })}
-      >
-        <span className="thumbnail-box">{index + 1}</span>
-        <span>Page {index + 1}</span>
-      </button>
-    ));
+    return (
+      <PdfThumbnailList
+        session={session}
+        onJump={props.onJump}
+        scrollTop={props.scrollTop}
+        viewportHeight={props.viewportHeight}
+      />
+    );
   }
 
   if (props.mode === "bookmarks") {
@@ -1538,18 +1752,48 @@ function SidebarRows(props: {
     return <p className="empty-note">Search results appear here.</p>;
   }
 
-  return session.searchResults.map((result, index) => (
-    <button
-      key={result.id}
-      className="search-result-row"
-      type="button"
-      aria-label={`${result.label}, result ${index + 1}: ${result.snippet}`}
-      onClick={() => props.onJump(result.location)}
+  const range = visibleRowRange(
+    session.searchResults.length,
+    SEARCH_RESULT_ROW_HEIGHT,
+    props.scrollTop,
+    props.viewportHeight || SEARCH_RESULT_FALLBACK_VIEWPORT_HEIGHT,
+    SEARCH_RESULT_OVERSCAN_ROWS
+  );
+  const visibleResults = session.searchResults.slice(range.start, range.end);
+
+  return (
+    <div
+      style={{
+        ...outlineWindowStyle,
+        height: `${session.searchResults.length * SEARCH_RESULT_ROW_HEIGHT}px`
+      }}
     >
-      <strong>{result.label}</strong>
-      <span>{result.snippet}</span>
-    </button>
-  ));
+      {visibleResults.map((result, offset) => {
+        const index = range.start + offset;
+
+        return (
+          <button
+            key={result.id}
+            className="search-result-row"
+            type="button"
+            aria-label={`${result.label}, result ${index + 1}: ${result.snippet}`}
+            onClick={() => props.onJump(result.location)}
+            style={{
+              position: "absolute",
+              top: `${index * SEARCH_RESULT_ROW_HEIGHT}px`,
+              left: 0,
+              right: 0,
+              height: `${SEARCH_RESULT_ROW_HEIGHT}px`,
+              boxSizing: "border-box"
+            }}
+          >
+            <strong>{result.label}</strong>
+            <span>{result.snippet}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 const OutlineSidebarRow = memo(function OutlineSidebarRow(props: {
@@ -1603,6 +1847,111 @@ const OutlineSidebarRow = memo(function OutlineSidebarRow(props: {
   );
 });
 
+function PdfThumbnailList(props: {
+  session: DocumentSession;
+  onJump: (location: ReaderLocation) => void;
+  scrollTop: number;
+  viewportHeight: number;
+}) {
+  const pageCount = props.session.pageCount ?? 0;
+  const path = props.session.fileSource.kind === "desktop-path" ? props.session.fileSource.path : undefined;
+  const range = visibleRowRange(
+    pageCount,
+    THUMBNAIL_ROW_HEIGHT,
+    props.scrollTop,
+    props.viewportHeight || THUMBNAIL_FALLBACK_VIEWPORT_HEIGHT,
+    THUMBNAIL_OVERSCAN_ROWS
+  );
+  const activePage = props.session.location.kind === "page" ? props.session.location.page : undefined;
+
+  if (pageCount === 0) {
+    return <p className="empty-note">PDF thumbnails appear after page metadata loads.</p>;
+  }
+
+  const visiblePages = Array.from({ length: range.end - range.start }, (_, index) => range.start + index + 1);
+  if (activePage && activePage >= 1 && activePage <= pageCount && !visiblePages.includes(activePage)) {
+    visiblePages.push(activePage);
+    visiblePages.sort((first, second) => first - second);
+  }
+
+  return (
+    <div
+      style={{
+        ...outlineWindowStyle,
+        height: `${pageCount * THUMBNAIL_ROW_HEIGHT}px`
+      }}
+    >
+      {visiblePages.map((page) => (
+        <PdfThumbnailRow
+          key={`${props.session.id}-${page}`}
+          path={path}
+          page={page}
+          active={activePage === page}
+          onJump={props.onJump}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PdfThumbnailRow(props: {
+  path?: string;
+  page: number;
+  active: boolean;
+  onJump: (location: ReaderLocation) => void;
+}) {
+  const [dataUrl, setDataUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let disposed = false;
+    if (!props.path) {
+      return;
+    }
+
+    setDataUrl("");
+    setFailed(false);
+    renderPdfPageImage(props.path, props.page, THUMBNAIL_SCALE)
+      .then((image) => {
+        if (!disposed) {
+          setDataUrl(image.dataUrl);
+        }
+      })
+      .catch(() => {
+        if (!disposed) {
+          setFailed(true);
+        }
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [props.page, props.path]);
+
+  return (
+    <button
+      className={`thumbnail-row ${props.active ? "active" : ""}`}
+      type="button"
+      aria-label={`Page ${props.page}`}
+      onClick={() => props.onJump({ kind: "page", page: props.page })}
+      style={{
+        position: "absolute",
+        top: `${(props.page - 1) * THUMBNAIL_ROW_HEIGHT}px`,
+        left: 0,
+        right: 0,
+        height: `${THUMBNAIL_ROW_HEIGHT}px`,
+        boxSizing: "border-box"
+      }}
+    >
+      <span className="thumbnail-box">
+        {dataUrl ? <img src={dataUrl} alt={`Thumbnail page ${props.page}`} /> : failed ? "!" : props.page}
+      </span>
+      <span>Page {props.page}</span>
+      {failed ? <small>Preview failed</small> : null}
+    </button>
+  );
+}
+
 function ReaderViewport(props: {
   session?: DocumentSession;
   recentFiles: RecentFile[];
@@ -1614,9 +1963,12 @@ function ReaderViewport(props: {
   onRemoveRecent: (path: string) => void;
   onClearRecent: () => void;
   onLocationChange: (location: ReaderLocation) => void;
+  onNavigate: (location: ReaderLocation) => void;
   onOutlineChange: (outline: OutlineItem[]) => void;
   onPageCountChange: (pageCount: number) => void;
   onSearchReady: (handler: (query: string) => Promise<SearchResult[]>, wasmDocuments?: SearchWorkerDocument[]) => void;
+  searchQuery: string;
+  searchSelection?: SearchSelection;
   onPinchZoom: (event: React.WheelEvent<HTMLElement>) => void;
 }) {
   const session = props.session;
@@ -1653,6 +2005,7 @@ function ReaderViewport(props: {
           onOutlineChange={props.onOutlineChange}
           onPageCountChange={props.onPageCountChange}
           onSearchReady={props.onSearchReady}
+          searchSelection={props.searchSelection}
         />
       ) : (
         <EpubReader
@@ -1660,8 +2013,11 @@ function ReaderViewport(props: {
           preferences={props.preferences}
           documentCache={props.documentCache}
           onLocationChange={props.onLocationChange}
+          onNavigate={props.onNavigate}
           onOutlineChange={props.onOutlineChange}
           onSearchReady={props.onSearchReady}
+          searchQuery={props.searchQuery}
+          searchSelection={props.searchSelection}
         />
       )}
     </section>
@@ -1757,6 +2113,7 @@ function PdfReader(props: {
   onOutlineChange: (outline: OutlineItem[]) => void;
   onPageCountChange: (pageCount: number) => void;
   onSearchReady: (handler: (query: string) => Promise<SearchResult[]>, wasmDocuments?: SearchWorkerDocument[]) => void;
+  searchSelection?: SearchSelection;
 }) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const lastScrollRevisionRef = useRef<number | undefined>(undefined);
@@ -1884,6 +2241,16 @@ function PdfReader(props: {
       ? [props.session.location.page]
       : Array.from({ length: pdf.numPages }, (_, index) => index + 1);
   const currentPage = props.session.location.kind === "page" ? props.session.location.page : 1;
+  const searchMatchedPages = new Set(
+    props.session.searchResults
+      .map((result) => result.location)
+      .filter((location): location is Extract<ReaderLocation, { kind: "page" }> => location.kind === "page")
+      .map((location) => location.page)
+  );
+  const currentSearchPage =
+    props.searchSelection && props.searchSelection.currentIndex >= 0
+      ? props.session.searchResults[props.searchSelection.currentIndex]?.location
+      : undefined;
 
   return (
     <div ref={canvasRef} className="pdf-canvas">
@@ -1896,6 +2263,13 @@ function PdfReader(props: {
           zoom={zoomForFitMode(props.session.fitMode, props.session.zoom)}
           pdfKitPath={pdfKitPath}
           renderImmediately={props.session.fitMode === "single" || Math.abs(pageNumber - currentPage) <= 1}
+          searchMatch={
+            currentSearchPage?.kind === "page" && currentSearchPage.page === pageNumber
+              ? "current"
+              : searchMatchedPages.has(pageNumber)
+                ? "match"
+                : undefined
+          }
           onVisiblePage={handleVisiblePage}
           onPdfKitFallback={() => setPdfKitNotice("PDFKit unavailable; using PDF.js.")}
         />
@@ -1910,6 +2284,7 @@ function PdfPage(props: {
   zoom: number;
   pdfKitPath?: string;
   renderImmediately: boolean;
+  searchMatch?: "match" | "current";
   onVisiblePage: (pageNumber: number) => void;
   onPdfKitFallback?: () => void;
 }) {
@@ -2034,8 +2409,9 @@ function PdfPage(props: {
   return (
     <article
       ref={pageRef}
-      className="pdf-page-frame"
+      className={`pdf-page-frame ${props.searchMatch ? `search-${props.searchMatch}` : ""}`}
       data-page-number={props.pageNumber}
+      data-search-match={props.searchMatch}
       aria-label={`Page ${props.pageNumber}`}
     >
       {loading || !shouldRender ? <div className="page-skeleton" /> : null}
@@ -2062,10 +2438,14 @@ function EpubReader(props: {
   preferences: Preferences;
   documentCache: Map<string, LoadedReaderDocument>;
   onLocationChange: (location: ReaderLocation) => void;
+  onNavigate: (location: ReaderLocation) => void;
   onOutlineChange: (outline: OutlineItem[]) => void;
   onSearchReady: (handler: (query: string) => Promise<SearchResult[]>, wasmDocuments?: SearchWorkerDocument[]) => void;
+  searchQuery: string;
+  searchSelection?: SearchSelection;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLElement | null>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const metadataRequestRef = useRef(0);
   const chapterRequestRef = useRef(0);
   const pendingLocalChapterHrefRef = useRef<string | undefined>(undefined);
@@ -2084,11 +2464,15 @@ function EpubReader(props: {
   const selectChapterIndex = useCallback((index: number) => {
     const chapter = metadata?.chapters[index];
     if (chapter) {
+      const currentChapter = metadata?.chapters[activeChapterIndex];
+      if (currentChapter) {
+        props.onLocationChange(locationForChapter(currentChapter, metadata.chapters, currentScrollTop(containerRef.current)));
+      }
       pendingLocalChapterHrefRef.current = chapter.href;
     }
 
     setActiveChapterIndex(index);
-  }, [metadata]);
+  }, [activeChapterIndex, metadata, props.onLocationChange]);
 
   useEffect(() => {
     let disposed = false;
@@ -2173,7 +2557,7 @@ function EpubReader(props: {
     const index = metadata?.chapters.findIndex((chapter) => chapter.href === chapterHref) ?? -1;
     if (index >= 0) {
       setActiveChapterIndex(index);
-      containerRef.current?.scrollTo?.({ top: 0 });
+      containerRef.current?.scrollTo?.({ top: props.session.location.scrollTop ?? 0 });
     }
   }, [metadata, props.session.location]);
 
@@ -2184,13 +2568,57 @@ function EpubReader(props: {
       return;
     }
 
-    props.onLocationChange({
-      kind: "epub",
-      chapterHref: chapter.href,
-      chapterLabel: chapter.label,
-      progress: metadata.chapters.length > 1 ? activeChapterIndex / (metadata.chapters.length - 1) : 0
-    });
+    const location = locationForChapter(chapter, metadata.chapters, props.session.location.kind === "epub" ? props.session.location.scrollTop : undefined);
+    if (pendingLocalChapterHrefRef.current === chapter.href) {
+      props.onNavigate(location);
+    } else {
+      props.onLocationChange(location);
+    }
   }, [activeChapterIndex, metadata]);
+
+  useEffect(() => {
+    containerRef.current = surfaceRef.current?.closest(".reader-viewport") as HTMLElement | null;
+  });
+
+  useEffect(() => {
+    const container = surfaceRef.current?.closest(".reader-viewport") as HTMLElement | null;
+    const chapter = metadata?.chapters[activeChapterIndex];
+    if (!container || !chapter) {
+      return;
+    }
+
+    container.scrollTo?.({ top: props.session.location.kind === "epub" ? props.session.location.scrollTop ?? 0 : 0 });
+
+    let pendingLocation: ReaderLocation | undefined;
+    let saveTimer: number | undefined;
+    const flushPendingLocation = () => {
+      if (saveTimer !== undefined) {
+        window.clearTimeout(saveTimer);
+        saveTimer = undefined;
+      }
+
+      if (!pendingLocation) {
+        return;
+      }
+
+      const location = pendingLocation;
+      pendingLocation = undefined;
+      props.onLocationChange(location);
+    };
+    const onScroll = () => {
+      pendingLocation = locationForChapter(chapter, metadata.chapters, currentScrollTop(container));
+      if (saveTimer !== undefined) {
+        window.clearTimeout(saveTimer);
+      }
+      saveTimer = window.setTimeout(flushPendingLocation, EPUB_SCROLL_SAVE_DELAY_MS);
+    };
+
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      container.removeEventListener("scroll", onScroll);
+      flushPendingLocation();
+    };
+  }, [activeChapter?.href, activeChapterIndex, metadata, props.onLocationChange, props.session.id]);
 
   useEffect(() => {
     let disposed = false;
@@ -2248,6 +2676,26 @@ function EpubReader(props: {
     };
   }, [activeChapterIndex, metadata, props.documentCache, props.onSearchReady, props.session.fileSource, props.session.id]);
 
+  const trimmedSearchQuery = props.searchQuery.trim();
+  const currentSearchResult =
+    props.searchSelection && props.searchSelection.currentIndex >= 0
+      ? props.session.searchResults[props.searchSelection.currentIndex]
+      : undefined;
+  const currentSearchChapterHref =
+    currentSearchResult?.location.kind === "epub" ? currentSearchResult.location.chapterHref : undefined;
+  const currentSearchMatchIndex = currentSearchResult?.matchIndex ?? 0;
+  const highlightedHtml = useMemo(() => {
+    if (!activeChapter) {
+      return "";
+    }
+
+    if (!trimmedSearchQuery || currentSearchChapterHref !== activeChapter.href) {
+      return activeChapter.html;
+    }
+
+    return highlightCurrentSearchMatch(activeChapter.html, trimmedSearchQuery, currentSearchMatchIndex);
+  }, [activeChapter?.href, activeChapter?.html, currentSearchChapterHref, currentSearchMatchIndex, trimmedSearchQuery]);
+
   if (readerError) {
     return <InlineReaderError title={readerError.title} message={readerError.message} />;
   }
@@ -2281,10 +2729,11 @@ function EpubReader(props: {
 
   return (
     <div
+      ref={surfaceRef}
       className={`epub-surface theme-${props.session.epubSettings.theme}`}
       style={{ fontSize: props.session.epubSettings.fontSize || props.preferences.epubFontSize }}
     >
-      <article ref={containerRef} className="epub-renderer">
+      <article className="epub-renderer">
         <header className="epub-chapter-bar">
           <button
             type="button"
@@ -2309,7 +2758,7 @@ function EpubReader(props: {
         <div className="epub-progress-track" aria-label={chapterStatus}>
           <span style={{ width: `${chapterPercent}%` }} />
         </div>
-        <div className="epub-content" dangerouslySetInnerHTML={{ __html: chapter.html }} />
+        <div className="epub-content" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
       </article>
     </div>
   );
@@ -2399,6 +2848,40 @@ function disposeSessionResources(session: DocumentSession | undefined, document?
   }
 }
 
+function applyPreferencesToSession(session: DocumentSession, preferences: Preferences): DocumentSession {
+  return applyEpubPreferencesToSession(applyPdfPreferencesToSession(session, preferences), preferences);
+}
+
+function applyPdfPreferencesToSession(session: DocumentSession, preferences: Preferences): DocumentSession {
+  if (session.format === "pdf" && session.fitMode !== preferences.defaultPdfFitMode) {
+    return {
+      ...session,
+      fitMode: preferences.defaultPdfFitMode,
+      zoom: preferences.defaultPdfFitMode === "actual-size" ? 1 : session.zoom
+    };
+  }
+
+  return session;
+}
+
+function applyEpubPreferencesToSession(session: DocumentSession, preferences: Preferences): DocumentSession {
+  if (
+    session.format === "epub" &&
+    (session.epubSettings.fontSize !== preferences.epubFontSize ||
+      session.epubSettings.theme !== preferences.epubTheme)
+  ) {
+    return {
+      ...session,
+      epubSettings: {
+        fontSize: preferences.epubFontSize,
+        theme: preferences.epubTheme
+      }
+    };
+  }
+
+  return session;
+}
+
 function disposeLoadedReaderDocument(document?: LoadedReaderDocument) {
   if (document?.pdf) {
     void document.pdf.destroy();
@@ -2414,6 +2897,28 @@ function chapterIndexForLocation(chapters: EpubChapterMetadata[], location: Read
 
   const index = chapters.findIndex((chapter) => chapter.href === location.chapterHref);
   return index >= 0 ? index : 0;
+}
+
+function locationForChapter(
+  chapter: EpubChapterMetadata,
+  chapters: EpubChapterMetadata[],
+  scrollTop?: number
+): ReaderLocation {
+  return {
+    kind: "epub",
+    chapterHref: chapter.href,
+    chapterLabel: chapter.label,
+    progress: chapters.length > 1 ? chapter.index / (chapters.length - 1) : 0,
+    scrollTop
+  };
+}
+
+function currentScrollTop(container: HTMLElement | null): number | undefined {
+  if (!container) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.round(container.scrollTop));
 }
 
 let pdfJsModule: Promise<typeof import("pdfjs-dist")> | undefined;
@@ -2611,18 +3116,25 @@ async function searchDesktopPdf(path: string, query: string): Promise<SearchResu
 
 async function searchDesktopEpub(path: string, query: string): Promise<SearchResult[]> {
   const results = await searchEpubDocument(path, query);
+  const chapterMatchCounts = new Map<string, number>();
 
-  return results.map((result) => ({
-    id: result.id,
-    label: result.label,
-    snippet: result.snippet,
-    location: {
-      kind: "epub",
-      chapterHref: result.href,
-      chapterLabel: result.label,
-      progress: result.progress
-    }
-  }));
+  return results.map((result) => {
+    const matchIndex = chapterMatchCounts.get(result.href) ?? 0;
+    chapterMatchCounts.set(result.href, matchIndex + 1);
+
+    return {
+      id: result.id,
+      label: result.label,
+      snippet: result.snippet,
+      location: {
+        kind: "epub",
+        chapterHref: result.href,
+        chapterLabel: result.label,
+        progress: result.progress
+      },
+      matchIndex
+    };
+  });
 }
 
 async function parseEpub(data: ArrayBuffer): Promise<EpubChapter[]> {
@@ -2815,6 +3327,64 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function highlightCurrentSearchMatch(html: string, query: string, occurrenceIndex = 0): string {
+  if (!query) {
+    return html;
+  }
+
+  const document = new DOMParser().parseFromString(html, "text/html");
+  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matcher = new RegExp(escapedQuery, "i");
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  let remainingOccurrences = Math.max(0, occurrenceIndex);
+
+  while (node) {
+    const textNode = node as Text;
+    const text = textNode.nodeValue ?? "";
+    let match = matcher.exec(text);
+
+    if (!match) {
+      node = walker.nextNode();
+      continue;
+    }
+
+    while (match && remainingOccurrences > 0) {
+      remainingOccurrences -= 1;
+      matcher.lastIndex = 0;
+      const nextStart = match.index + match[0].length;
+      match = matcher.exec(text.slice(nextStart));
+      if (match) {
+        match.index += nextStart;
+      }
+    }
+
+    if (!match) {
+      node = walker.nextNode();
+      continue;
+    }
+
+    const fragment = document.createDocumentFragment();
+    if (match.index > 0) {
+      fragment.append(document.createTextNode(text.slice(0, match.index)));
+    }
+
+    const mark = document.createElement("mark");
+    mark.className = "search-highlight current";
+    mark.textContent = match[0];
+    fragment.append(mark);
+    const cursor = match.index + match[0].length;
+    if (cursor < text.length) {
+      fragment.append(document.createTextNode(text.slice(cursor)));
+    }
+
+    textNode.replaceWith(fragment);
+    break;
+  }
+
+  return document.body.innerHTML;
+}
+
 function renderPdfPage(page: PDFPageProxy, canvas: HTMLCanvasElement | null, zoom: number): PdfRenderTask | undefined {
   if (!canvas) {
     return;
@@ -3004,7 +3574,7 @@ function zoomForFitMode(fitMode: FitMode, zoom: number): number {
 function modeLabel(mode: SidebarMode): string {
   return {
     contents: "Contents",
-    thumbnails: "Thumbs",
+    thumbnails: "Thumbnails",
     bookmarks: "Marks",
     search: "Search"
   }[mode];

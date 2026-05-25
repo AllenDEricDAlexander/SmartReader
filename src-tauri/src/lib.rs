@@ -1048,8 +1048,9 @@ fn search_epub_document_from_path(
     let mut results = Vec::new();
 
     for chapter in &package.chapters {
-        let raw = read_zip_text(&mut archive, &chapter.href)
-            .map_err(|_| "Invalid EPUB: missing chapter".to_string())?;
+        let Ok(raw) = read_zip_text(&mut archive, &chapter.href) else {
+            continue;
+        };
         let sanitized_html = sanitize_epub_html(&raw);
         let text = text_from_sanitized_html(&sanitized_html);
         let lower_text = text.to_lowercase();
@@ -2099,6 +2100,17 @@ mod tests {
     }
 
     #[test]
+    fn open_pdf_document_returns_access_error_for_malformed_pdf() {
+        let path = test_path("malformed.pdf");
+        fs::write(&path, b"not a pdf").unwrap();
+
+        let result = open_pdf_document_from_path(path.clone());
+
+        assert_eq!(result.unwrap_err(), DOCUMENT_ACCESS_ERROR);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn search_pdf_document_finds_text_without_renderer_pdfjs() {
         let path = test_path("search.pdf");
         write_test_pdf(&path, &["Intro body", "Native PDF result"], false).unwrap();
@@ -2305,6 +2317,24 @@ mod tests {
     }
 
     #[test]
+    fn read_epub_chapter_returns_missing_chapter_error_when_archive_entry_is_unreadable() {
+        let path = test_path("missing-chapter.epub");
+        write_test_epub(
+            &path,
+            TestEpubOptions {
+                omitted_chapters: vec!["OPS/chapter-two.xhtml"],
+                ..TestEpubOptions::default()
+            },
+        )
+        .unwrap();
+
+        let result = read_epub_chapter_from_path(path.clone(), "OPS/chapter-two.xhtml".to_string());
+
+        assert_eq!(result.unwrap_err(), "Invalid EPUB: missing chapter");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn read_epub_chapter_returns_safe_resource_metadata() {
         let path = test_path("chapter-resources.epub");
         write_test_epub(
@@ -2371,6 +2401,26 @@ mod tests {
         assert!(results.len() > 120);
         assert_eq!(results[0].href, "OPS/chapter-1.xhtml");
         assert_eq!(results.last().unwrap().href, "OPS/chapter-120.xhtml");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn search_epub_document_skips_unreadable_chapters() {
+        let path = test_path("search-missing-chapter.epub");
+        write_test_epub(
+            &path,
+            TestEpubOptions {
+                omitted_chapters: vec!["OPS/chapter-two.xhtml"],
+                ..TestEpubOptions::default()
+            },
+        )
+        .unwrap();
+
+        let results = search_epub_document_from_path(path.clone(), "chapter".to_string()).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].href, "OPS/chapter-one.xhtml");
+        assert!(results[0].snippet.contains("First chapter"));
         fs::remove_file(path).unwrap();
     }
 
@@ -2679,6 +2729,7 @@ mod tests {
         include_extra_resource: bool,
         include_chapter_resource_reference: bool,
         encrypted_resources: Vec<&'static str>,
+        omitted_chapters: Vec<&'static str>,
         chapter_count: usize,
     }
 
@@ -2693,6 +2744,7 @@ mod tests {
                 include_extra_resource: false,
                 include_chapter_resource_reference: false,
                 encrypted_resources: Vec::new(),
+                omitted_chapters: Vec::new(),
                 chapter_count: 2,
             }
         }
@@ -2810,13 +2862,19 @@ mod tests {
         }
 
         for index in 0..options.chapter_count {
-            zip.start_file(
-                format!(
-                    "OPS/{}",
-                    test_epub_chapter_file(index, options.chapter_count)
-                ),
-                file_options,
-            )?;
+            let chapter_path = format!(
+                "OPS/{}",
+                test_epub_chapter_file(index, options.chapter_count)
+            );
+            if options
+                .omitted_chapters
+                .iter()
+                .any(|omitted_chapter| *omitted_chapter == chapter_path)
+            {
+                continue;
+            }
+
+            zip.start_file(chapter_path, file_options)?;
             let label = test_epub_chapter_label(index, options.chapter_count);
             let text = test_epub_chapter_text(index, options.chapter_count);
             let resource_html = if options.include_chapter_resource_reference && index == 0 {

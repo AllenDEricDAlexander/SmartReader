@@ -544,6 +544,18 @@ button {
   box-shadow: 0 2px 5px rgba(45, 37, 28, 0.08);
 }
 
+.thumbnail-box img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.thumbnail-row small {
+  grid-column: 2;
+  color: var(--danger);
+  font-size: 11px;
+}
+
 .search-result-row {
   display: grid;
   gap: 3px;
@@ -596,6 +608,14 @@ button {
   display: block;
   max-width: min(100%, calc(100vw - 360px));
   height: auto !important;
+}
+
+.pdf-page-frame.search-match {
+  box-shadow: var(--shadow-paper), 0 0 0 3px rgba(199, 146, 112, 0.42);
+}
+
+.pdf-page-frame.search-current {
+  box-shadow: var(--shadow-paper), 0 0 0 4px rgba(155, 99, 63, 0.72);
 }
 
 .page-number {
@@ -811,6 +831,16 @@ button {
 .epub-content img {
   max-width: 100%;
   height: auto;
+}
+
+.search-highlight {
+  border-radius: 3px;
+  background: #ffe28a;
+  color: inherit;
+}
+
+.search-highlight.current {
+  background: #f2ad62;
 }
 
 .empty-state,

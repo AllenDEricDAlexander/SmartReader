@@ -85,15 +85,19 @@ const tauriMocks = vi.hoisted(() => {
       { id: "chapter-2", title: "Chapter Two", href: "OPS/chapter-2.xhtml", index: 1, level: 0 }
     ]
   }));
-  const readEpubChapter = vi.fn(async () => ({
-    id: "chapter-1",
-    href: "OPS/chapter-1.xhtml",
-    label: "Chapter One",
-    index: 0,
-    sanitizedHtml: "<p>Native chapter body</p>",
-    text: "Native chapter body",
-    resources: [] as EpubResourceMetadata[]
-  }));
+  const readEpubChapter = vi.fn(async (_path: string, href = "OPS/chapter-1.xhtml") => {
+    const chapterNumber = href.includes("chapter-2") ? 2 : 1;
+
+    return {
+      id: `chapter-${chapterNumber}`,
+      href,
+      label: chapterNumber === 2 ? "Chapter Two" : "Chapter One",
+      index: chapterNumber - 1,
+      sanitizedHtml: "<p>Native chapter body</p>",
+      text: "Native chapter body",
+      resources: [] as EpubResourceMetadata[]
+    };
+  });
   const searchEpubDocument = vi.fn(async () => [
     {
       id: "search-chapter-2-4",
@@ -120,13 +124,13 @@ const tauriMocks = vi.hoisted(() => {
       page: 2
     }
   ]);
-  const renderPdfPageImage = vi.fn(async () => ({
-    page: 1,
+  const renderPdfPageImage = vi.fn(async (_path: string, page = 1, scale = 1) => ({
+    page,
     width: 640,
     height: 900,
-    scale: 1,
+    scale,
     dataUrl: "data:image/png;base64,pdfkit",
-    renderer: "pdfkit"
+    renderer: "pdfkit" as const
   }));
   const getSmartReaderCacheInfo = vi.fn(async () => ({
     defaultPath: "/Users/mario/Library/Application Support/SmartReader/cache",
@@ -778,6 +782,555 @@ describe("App desktop open delivery", () => {
     expect(screen.getByLabelText("Page or location")).toHaveValue("9");
   });
 
+  it("focuses an already-open recent document instead of opening a duplicate tab", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.click(screen.getByText("start.pdf"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("start.pdf reader")).toBeInTheDocument();
+    });
+    expect(tauriMocks.createDesktopSession).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByText("start.pdf")).toHaveLength(1);
+  });
+
+  it("keeps the existing tab active when a duplicate desktop open is delivered", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await screen.findByLabelText("start.pdf reader");
+
+    await act(async () => {
+      tauriMocks.emitDesktopOpen("/Users/mario/Books/start.pdf");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("start.pdf reader")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText("start.pdf")).toHaveLength(1);
+    expect(screen.getByLabelText("Page or location")).toHaveValue("1");
+  });
+
+  it("restores a closed desktop recent document at its saved location", async () => {
+    tauriMocks.setPendingPaths([]);
+    tauriMocks.openPdfDocument.mockResolvedValueOnce({
+      id: "/Users/mario/Books/spec.pdf",
+      pageCount: 12,
+      outline: []
+    });
+    localStorage.setItem(
+      "smartreader.recentFiles.v1",
+      JSON.stringify([
+        {
+          id: "/Users/mario/Books/spec.pdf",
+          title: "spec.pdf",
+          path: "/Users/mario/Books/spec.pdf",
+          parentPath: "/Users/mario/Books",
+          format: "pdf",
+          access: "desktop-path",
+          lastOpenedAt: 1,
+          resumeLabel: "Page 9",
+          location: { kind: "page", page: 9 }
+        }
+      ])
+    );
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("spec.pdf"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Page or location")).toHaveValue("9");
+    });
+    expect(screen.getByLabelText("spec.pdf reader")).toBeInTheDocument();
+  });
+
+  it("uses toolbar Back and Forward for explicit PDF navigation history", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 0;
+    });
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.click(screen.getByText("Later chapter"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
+    });
+
+    fireEvent.click(screen.getByLabelText("Back"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Page or location")).toHaveValue("1");
+    });
+
+    fireEvent.click(screen.getByLabelText("Forward"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
+    });
+  });
+
+  it("finds, cycles, highlights, and clears desktop PDF search matches", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    tauriMocks.searchPdfDocument.mockResolvedValueOnce([
+      { id: "pdf-search-1-4", label: "Page 1", snippet: "First native result", page: 1 },
+      { id: "pdf-search-2-4", label: "Page 2", snippet: "Second native result", page: 2 }
+    ]);
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.click(screen.getByLabelText("Find"));
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "native" }
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+
+    expect(await screen.findByText("1 / 2")).toBeInTheDocument();
+    expect(document.querySelector('[data-page-number="1"]')).toHaveAttribute("data-search-match", "current");
+    expect(document.querySelector('[data-page-number="2"]')).toHaveAttribute("data-search-match", "match");
+
+    fireEvent.click(screen.getByLabelText("Next result"));
+
+    await waitFor(() => {
+      expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    });
+    expect(document.querySelector('[data-page-number="2"]')).toHaveAttribute("data-search-match", "current");
+
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "" }
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("0 / 0")).toBeInTheDocument();
+    });
+    expect(document.querySelector('[data-page-number="1"]')).not.toHaveAttribute("data-search-match");
+    expect(document.querySelector('[data-page-number="2"]')).not.toHaveAttribute("data-search-match");
+  });
+
+  it("shows no-result search feedback without moving the current location", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    tauriMocks.searchPdfDocument.mockResolvedValueOnce([]);
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.click(screen.getByLabelText("Find"));
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "missing" }
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+
+    expect(await screen.findByText("No results")).toBeInTheDocument();
+    expect(screen.getByLabelText("Page or location")).toHaveValue("1");
+  });
+
+  it("loads PDF thumbnails progressively and keeps per-page failures local", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    tauriMocks.openPdfDocument.mockResolvedValueOnce({
+      id: "/Users/mario/Books/start.pdf",
+      pageCount: 40,
+      outline: []
+    });
+    tauriMocks.renderPdfPageImage.mockImplementation(async (_path: string, page: number) => {
+      if (page === 2) {
+        throw new Error("thumbnail failed");
+      }
+
+      return {
+        page,
+        width: 64,
+        height: 90,
+        scale: 0.18,
+        dataUrl: `data:image/png;base64,page-${page}`,
+        renderer: "pdfkit" as const
+      };
+    });
+
+    render(<App />);
+
+    await screen.findByLabelText("start.pdf reader");
+    fireEvent.click(screen.getByRole("tab", { name: "Thumbnails" }));
+
+    await waitFor(() => {
+      expect(screen.getByAltText("Thumbnail page 1")).toBeInTheDocument();
+    });
+    expect(await screen.findByText("Preview failed")).toBeInTheDocument();
+    expect(tauriMocks.renderPdfPageImage.mock.calls.length).toBeLessThan(12);
+
+    fireEvent.click(screen.getByRole("button", { name: "Page 3" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Page or location")).toHaveValue("3");
+    });
+  });
+
+  it("windows large PDF thumbnail lists and only requests rendered thumbnails", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/large-thumbnails.pdf"]);
+    tauriMocks.openPdfDocument.mockResolvedValueOnce({
+      id: "/Users/mario/Books/large-thumbnails.pdf",
+      pageCount: 10000,
+      outline: []
+    });
+
+    render(<App />);
+
+    await screen.findByLabelText("large-thumbnails.pdf reader");
+    fireEvent.click(screen.getByRole("tab", { name: "Thumbnails" }));
+
+    await screen.findByRole("button", { name: "Page 1" });
+    expect(screen.queryByRole("button", { name: "Page 9700" })).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".thumbnail-row").length).toBeLessThan(200);
+    expect(tauriMocks.renderPdfPageImage.mock.calls.length).toBeLessThan(50);
+
+    const sidebarContent = document.querySelector(".sidebar-content");
+    expect(sidebarContent).toBeInstanceOf(HTMLElement);
+    Object.defineProperty(sidebarContent, "clientHeight", {
+      configurable: true,
+      value: 420
+    });
+    Object.defineProperty(sidebarContent, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 737124
+    });
+
+    fireEvent.scroll(sidebarContent as HTMLElement);
+
+    await screen.findByRole("button", { name: "Page 9700" });
+    expect(document.querySelectorAll(".thumbnail-row").length).toBeLessThan(200);
+    expect(tauriMocks.renderPdfPageImage.mock.calls.length).toBeLessThan(100);
+  });
+
+  it("windows large search result sidebars without limiting search results", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    tauriMocks.searchPdfDocument.mockResolvedValueOnce(
+      Array.from({ length: 10000 }, (_, index) => ({
+        id: `pdf-search-${index}`,
+        label: `Result ${index}`,
+        snippet: `Snippet ${index}`,
+        page: (index % 2) + 1
+      }))
+    );
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.click(screen.getByLabelText("Find"));
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "needle" }
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+
+    await screen.findByText("1 / 10000");
+    expect(screen.queryByRole("button", { name: /Result 9700, result 9701/ })).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".search-result-row").length).toBeLessThan(200);
+
+    const sidebarContent = document.querySelector(".sidebar-content");
+    expect(sidebarContent).toBeInstanceOf(HTMLElement);
+    Object.defineProperty(sidebarContent, "clientHeight", {
+      configurable: true,
+      value: 420
+    });
+    Object.defineProperty(sidebarContent, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 562600
+    });
+
+    fireEvent.scroll(sidebarContent as HTMLElement);
+
+    await screen.findByRole("button", { name: /Result 9700, result 9701/ });
+    expect(screen.queryByRole("button", { name: /Result 0, result 1/ })).not.toBeInTheDocument();
+  });
+
+  it("restores and saves EPUB chapter scroll location", async () => {
+    tauriMocks.setPendingPaths([]);
+    localStorage.setItem(
+      "smartreader.appSession.v1",
+      JSON.stringify({
+        version: 1,
+        activeTabId: "epub-1",
+        sidebarOpen: true,
+        preferences: {
+          reopenLastSession: true,
+          rememberPosition: true,
+          defaultSidebarVisible: true,
+          defaultPdfFitMode: "continuous",
+          epubFontSize: 18,
+          epubTheme: "system",
+          recentRetention: 12,
+          cacheLocation: { mode: "default" },
+          search: { resultLimit: "unlimited", includePdf: true, includeEpub: true },
+          shortcuts: [],
+          wasm: { enabled: true },
+          pdfKit: { enabled: false }
+        },
+        sessions: [
+          {
+            id: "epub-1",
+            title: "story.epub",
+            filePath: "/Users/mario/Books/story.epub",
+            fileSource: { kind: "desktop-path", path: "/Users/mario/Books/story.epub" },
+            format: "epub",
+            status: "ready",
+            location: {
+              kind: "epub",
+              chapterHref: "OPS/chapter-2.xhtml",
+              chapterLabel: "Chapter Two",
+              progress: 1,
+              scrollTop: 240
+            },
+            lastLocation: {
+              kind: "epub",
+              chapterHref: "OPS/chapter-2.xhtml",
+              chapterLabel: "Chapter Two",
+              progress: 1,
+              scrollTop: 240
+            },
+            zoom: 1,
+            fitMode: "continuous",
+            sidebarMode: "contents",
+            bookmarks: [],
+            epubSettings: { fontSize: 18, theme: "system" },
+            openedAt: 1,
+            updatedAt: 2
+          }
+        ]
+      })
+    );
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: scrollTo
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(tauriMocks.readEpubChapter).toHaveBeenCalledWith("/Users/mario/Books/story.epub", "OPS/chapter-2.xhtml");
+    });
+    await waitFor(() => {
+      expect(scrollTo).toHaveBeenCalledWith({ top: 240 });
+    });
+
+    const reader = await screen.findByLabelText("story.epub reader");
+    Object.defineProperty(reader, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 360
+    });
+    fireEvent.scroll(reader);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Chapter Two").length).toBeGreaterThan(0);
+    });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 300));
+    });
+    expect(localStorage.getItem("smartreader.appSession.v1")).toContain("\"scrollTop\":360");
+  });
+
+  it("debounces high-frequency EPUB scroll persistence while keeping the final scrollTop", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
+
+    render(<App />);
+
+    await screen.findByText("Native chapter body");
+    const reader = await screen.findByLabelText("story.epub reader");
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+    setItemSpy.mockClear();
+
+    vi.useFakeTimers();
+    try {
+      for (let index = 0; index < 10; index += 1) {
+        Object.defineProperty(reader, "scrollTop", {
+          configurable: true,
+          writable: true,
+          value: 300 + index
+        });
+        fireEvent.scroll(reader);
+      }
+
+      const sessionWrites = () =>
+        setItemSpy.mock.calls.filter(([key]) => key === "smartreader.appSession.v1");
+
+      expect(sessionWrites()).toHaveLength(0);
+
+      await act(async () => {
+        vi.advanceTimersByTime(249);
+      });
+
+      expect(sessionWrites()).toHaveLength(0);
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+
+      expect(sessionWrites()).toHaveLength(1);
+      expect(localStorage.getItem("smartreader.appSession.v1")).toContain("\"scrollTop\":309");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps EPUB visual highlights capacity-safe for a large common-word chapter", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
+    tauriMocks.readEpubChapter.mockResolvedValueOnce({
+      id: "chapter-1",
+      href: "OPS/chapter-1.xhtml",
+      label: "Chapter One",
+      index: 0,
+      sanitizedHtml: `<p>${Array.from({ length: 1000 }, () => "the").join(" ")}</p>`,
+      text: Array.from({ length: 1000 }, () => "the").join(" "),
+      resources: [] as EpubResourceMetadata[]
+    });
+    tauriMocks.searchEpubDocument.mockResolvedValueOnce([
+      {
+        id: "search-chapter-1-common",
+        label: "Chapter One",
+        snippet: "the",
+        href: "OPS/chapter-1.xhtml",
+        index: 0,
+        progress: 0
+      }
+    ]);
+
+    render(<App />);
+
+    await screen.findByText(/the the the/);
+    fireEvent.click(screen.getByLabelText("Find"));
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "the" }
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+
+    await screen.findByText("1 / 1");
+
+    const marks = document.querySelectorAll(".epub-content mark.search-highlight");
+    expect(marks).toHaveLength(1);
+    expect(marks[0]).toHaveClass("current");
+  });
+
+  it("does not rebuild EPUB highlighted HTML for unrelated renders", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
+    tauriMocks.readEpubChapter.mockResolvedValueOnce({
+      id: "chapter-1",
+      href: "OPS/chapter-1.xhtml",
+      label: "Chapter One",
+      index: 0,
+      sanitizedHtml: "<p>Needle chapter body needle.</p>",
+      text: "Needle chapter body needle.",
+      resources: [] as EpubResourceMetadata[]
+    });
+    tauriMocks.searchEpubDocument.mockResolvedValueOnce([
+      {
+        id: "search-chapter-1-needle",
+        label: "Chapter One",
+        snippet: "needle",
+        href: "OPS/chapter-1.xhtml",
+        index: 0,
+        progress: 0
+      }
+    ]);
+    const parseSpy = vi.spyOn(DOMParser.prototype, "parseFromString");
+
+    render(<App />);
+
+    await screen.findByText(/Needle chapter body/);
+    fireEvent.click(screen.getByLabelText("Find"));
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "needle" }
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+
+    await screen.findByText("1 / 1");
+    expect(parseSpy).toHaveBeenCalled();
+    parseSpy.mockClear();
+
+    fireEvent.click(screen.getByLabelText("More"));
+
+    expect(await screen.findByRole("dialog", { name: "Preferences" })).toBeInTheDocument();
+    expect(parseSpy).not.toHaveBeenCalled();
+  });
+
+  it("moves the single EPUB current highlight to the selected same-chapter occurrence", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
+    tauriMocks.readEpubChapter.mockResolvedValueOnce({
+      id: "chapter-1",
+      href: "OPS/chapter-1.xhtml",
+      label: "Chapter One",
+      index: 0,
+      sanitizedHtml: "<p>first needle then second needle.</p>",
+      text: "first needle then second needle.",
+      resources: [] as EpubResourceMetadata[]
+    });
+    tauriMocks.searchEpubDocument.mockResolvedValueOnce([
+      {
+        id: "search-chapter-1-first",
+        label: "Chapter One",
+        snippet: "first needle",
+        href: "OPS/chapter-1.xhtml",
+        index: 0,
+        progress: 0
+      },
+      {
+        id: "search-chapter-1-second",
+        label: "Chapter One",
+        snippet: "second needle",
+        href: "OPS/chapter-1.xhtml",
+        index: 0,
+        progress: 0
+      }
+    ]);
+
+    render(<App />);
+
+    await screen.findByText(/first needle then second needle/);
+    fireEvent.click(screen.getByLabelText("Find"));
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "needle" }
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+
+    await screen.findByText("1 / 2");
+    expect(document.querySelector(".epub-content")?.innerHTML).toContain("first <mark");
+    expect(document.querySelector(".epub-content")?.innerHTML).toContain("</mark> then second needle");
+
+    fireEvent.click(screen.getByLabelText("Next result"));
+
+    await screen.findByText("2 / 2");
+    expect(document.querySelectorAll(".epub-content mark.search-highlight.current")).toHaveLength(1);
+    expect(document.querySelector(".epub-content")?.innerHTML).toContain("first needle then second <mark");
+  });
+
+  it("does not reset a manual PDF fit mode when EPUB preferences change", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.change(screen.getByLabelText("Fit mode"), {
+      target: { value: "fit-width" }
+    });
+    expect(screen.getByLabelText("Fit mode")).toHaveValue("fit-width");
+
+    fireEvent.click(screen.getByLabelText("More"));
+    fireEvent.change(await screen.findByLabelText("EPUB font size"), {
+      target: { value: "22" }
+    });
+
+    expect(screen.getByLabelText("Fit mode")).toHaveValue("fit-width");
+  });
+
   it("loads desktop EPUB metadata and the active chapter through Tauri without full-book byte parsing", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
 
@@ -1114,7 +1667,9 @@ function createSearchWorkerMock(options: { failInit?: boolean } = {}) {
                 id: `wasm-${document.id}-${index}`,
                 label: document.label,
                 snippet: `WASM: ${document.text}`,
-                location: document.location
+                location: document.location,
+                matchIndex: found.length,
+                matchOffset: index
               });
               searchStart = index + query.length;
               index = text.indexOf(query, searchStart);

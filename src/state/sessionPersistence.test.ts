@@ -75,6 +75,96 @@ describe("app session persistence", () => {
     });
   });
 
+  it("preserves EPUB chapter scroll offsets without letting saved reading settings override current preferences", () => {
+    const epub = updateSessionLocation(
+      createSessionFromFile({
+        kind: "desktop-path",
+        path: "/Users/mario/Books/novel.epub",
+        name: "novel.epub",
+        size: 0,
+        lastModified: 0
+      }),
+      {
+        kind: "epub",
+        chapterHref: "chapter-4.xhtml",
+        chapterLabel: "Chapter 4",
+        progress: 0.4,
+        scrollTop: 320
+      }
+    );
+    const savedPreferences = {
+      ...preferences,
+      epubFontSize: 22,
+      epubTheme: "dark" as const
+    };
+    const currentPreferences = {
+      ...preferences,
+      epubFontSize: 16,
+      epubTheme: "light" as const
+    };
+
+    const snapshot = createAppSessionSnapshot({
+      sessions: [
+        {
+          ...epub,
+          epubSettings: {
+            fontSize: 22,
+            theme: "dark"
+          }
+        }
+      ],
+      activeTabId: epub.id,
+      sidebarOpen: false,
+      preferences: savedPreferences
+    });
+    const restored = restoreAppSessionSnapshot(snapshot, currentPreferences, {
+      preferFallbackPreferences: true
+    });
+
+    expect(restored.preferences.epubFontSize).toBe(16);
+    expect(restored.preferences.epubTheme).toBe("light");
+    expect(restored.sessions[0].location).toEqual({
+      kind: "epub",
+      chapterHref: "chapter-4.xhtml",
+      chapterLabel: "Chapter 4",
+      progress: 0.4,
+      scrollTop: 320
+    });
+    expect(restored.sessions[0].epubSettings).toEqual({
+      fontSize: 16,
+      theme: "light"
+    });
+  });
+
+  it("restores saved global preferences by default on startup", () => {
+    const session = createSessionFromFile({
+      kind: "desktop-path",
+      path: "/Users/mario/Books/spec.pdf",
+      name: "spec.pdf",
+      size: 0,
+      lastModified: 0
+    });
+    const savedPreferences = {
+      ...preferences,
+      defaultPdfFitMode: "fit-width" as const,
+      epubFontSize: 20,
+      epubTheme: "dark" as const
+    };
+
+    const snapshot = createAppSessionSnapshot({
+      sessions: [session],
+      activeTabId: session.id,
+      sidebarOpen: true,
+      preferences: savedPreferences
+    });
+    const restored = restoreAppSessionSnapshot(snapshot, preferences);
+
+    expect(restored.preferences.defaultPdfFitMode).toBe("fit-width");
+    expect(restored.preferences.epubFontSize).toBe(20);
+    expect(restored.preferences.epubTheme).toBe("dark");
+    expect(restored.sessions[0].fitMode).toBe("fit-width");
+  });
+
   it("does not persist browser File sessions that cannot be reopened", () => {
     const file = new File(["content"], "browser.pdf", { type: "application/pdf" });
     const browserSession = createSessionFromFile({

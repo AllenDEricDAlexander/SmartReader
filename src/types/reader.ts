@@ -9,7 +9,14 @@ export type ReaderTheme = "system" | "light" | "dark";
 export type ReaderLocation =
   | { kind: "none" }
   | { kind: "page"; page: number }
-  | { kind: "epub"; cfi?: string; chapterHref?: string; chapterLabel?: string; progress: number };
+  | {
+      kind: "epub";
+      cfi?: string;
+      chapterHref?: string;
+      chapterLabel?: string;
+      progress: number;
+      scrollTop?: number;
+    };
 
 export type ReaderErrorKind =
   | "unsupported-format"
@@ -51,6 +58,8 @@ export interface SearchResult {
   label: string;
   snippet: string;
   location: ReaderLocation;
+  matchIndex?: number;
+  matchOffset?: number;
 }
 
 export interface EpubResourceMetadata {

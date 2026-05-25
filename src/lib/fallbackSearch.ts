@@ -27,16 +27,18 @@ export async function searchEpubChapters(
   }
 
   return chapters.flatMap((chapter, index) =>
-    findAllTextMatches(chapter.text, normalizedQuery).map((matchIndex) => ({
-      id: `epub-search-${chapter.id}-${matchIndex}`,
+    findAllTextMatches(chapter.text, normalizedQuery).map((matchOffset, matchIndex) => ({
+      id: `epub-search-${chapter.id}-${matchOffset}`,
       label: chapter.label,
-      snippet: snippetFor(chapter.text, matchIndex, query.length),
+      snippet: snippetFor(chapter.text, matchOffset, query.length),
       location: {
         kind: "epub" as const,
         chapterHref: chapter.href,
         chapterLabel: chapter.label,
         progress: chapters.length > 1 ? index / (chapters.length - 1) : 0
-      }
+      },
+      matchIndex,
+      matchOffset
     }))
   );
 }

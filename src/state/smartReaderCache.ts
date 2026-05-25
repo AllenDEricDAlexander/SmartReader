@@ -529,7 +529,8 @@ function isReaderLocation(value: unknown): value is PersistedDocumentSession["lo
       typeof value.progress === "number" &&
       (value.cfi === undefined || typeof value.cfi === "string") &&
       (value.chapterHref === undefined || typeof value.chapterHref === "string") &&
-      (value.chapterLabel === undefined || typeof value.chapterLabel === "string")
+      (value.chapterLabel === undefined || typeof value.chapterLabel === "string") &&
+      (value.scrollTop === undefined || typeof value.scrollTop === "number")
     );
   }
 
@@ -554,7 +555,8 @@ function sanitizeReaderLocation(value: unknown): PersistedDocumentSession["locat
     cfi: value.cfi,
     chapterHref: value.chapterHref,
     chapterLabel: value.chapterLabel,
-    progress: value.progress
+    progress: value.progress,
+    scrollTop: value.scrollTop
   };
 }
 

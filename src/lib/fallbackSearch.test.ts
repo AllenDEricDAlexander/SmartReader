@@ -21,6 +21,8 @@ describe("fallback search", () => {
       "epub-search-chapter-1-11",
       "epub-search-chapter-1-22"
     ]);
+    expect(results.map((result) => result.matchIndex)).toEqual([0, 1, 2]);
+    expect(results.map((result) => result.matchOffset)).toEqual([0, 11, 22]);
   });
 
   it("returns every same-page PDF text match without applying a result limit", async () => {

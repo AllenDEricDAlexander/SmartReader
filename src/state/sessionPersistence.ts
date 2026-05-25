@@ -58,12 +58,18 @@ export function saveAppSessionSnapshot(snapshot: AppSessionSnapshot): void {
 
 export function restoreAppSessionSnapshot(
   snapshot: AppSessionSnapshot | undefined,
-  fallbackPreferences: Preferences
+  fallbackPreferences: Preferences,
+  options: { preferFallbackPreferences?: boolean } = {}
 ): AppSessionState {
-  const preferences = {
-    ...fallbackPreferences,
-    ...(snapshot?.preferences ?? {})
-  };
+  const preferences = options.preferFallbackPreferences
+    ? {
+        ...(snapshot?.preferences ?? {}),
+        ...fallbackPreferences
+      }
+    : {
+        ...fallbackPreferences,
+        ...(snapshot?.preferences ?? {})
+      };
 
   if (!snapshot || !preferences.reopenLastSession) {
     const empty = createEmptySession();
@@ -76,7 +82,7 @@ export function restoreAppSessionSnapshot(
     };
   }
 
-  const sessions = snapshot.sessions.map(restoreDocumentSession);
+  const sessions = snapshot.sessions.map((session) => restoreDocumentSession(session, preferences));
   const activeTabId = sessions.some((session) => session.id === snapshot.activeTabId)
     ? snapshot.activeTabId
     : sessions[0]?.id;
@@ -131,10 +137,18 @@ function persistDocumentSession(
   };
 }
 
-function restoreDocumentSession(session: PersistedDocumentSession): DocumentSession {
+function restoreDocumentSession(
+  session: PersistedDocumentSession,
+  preferences: Preferences
+): DocumentSession {
   return {
     ...session,
     fileSource: session.fileSource,
+    fitMode: session.format === "pdf" ? preferences.defaultPdfFitMode : session.fitMode,
+    epubSettings: {
+      fontSize: preferences.epubFontSize,
+      theme: preferences.epubTheme
+    },
     source: undefined,
     objectUrl: undefined,
     outline: [],

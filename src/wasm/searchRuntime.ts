@@ -69,7 +69,9 @@ export function findAllDocumentMatches(
       id: `wasm-${document.id}-${matchIndex}`,
       label: document.label,
       snippet: snippetAround(text, matchIndex, normalizedQuery.length),
-      location: document.location
+      location: document.location,
+      matchIndex: results.length,
+      matchOffset: matchIndex
     });
     searchStart = matchIndex + normalizedQuery.length;
     matchIndex = lowerText.indexOf(normalizedQuery, searchStart);
