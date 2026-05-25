@@ -633,6 +633,43 @@ describe("App desktop open delivery", () => {
     expect(screen.getByRole("button", { name: "Next Root" })).toBeInTheDocument();
   });
 
+  it("windows large outlines instead of rendering every visible row at once", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/large-outline.pdf"]);
+    tauriMocks.openPdfDocument.mockResolvedValueOnce({
+      id: "/Users/mario/Books/large-outline.pdf",
+      pageCount: 10000,
+      outline: Array.from({ length: 10000 }, (_, index) => ({
+        id: `large-outline-${index}`,
+        title: `Large Section ${index}`,
+        page: index + 1,
+        level: index % 10 === 0 ? 0 : Math.min(index % 10, 3)
+      }))
+    });
+
+    render(<App />);
+
+    await screen.findByRole("button", { name: "Large Section 0" });
+    expect(screen.queryByRole("button", { name: "Large Section 9999" })).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".sidebar-row").length).toBeLessThan(200);
+
+    const sidebarContent = document.querySelector(".sidebar-content");
+    expect(sidebarContent).toBeInstanceOf(HTMLElement);
+    Object.defineProperty(sidebarContent, "clientHeight", {
+      configurable: true,
+      value: 360
+    });
+    Object.defineProperty(sidebarContent, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 330000
+    });
+
+    fireEvent.scroll(sidebarContent as HTMLElement);
+
+    await screen.findByRole("button", { name: "Large Section 9700" });
+    expect(screen.queryByRole("button", { name: "Large Section 0" })).not.toBeInTheDocument();
+  });
+
   it("debounces cache persistence during visible page progress updates", async () => {
     const visiblePages = installVisiblePageObserver();
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);

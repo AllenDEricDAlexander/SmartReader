@@ -14,7 +14,7 @@ SmartReader is a macOS-first local reader MVP for PDF and EPUB files. The curren
 - Find bar, page/location controls, zoom controls, PDF fit modes, bookmark toggling, and preferences dialog.
 - PDF continuous scrolling now treats ordinary wheel and trackpad scroll as reading-progress updates only; explicit page controls, shortcuts, page input, thumbnails, and outline title clicks remain hard navigation actions.
 - The PDF reader supports trackpad pinch-style zoom through the reader viewport, keeps zoom controls in sync, and clamps zoom through the existing reader zoom range.
-- The contents sidebar supports hierarchical outline expansion and collapse, with separate expand controls and title jump actions.
+- The contents sidebar supports hierarchical outline expansion and collapse, with separate expand controls, title jump actions, and windowed rendering for large outlines.
 - Preferences manage session restore, reading defaults, cache storage location, cache export/import, editable shortcuts, WASM search runtime status, and the experimental PDFKit renderer toggle.
 - Recent files persisted in local storage with lightweight resume metadata.
 - App-session restore for desktop-path tabs, active tab, sidebar state, preferences, bookmarks, zoom, and per-document reading position.
@@ -141,6 +141,7 @@ Tauri runs the same Vite frontend and uses Rust commands for validated PDF/EPUB 
 - PDF zoom changes from toolbar controls and trackpad pinch-style gestures share the same zoom state and `0.5` to `3` clamp. Pinch wheel events are coalesced per animation frame to avoid repeated full-page rerenders while the gesture is still moving.
 - PDF page rendering cancels stale PDF.js render tasks during zoom, scroll, and unmount transitions so cancelled work does not surface as a user-facing page render failure.
 - Contents outline folding is isolated per open document and tolerates jumped outline levels so malformed or partially resolved outlines remain readable instead of disappearing behind a neighboring collapsed row.
+- Large contents outlines are window-rendered in React so the sidebar only mounts rows near the current scroll viewport. Profiling showed DOM volume, not Rust outline extraction or WASM data processing, was the primary bottleneck for large directories.
 - Desktop PDF opening validates the path and reads page-count/outline metadata in Rust before React renders pages. The default renderer still uses PDF.js canvas output for visible page painting.
 - The experimental macOS PDFKit renderer can rasterize desktop-path PDF pages through a bounded Rust/Tauri command. It is opt-in, macOS-only, and falls back to PDF.js if the command is unavailable or fails.
 - Desktop PDF search uses a Rust command that returns all matching pages for path-backed desktop PDFs, so React does not scan page text for those files.
@@ -160,13 +161,13 @@ Tauri runs the same Vite frontend and uses Rust commands for validated PDF/EPUB 
 
 - The current visual direction follows the latest local UI prototype in `/Users/mario/Downloads/app.html`: warm neutral chrome, paper-like reader surfaces, restrained brown accent states, and low-noise utility controls.
 - The CSS implementation keeps the existing React structure and Tauri desktop shell behavior intact. The tab strip still preserves desktop drag regions while interactive tab, toolbar, and new-tab controls remain non-drag regions.
-- Reader interaction checks cover continuous PDF scrolling without automatic page snapping, explicit previous/next page jumps, pinch-style zoom coalescing, stale PDF.js render cancellation, debounced cache persistence, and contents outline expand/collapse behavior.
+- Reader interaction checks cover continuous PDF scrolling without automatic page snapping, explicit previous/next page jumps, pinch-style zoom coalescing, stale PDF.js render cancellation, debounced cache persistence, contents outline expand/collapse behavior, and synthetic 10k-row outline windowing.
 - Responsive checks cover wide desktop, 900px sidebar overlay behavior, 760px toolbar simplification, and 720px narrow-window overflow handling.
 - The latest UI review passed shell, preferences, sidebar, recent-file, empty-state, reader interaction, build, and test checks. Real PDF/EPUB document visual QA and macOS trackpad pinch QA should still be repeated manually in the Tauri app before a signed release.
 
 ## Roadmap Notes
 
-React Native/mobile remains a future platform track. Current roadmap work is frozen around desktop reading-loop stability until normal PDF/EPUB opening, scrolling, zooming, outlines, and page rendering stay reliable on real documents. The only near-term roadmap work in this iteration is Tauri macOS reading hardening and real-document QA. Signing, notarization, broader PDFKit work, deeper parser/runtime expansion, and full PDF/EPUB parsing in WASM remain later work after the desktop reading loop is stable.
+React Native/mobile remains a future platform track. Current roadmap work is frozen around desktop reading-loop stability until normal PDF/EPUB opening, scrolling, zooming, outlines, and page rendering stay reliable on real documents. The only near-term roadmap work in this iteration is Tauri macOS reading hardening and real-document QA. Signing, notarization, broader PDFKit work, deeper parser/runtime expansion, Rust-side outline indexing, and full PDF/EPUB parsing in WASM remain later work unless profiling shows React-side windowing is no longer the dominant fix.
 
 ## Current Limitations
 

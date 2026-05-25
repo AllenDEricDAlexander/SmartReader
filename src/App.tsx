@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { JSX } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, JSX } from "react";
 import JSZip from "jszip";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import {
@@ -26,6 +26,8 @@ import {
 } from "./state/sessionPersistence";
 import { sanitizeEpubHtml } from "./reader/epubSanitizer";
 import { outlineFromPdf } from "./reader/pdfOutline";
+import { isSameReaderLocation, visibleOutlineRows } from "./reader/outlineRows";
+import type { OutlineRow } from "./reader/outlineRows";
 import {
   exportSmartReaderCacheFile,
   createDesktopSession,
@@ -99,6 +101,37 @@ const defaultPreferences: Preferences = {
   shortcuts: [],
   wasm: { enabled: true },
   pdfKit: { enabled: false }
+};
+
+const OUTLINE_ROW_HEIGHT = 34;
+const OUTLINE_OVERSCAN_ROWS = 8;
+const OUTLINE_FALLBACK_VIEWPORT_HEIGHT = 420;
+
+const outlineWindowStyle: CSSProperties = {
+  position: "relative"
+};
+
+const outlineToggleStyle: CSSProperties = {
+  border: 0,
+  background: "transparent",
+  color: "inherit",
+  cursor: "pointer",
+  font: "inherit",
+  padding: 0
+};
+
+const outlineTitleStyle: CSSProperties = {
+  minWidth: 0,
+  border: 0,
+  background: "transparent",
+  color: "inherit",
+  cursor: "pointer",
+  font: "inherit",
+  overflow: "hidden",
+  padding: 0,
+  textAlign: "left",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap"
 };
 
 const CACHE_SAVE_DEBOUNCE_MS = 300;
@@ -585,7 +618,7 @@ export function App() {
   const toggleBookmark = useCallback(() => {
     updateActiveSession((session) => {
       const existing = session.bookmarks.find((bookmark) =>
-        sameLocation(bookmark.location, session.location)
+        isSameReaderLocation(bookmark.location, session.location)
       );
 
       if (existing) {
@@ -1324,6 +1357,31 @@ function ReaderSidebar(props: {
   onJump: (location: ReaderLocation) => void;
 }) {
   const mode = props.session?.sidebarMode ?? "contents";
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [scrollState, setScrollState] = useState({ top: 0, height: 0 });
+  const syncScrollState = useCallback(() => {
+    const content = contentRef.current;
+    if (!content) {
+      return;
+    }
+
+    const next = {
+      top: content.scrollTop,
+      height: content.clientHeight
+    };
+    setScrollState((current) =>
+      current.top === next.top && current.height === next.height ? current : next
+    );
+  }, []);
+
+  useEffect(() => {
+    syncScrollState();
+  }, [mode, props.session?.id, syncScrollState]);
+
+  useEffect(() => {
+    window.addEventListener("resize", syncScrollState);
+    return () => window.removeEventListener("resize", syncScrollState);
+  }, [syncScrollState]);
 
   return (
     <aside className="reader-sidebar" aria-label="Document navigation">
@@ -1341,8 +1399,14 @@ function ReaderSidebar(props: {
           </button>
         ))}
       </div>
-      <div className="sidebar-content">
-        <SidebarRows session={props.session} mode={mode} onJump={props.onJump} />
+      <div ref={contentRef} className="sidebar-content" onScroll={syncScrollState}>
+        <SidebarRows
+          session={props.session}
+          mode={mode}
+          onJump={props.onJump}
+          scrollTop={scrollState.top}
+          viewportHeight={scrollState.height}
+        />
       </div>
     </aside>
   );
@@ -1352,6 +1416,8 @@ function SidebarRows(props: {
   session?: DocumentSession;
   mode: SidebarMode;
   onJump: (location: ReaderLocation) => void;
+  scrollTop: number;
+  viewportHeight: number;
 }) {
   const session = props.session;
   const [collapsedOutlineIds, setCollapsedOutlineIds] = useState<Set<string>>(() => new Set());
@@ -1376,6 +1442,17 @@ function SidebarRows(props: {
     () => session?.status === "ready" ? visibleOutlineRows(session.outline, collapsedOutlineIds) : [],
     [collapsedOutlineIds, session?.outline, session?.status]
   );
+  const toggleOutlineRow = useCallback((id: string) => {
+    setCollapsedOutlineIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
 
   if (!session || session.status !== "ready") {
     return <p className="empty-note">Open a PDF or EPUB to show navigation.</p>;
@@ -1386,73 +1463,40 @@ function SidebarRows(props: {
       return <p className="empty-note">No outline in this document.</p>;
     }
 
-    return outlineRows.map(({ item, level, hasChildren }) => {
-      const collapsed = collapsedOutlineIds.has(item.id);
+    const viewportHeight = props.viewportHeight || OUTLINE_FALLBACK_VIEWPORT_HEIGHT;
+    const windowSize = Math.ceil(viewportHeight / OUTLINE_ROW_HEIGHT) + OUTLINE_OVERSCAN_ROWS * 2;
+    const maxStart = Math.max(0, outlineRows.length - windowSize);
+    const startIndex = Math.min(
+      Math.max(0, Math.floor(props.scrollTop / OUTLINE_ROW_HEIGHT) - OUTLINE_OVERSCAN_ROWS),
+      maxStart
+    );
+    const endIndex = Math.min(outlineRows.length, startIndex + windowSize);
+    const visibleRows = outlineRows.slice(startIndex, endIndex);
 
-      return (
-        <div
-          key={item.id}
-          className={`sidebar-row ${sameLocation(item.location, session.location) ? "active" : ""}`}
-          style={{
-            display: "grid",
-            gridTemplateColumns: "18px minmax(0, 1fr)",
-            alignItems: "center",
-            gap: "4px",
-            paddingLeft: `${12 + level * 14}px`
-          }}
-        >
-          {hasChildren ? (
-            <button
-              type="button"
-              aria-label={`${collapsed ? "Expand" : "Collapse"} ${item.title}`}
-              aria-expanded={!collapsed}
-              onClick={() => {
-                setCollapsedOutlineIds((current) => {
-                  const next = new Set(current);
-                  if (next.has(item.id)) {
-                    next.delete(item.id);
-                  } else {
-                    next.add(item.id);
-                  }
-                  return next;
-                });
-              }}
-              style={{
-                border: 0,
-                background: "transparent",
-                color: "inherit",
-                cursor: "pointer",
-                font: "inherit",
-                padding: 0
-              }}
-            >
-              {collapsed ? "›" : "⌄"}
-            </button>
-          ) : (
-            <span aria-hidden="true" />
-          )}
-          <button
-            type="button"
-            onClick={() => props.onJump(item.location)}
-            style={{
-              minWidth: 0,
-              border: 0,
-              background: "transparent",
-              color: "inherit",
-              cursor: "pointer",
-              font: "inherit",
-              overflow: "hidden",
-              padding: 0,
-              textAlign: "left",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap"
-            }}
-          >
-            {item.title}
-          </button>
-        </div>
-      );
-    });
+    return (
+      <div
+        style={{
+          ...outlineWindowStyle,
+          height: `${outlineRows.length * OUTLINE_ROW_HEIGHT}px`
+        }}
+      >
+        {visibleRows.map((row, offset) => {
+          const index = startIndex + offset;
+
+          return (
+            <OutlineSidebarRow
+              key={row.item.id}
+              row={row}
+              index={index}
+              collapsed={collapsedOutlineIds.has(row.item.id)}
+              active={isSameReaderLocation(row.item.location, session.location)}
+              onToggle={toggleOutlineRow}
+              onJump={props.onJump}
+            />
+          );
+        })}
+      </div>
+    );
   }
 
   if (props.mode === "thumbnails") {
@@ -1507,6 +1551,57 @@ function SidebarRows(props: {
     </button>
   ));
 }
+
+const OutlineSidebarRow = memo(function OutlineSidebarRow(props: {
+  row: OutlineRow;
+  index: number;
+  collapsed: boolean;
+  active: boolean;
+  onToggle: (id: string) => void;
+  onJump: (location: ReaderLocation) => void;
+}) {
+  const { item, level, hasChildren } = props.row;
+
+  return (
+    <div
+      className={`sidebar-row ${props.active ? "active" : ""}`}
+      style={{
+        position: "absolute",
+        top: `${props.index * OUTLINE_ROW_HEIGHT}px`,
+        left: 0,
+        right: 0,
+        height: `${OUTLINE_ROW_HEIGHT}px`,
+        boxSizing: "border-box",
+        display: "grid",
+        gridTemplateColumns: "18px minmax(0, 1fr)",
+        alignItems: "center",
+        gap: "4px",
+        paddingLeft: `${12 + level * 14}px`
+      }}
+    >
+      {hasChildren ? (
+        <button
+          type="button"
+          aria-label={`${props.collapsed ? "Expand" : "Collapse"} ${item.title}`}
+          aria-expanded={!props.collapsed}
+          onClick={() => props.onToggle(item.id)}
+          style={outlineToggleStyle}
+        >
+          {props.collapsed ? "›" : "⌄"}
+        </button>
+      ) : (
+        <span aria-hidden="true" />
+      )}
+      <button
+        type="button"
+        onClick={() => props.onJump(item.location)}
+        style={outlineTitleStyle}
+      >
+        {item.title}
+      </button>
+    </div>
+  );
+});
 
 function ReaderViewport(props: {
   session?: DocumentSession;
@@ -2756,58 +2851,6 @@ function clampZoom(zoom: number): number {
 
 async function searchPdf(pdf: PDFDocumentProxy, query: string): Promise<SearchResult[]> {
   return searchPdfDocumentText(pdf, query);
-}
-
-function sameLocation(first: ReaderLocation, second: ReaderLocation): boolean {
-  return JSON.stringify(first) === JSON.stringify(second);
-}
-
-function visibleOutlineRows(
-  outline: OutlineItem[],
-  collapsedIds: Set<string>
-): Array<{ item: OutlineItem; level: number; hasChildren: boolean }> {
-  const normalized = normalizeOutlineRows(outline);
-  const rows: Array<{ item: OutlineItem; level: number; hasChildren: boolean }> = [];
-  let hiddenBelowLevel: number | undefined;
-
-  normalized.forEach((row) => {
-    if (hiddenBelowLevel !== undefined) {
-      if (row.level > hiddenBelowLevel) {
-        return;
-      }
-
-      hiddenBelowLevel = undefined;
-    }
-
-    rows.push(row);
-
-    if (collapsedIds.has(row.item.id)) {
-      hiddenBelowLevel = row.level;
-    }
-  });
-
-  return rows;
-}
-
-function normalizeOutlineRows(outline: OutlineItem[]): Array<{ item: OutlineItem; level: number; hasChildren: boolean }> {
-  const normalized: Array<{ item: OutlineItem; level: number; hasChildren: boolean }> = [];
-
-  outline.forEach((item, index) => {
-    const rawLevel = outlineLevel(item);
-    const previousLevel = normalized[index - 1]?.level ?? 0;
-    const level = index === 0 || rawLevel > previousLevel + 1 ? 0 : rawLevel;
-
-    normalized.push({ item, level, hasChildren: false });
-  });
-
-  return normalized.map((row, index) => ({
-    ...row,
-    hasChildren: Boolean(normalized[index + 1] && normalized[index + 1].level === row.level + 1)
-  }));
-}
-
-function outlineLevel(item: OutlineItem): number {
-  return Math.max(0, item.level ?? 0);
 }
 
 function readerShortcutLabel(commandId: string): string {
