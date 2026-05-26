@@ -56,7 +56,7 @@ mod platform {
             return Err(ENCRYPTED_DOCUMENT_ERROR.to_string());
         }
 
-        let page_count = unsafe { document.pageCount() } as usize;
+        let page_count = unsafe { document.pageCount() };
         if page_number > page_count {
             return Err("Invalid PDF page".to_string());
         }

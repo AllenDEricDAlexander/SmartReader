@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  epubHrefFragment,
   isSameReaderLocation,
   normalizeOutlineRows,
   visibleOutlineRows
@@ -63,5 +64,24 @@ describe("outline row helpers", () => {
         { kind: "epub", chapterHref: "chapter.xhtml", cfi: undefined, progress: 0.5 }
       )
     ).toBe(true);
+  });
+
+  it("keeps EPUB fragment locations distinct while matching identical anchors", () => {
+    expect(
+      isSameReaderLocation(
+        { kind: "epub", chapterHref: "OPS/chapter.xhtml#child", progress: 0.4 },
+        { kind: "epub", chapterHref: "OPS/chapter.xhtml#child", progress: 0.4 }
+      )
+    ).toBe(true);
+    expect(
+      isSameReaderLocation(
+        { kind: "epub", chapterHref: "OPS/chapter.xhtml", progress: 0.4 },
+        { kind: "epub", chapterHref: "OPS/chapter.xhtml#child", progress: 0.4 }
+      )
+    ).toBe(false);
+  });
+
+  it("returns raw EPUB fragments when percent escapes are malformed", () => {
+    expect(epubHrefFragment("chapter.xhtml#50%")).toBe("50%");
   });
 });

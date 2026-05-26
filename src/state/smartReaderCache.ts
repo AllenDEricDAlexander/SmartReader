@@ -1,5 +1,8 @@
 import type {
+  AnnotationTag,
+  AnnotationType,
   RecentFile,
+  ReaderAnnotation,
   SmartReaderAdapterCache,
   SmartReaderCacheEnvelope,
   PersistedDocumentSession,
@@ -294,6 +297,7 @@ function sanitizePersistedDocumentSession(tab: unknown): PersistedDocumentSessio
   const fileSource = sanitizePersistedFileSource(tab.fileSource);
   const error = sanitizeReaderError(tab.error);
   const bookmarks = sanitizeArray(Array.isArray(tab.bookmarks) ? tab.bookmarks : [], sanitizeBookmark);
+  const annotations = sanitizeArray(Array.isArray(tab.annotations) ? tab.annotations : [], sanitizeAnnotation);
   const epubSettings = sanitizeEpubSettings(tab.epubSettings);
   const location = sanitizeReaderLocation(tab.location);
   const lastLocation = sanitizeReaderLocation(tab.lastLocation);
@@ -310,6 +314,7 @@ function sanitizePersistedDocumentSession(tab: unknown): PersistedDocumentSessio
     !isFitMode(tab.fitMode) ||
     !isSidebarMode(tab.sidebarMode) ||
     !bookmarks ||
+    !annotations ||
     !epubSettings ||
     typeof tab.openedAt !== "number" ||
     typeof tab.updatedAt !== "number"
@@ -331,6 +336,7 @@ function sanitizePersistedDocumentSession(tab: unknown): PersistedDocumentSessio
     fitMode: tab.fitMode,
     sidebarMode: tab.sidebarMode,
     bookmarks,
+    annotations,
     pageCount: typeof tab.pageCount === "number" ? tab.pageCount : undefined,
     epubSettings,
     openedAt: tab.openedAt,
@@ -436,6 +442,41 @@ function sanitizeBookmark(value: unknown) {
   return undefined;
 }
 
+function sanitizeAnnotation(value: unknown): ReaderAnnotation | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const location = sanitizeReaderLocation(value.location);
+
+  if (
+    typeof value.id === "string" &&
+    isAnnotationType(value.type) &&
+    isAnnotationTag(value.tag) &&
+    isAnnotationColor(value.color) &&
+    isAnnotationThickness(value.thickness) &&
+    location &&
+    typeof value.createdAt === "number" &&
+    typeof value.updatedAt === "number"
+  ) {
+    return {
+      id: value.id,
+      type: value.type,
+      tag: value.tag,
+      color: value.color,
+      thickness: value.thickness,
+      location,
+      selectedText: typeof value.selectedText === "string" ? value.selectedText : undefined,
+      note: typeof value.note === "string" ? value.note : undefined,
+      hidden: typeof value.hidden === "boolean" ? value.hidden : undefined,
+      createdAt: value.createdAt,
+      updatedAt: value.updatedAt
+    };
+  }
+
+  return undefined;
+}
+
 function sanitizeEpubSettings(value: unknown) {
   if (
     isRecord(value) &&
@@ -508,7 +549,37 @@ function isFitMode(value: unknown) {
 }
 
 function isSidebarMode(value: unknown) {
-  return value === "contents" || value === "thumbnails" || value === "bookmarks" || value === "search";
+  return (
+    value === "contents" ||
+    value === "thumbnails" ||
+    value === "bookmarks" ||
+    value === "search" ||
+    value === "annotations"
+  );
+}
+
+function isAnnotationType(value: unknown): value is AnnotationType {
+  return value === "highlight" || value === "underline" || value === "strike" || value === "note";
+}
+
+function isAnnotationTag(value: unknown): value is AnnotationTag {
+  return (
+    value === "重点" ||
+    value === "疑问" ||
+    value === "引用备注" ||
+    value === "创新点" ||
+    value === "实验数据" ||
+    value === "缺陷" ||
+    value === "个人思考"
+  );
+}
+
+function isAnnotationColor(value: unknown): value is string {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
+}
+
+function isAnnotationThickness(value: unknown): value is number {
+  return typeof value === "number" && [1, 2, 3, 4].includes(value);
 }
 
 function isReaderLocation(value: unknown): value is PersistedDocumentSession["location"] {

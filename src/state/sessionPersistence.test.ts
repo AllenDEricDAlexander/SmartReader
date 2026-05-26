@@ -215,4 +215,42 @@ describe("app session persistence", () => {
 
     expect(loadAppSessionSnapshot()).toBeUndefined();
   });
+
+  it("persists annotation metadata with reopened desktop sessions", () => {
+    const session = {
+      ...createSessionFromFile({
+        kind: "desktop-path",
+        path: "/Users/mario/Books/spec.pdf",
+        name: "spec.pdf",
+        size: 0,
+        lastModified: 0
+      }),
+      annotations: [
+        {
+          id: "annotation-1",
+          type: "highlight" as const,
+          tag: "重点" as const,
+          color: "#ffe28a",
+          thickness: 2,
+          note: "Important result",
+          selectedText: "important result",
+          location: { kind: "page" as const, page: 4 },
+          createdAt: 1,
+          updatedAt: 1,
+          hidden: false
+        }
+      ]
+    };
+
+    const snapshot = createAppSessionSnapshot({
+      sessions: [session],
+      activeTabId: session.id,
+      sidebarOpen: true,
+      preferences
+    });
+    const restored = restoreAppSessionSnapshot(snapshot, preferences);
+
+    expect(snapshot.sessions[0].annotations).toHaveLength(1);
+    expect(restored.sessions[0].annotations).toEqual(session.annotations);
+  });
 });

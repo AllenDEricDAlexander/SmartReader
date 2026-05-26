@@ -69,6 +69,7 @@ const session: SmartReaderSessionCache = {
       fitMode: "continuous",
       sidebarMode: "contents",
       bookmarks: [],
+      annotations: [],
       epubSettings: { fontSize: 18, theme: "system" },
       openedAt: 100,
       updatedAt: 130
@@ -207,6 +208,22 @@ describe("smart reader cache", () => {
                   rawText: "bookmark leak"
                 }
               ],
+              annotations: [
+                {
+                  id: "annotation-1",
+                  type: "highlight",
+                  tag: "重点",
+                  color: "#ffe28a",
+                  thickness: 2,
+                  note: "Important",
+                  selectedText: "important",
+                  location: { kind: "page", page: 7, rawText: "annotation location leak" },
+                  hidden: false,
+                  createdAt: 130,
+                  updatedAt: 131,
+                  rawText: "annotation leak"
+                }
+              ],
               epubSettings: {
                 fontSize: 18,
                 theme: "system",
@@ -238,6 +255,44 @@ describe("smart reader cache", () => {
     expect(exported).not.toContain("pdfProxy");
     expect(exported).not.toContain("parser leak");
     expect(exported).not.toContain("rawPayload");
+    expect(exported).toContain("\"annotations\":[");
+    expect(exported).toContain("\"tag\":\"重点\"");
+  });
+
+  it("rejects imported annotation styles outside the supported palette contract", () => {
+    const imported = importSmartReaderCache(
+      JSON.stringify({
+        schemaVersion: 1,
+        appVersion: "0.1.0",
+        savedAt: "2026-05-23T00:00:00.000Z",
+        settings: preferences,
+        recentFiles: [recentFile],
+        readingProgress: [progress],
+        session: {
+          ...session,
+          tabs: [
+            {
+              ...session.tabs[0],
+              annotations: [
+                {
+                  id: "annotation-1",
+                  type: "highlight",
+                  tag: "重点",
+                  color: "red;position:fixed",
+                  thickness: 9,
+                  location: { kind: "page", page: 7 },
+                  createdAt: 130,
+                  updatedAt: 131
+                }
+              ]
+            }
+          ]
+        },
+        adapterCache: adapter
+      })
+    );
+
+    expect(imported).toBeUndefined();
   });
 
   it("imports old version 1 cache settings without pdfKit and defaults the setting off", () => {

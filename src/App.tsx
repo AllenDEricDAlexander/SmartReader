@@ -44,7 +44,12 @@ import {
 } from "./state/sessionPersistence";
 import { sanitizeEpubHtml } from "./reader/epubSanitizer";
 import { outlineFromPdf } from "./reader/pdfOutline";
-import { isSameReaderLocation, visibleOutlineRows } from "./reader/outlineRows";
+import {
+  epubHrefFragment,
+  isSameEpubChapterHref,
+  isSameReaderLocation,
+  visibleOutlineRows
+} from "./reader/outlineRows";
 import type { OutlineRow } from "./reader/outlineRows";
 import {
   exportSmartReaderCacheFile,
@@ -97,6 +102,9 @@ import type {
   FitMode,
   OutlineItem,
   Preferences,
+  ReaderAnnotation,
+  AnnotationTag,
+  AnnotationType,
   ReaderError,
   ReaderLocation,
   RecentFile,
@@ -131,7 +139,14 @@ const THUMBNAIL_SCALE = 0.18;
 const SEARCH_RESULT_ROW_HEIGHT = 58;
 const SEARCH_RESULT_OVERSCAN_ROWS = 8;
 const SEARCH_RESULT_FALLBACK_VIEWPORT_HEIGHT = 420;
+const ANNOTATION_ROW_HEIGHT = 82;
+const ANNOTATION_OVERSCAN_ROWS = 6;
+const ANNOTATION_FALLBACK_VIEWPORT_HEIGHT = 420;
 const EPUB_SCROLL_SAVE_DELAY_MS = 250;
+const annotationTypes: AnnotationType[] = ["highlight", "underline", "strike", "note"];
+const annotationTags: AnnotationTag[] = ["重点", "疑问", "引用备注", "创新点", "实验数据", "缺陷", "个人思考"];
+const annotationColors = ["#ffe28a", "#9ed7ff", "#b9e88f", "#f4a7a7", "#d7b6ff"];
+const annotationThicknesses = [1, 2, 3, 4];
 
 const outlineWindowStyle: CSSProperties = {
   position: "relative"
@@ -167,6 +182,37 @@ interface PdfRenderTask {
   cancel: () => void;
 }
 
+interface PdfSearchHighlight {
+  id: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+interface PdfTextContentRange {
+  item: {
+    str: string;
+    transform: number[];
+    width?: number;
+    height?: number;
+  };
+  index: number;
+  start: number;
+  end: number;
+}
+
+interface AnnotationDraft {
+  type: AnnotationType;
+  tag: AnnotationTag;
+  color: string;
+  thickness: number;
+  note: string;
+}
+
+// PDF.js text content is stable per page; keep zoom-only overlay updates to geometry work.
+const pdfTextContentCache = new WeakMap<PDFDocumentProxy, Map<number, Promise<unknown[]>>>();
+
 export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const locationInputRef = useRef<HTMLInputElement>(null);
@@ -181,6 +227,13 @@ export function App() {
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
+  const [annotationDraft, setAnnotationDraft] = useState<AnnotationDraft>({
+    type: "highlight",
+    tag: "重点",
+    color: annotationColors[0],
+    thickness: 2,
+    note: ""
+  });
   const [hud, setHud] = useState("");
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferences, setPreferences] = useState(initialAppState.preferences);
@@ -222,6 +275,9 @@ export function App() {
     ? navigationHistories[activeSession.id] ?? createNavigationHistory()
     : createNavigationHistory();
   const activeSearchSelection = activeSession ? searchSelections[activeSession.id] : undefined;
+  const activeHasBookmark = Boolean(
+    activeSession?.bookmarks.some((bookmark) => isSameReaderLocation(bookmark.location, activeSession.location))
+  );
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -719,6 +775,107 @@ export function App() {
     showHud("Bookmark updated");
   }, [showHud, updateActiveSession]);
 
+  const addAnnotation = useCallback(() => {
+    updateActiveSession((session) => {
+      if (session.status !== "ready" || session.location.kind === "none") {
+        return session;
+      }
+
+      const now = Date.now();
+      const selectedText = window.getSelection?.()?.toString().trim().slice(0, 500);
+      const note = annotationDraft.note.trim();
+      const annotation: ReaderAnnotation = {
+        id: createAnnotationId(),
+        type: annotationDraft.type,
+        tag: annotationDraft.tag,
+        color: annotationDraft.color,
+        thickness: annotationDraft.thickness,
+        location: session.location,
+        selectedText: selectedText || undefined,
+        note: note || undefined,
+        hidden: false,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      return {
+        ...session,
+        sidebarMode: "annotations",
+        annotations: [annotation, ...session.annotations],
+        updatedAt: now
+      };
+    });
+    setSidebarOpen(true);
+    setAnnotationDraft((current) => ({ ...current, note: "" }));
+    showHud("Annotation added");
+  }, [annotationDraft, showHud, updateActiveSession]);
+
+  const toggleAnnotationHidden = useCallback((annotationId: string) => {
+    updateActiveSession((session) => {
+      const now = Date.now();
+      let changed = false;
+      const annotations = session.annotations.map((annotation) => {
+        if (annotation.id !== annotationId) {
+          return annotation;
+        }
+
+        changed = true;
+        return { ...annotation, hidden: !annotation.hidden, updatedAt: now };
+      });
+
+      return changed ? { ...session, annotations, updatedAt: now } : session;
+    });
+  }, [updateActiveSession]);
+
+  const toggleAllAnnotationsHidden = useCallback(() => {
+    if (!activeSession || activeSession.annotations.length === 0) {
+      showHud("No annotations to update");
+      return;
+    }
+
+    const hidden = activeSession.annotations.some((annotation) => !annotation.hidden);
+    const now = Date.now();
+
+    updateActiveSession((session) => {
+      if (session.annotations.length === 0) {
+        return session;
+      }
+
+      return {
+        ...session,
+        annotations: session.annotations.map((annotation) =>
+          annotation.hidden === hidden ? annotation : { ...annotation, hidden, updatedAt: now }
+        ),
+        updatedAt: now
+      };
+    });
+    showHud(hidden ? "Annotations hidden" : "Annotations shown");
+  }, [activeSession, showHud, updateActiveSession]);
+
+  const deleteAnnotation = useCallback((annotationId: string) => {
+    updateActiveSession((session) => {
+      const annotations = session.annotations.filter((annotation) => annotation.id !== annotationId);
+
+      return annotations.length === session.annotations.length
+        ? session
+        : { ...session, annotations, updatedAt: Date.now() };
+    });
+  }, [updateActiveSession]);
+
+  const exportAnnotations = useCallback((session: DocumentSession) => {
+    if (session.annotations.length === 0) {
+      showHud("No annotations to export");
+      return;
+    }
+
+    downloadTextFile(
+      annotationsToMarkdown(session),
+      `${downloadSafeName(session.title)}-annotations.md`,
+      "text/markdown;charset=utf-8"
+    );
+    showHud("Annotations exported");
+  }, [showHud]);
+
   const configureSearchAdapter = useCallback((
     handler: (query: string) => Promise<SearchResult[]>,
     wasmDocuments: SearchWorkerDocument[] = []
@@ -861,6 +1018,27 @@ export function App() {
       jumpToLocation(result.location);
     }
   }, [activeSearchSelection, activeSession, jumpToLocation, showHud]);
+
+  const selectSearchResultAtIndex = useCallback((index: number) => {
+    if (!activeSession || activeSession.searchResults.length === 0) {
+      return;
+    }
+
+    const boundedIndex = Math.min(Math.max(0, index), activeSession.searchResults.length - 1);
+    const result = activeSession.searchResults[boundedIndex];
+    setSearchSelections((current) => ({
+      ...current,
+      [activeSession.id]: {
+        query: activeSearchSelection?.query ?? findQuery.trim(),
+        currentIndex: boundedIndex,
+        total: activeSession.searchResults.length
+      }
+    }));
+
+    if (result) {
+      jumpToLocation(result.location);
+    }
+  }, [activeSearchSelection?.query, activeSession, findQuery, jumpToLocation]);
 
   const movePdfPage = useCallback((delta: number) => {
     setPdfScrollRevision((revision) => revision + 1);
@@ -1183,6 +1361,7 @@ export function App() {
         onResetZoom={resetZoom}
         onOpenFind={() => setFindOpen(true)}
         onToggleBookmark={toggleBookmark}
+        bookmarkActive={activeHasBookmark}
         onPreferences={() => setPreferencesOpen(true)}
         onNavigateBack={navigateHistoryBack}
         onNavigateForward={navigateHistoryForward}
@@ -1219,6 +1398,12 @@ export function App() {
             session={activeSession}
             onModeChange={(mode) => updateActiveSession((session) => updateSessionSidebarMode(session, mode))}
             onJump={jumpToLocation}
+            searchSelection={activeSearchSelection}
+            onSelectSearchResult={selectSearchResultAtIndex}
+            onToggleAnnotationHidden={toggleAnnotationHidden}
+            onToggleAllAnnotationsHidden={toggleAllAnnotationsHidden}
+            onExportAnnotations={exportAnnotations}
+            onDeleteAnnotation={deleteAnnotation}
           />
         ) : null}
 
@@ -1247,6 +1432,9 @@ export function App() {
           onSearchReady={configureSearchAdapter}
           searchQuery={findQuery}
           searchSelection={activeSearchSelection}
+          annotationDraft={annotationDraft}
+          onAnnotationDraftChange={setAnnotationDraft}
+          onAddAnnotation={addAnnotation}
           onPinchZoom={handleReaderPinchZoom}
         />
       </section>
@@ -1369,6 +1557,7 @@ function CommandToolbar(props: {
   onResetZoom: () => void;
   onOpenFind: () => void;
   onToggleBookmark: () => void;
+  bookmarkActive: boolean;
   onPreferences: () => void;
   onNavigateBack: () => void;
   onNavigateForward: () => void;
@@ -1459,7 +1648,13 @@ function CommandToolbar(props: {
       </select>
       <span className="toolbar-spacer" />
       <ToolbarButton label="Find" icon="search" disabled={!hasDocument} onClick={props.onOpenFind} />
-      <ToolbarButton label="Bookmark" icon="bookmark" disabled={!hasDocument} onClick={props.onToggleBookmark} />
+      <ToolbarButton
+        label="Bookmark"
+        icon="bookmark"
+        disabled={!hasDocument}
+        pressed={props.bookmarkActive}
+        onClick={props.onToggleBookmark}
+      />
       <ToolbarButton label="More" icon="more" onClick={props.onPreferences} />
     </header>
   );
@@ -1548,6 +1743,12 @@ function ReaderSidebar(props: {
   session?: DocumentSession;
   onModeChange: (mode: SidebarMode) => void;
   onJump: (location: ReaderLocation) => void;
+  searchSelection?: SearchSelection;
+  onSelectSearchResult: (index: number) => void;
+  onToggleAnnotationHidden: (id: string) => void;
+  onToggleAllAnnotationsHidden: () => void;
+  onExportAnnotations: (session: DocumentSession) => void;
+  onDeleteAnnotation: (id: string) => void;
 }) {
   const mode = props.session?.sidebarMode ?? "contents";
   const contentRef = useRef<HTMLDivElement>(null);
@@ -1579,7 +1780,7 @@ function ReaderSidebar(props: {
   return (
     <aside className="reader-sidebar" aria-label="Document navigation">
       <div className="sidebar-modes" role="tablist" aria-label="Sidebar modes">
-        {(["contents", "thumbnails", "bookmarks", "search"] as SidebarMode[]).map((item) => (
+        {(["contents", "thumbnails", "bookmarks", "search", "annotations"] as SidebarMode[]).map((item) => (
           <button
             key={item}
             type="button"
@@ -1597,6 +1798,12 @@ function ReaderSidebar(props: {
           session={props.session}
           mode={mode}
           onJump={props.onJump}
+          searchSelection={props.searchSelection}
+          onSelectSearchResult={props.onSelectSearchResult}
+          onToggleAnnotationHidden={props.onToggleAnnotationHidden}
+          onToggleAllAnnotationsHidden={props.onToggleAllAnnotationsHidden}
+          onExportAnnotations={props.onExportAnnotations}
+          onDeleteAnnotation={props.onDeleteAnnotation}
           scrollTop={scrollState.top}
           viewportHeight={scrollState.height}
         />
@@ -1633,14 +1840,27 @@ function SidebarRows(props: {
   session?: DocumentSession;
   mode: SidebarMode;
   onJump: (location: ReaderLocation) => void;
+  searchSelection?: SearchSelection;
+  onSelectSearchResult: (index: number) => void;
+  onToggleAnnotationHidden: (id: string) => void;
+  onToggleAllAnnotationsHidden: () => void;
+  onExportAnnotations: (session: DocumentSession) => void;
+  onDeleteAnnotation: (id: string) => void;
   scrollTop: number;
   viewportHeight: number;
 }) {
   const session = props.session;
   const [collapsedOutlineIds, setCollapsedOutlineIds] = useState<Set<string>>(() => new Set());
+  const [annotationTypeFilter, setAnnotationTypeFilter] = useState<AnnotationType | "all">("all");
+  const [annotationTagFilter, setAnnotationTagFilter] = useState<AnnotationTag | "all">("all");
+  const [showHiddenAnnotations, setShowHiddenAnnotations] = useState(true);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState("");
+  const annotationWindowRef = useRef<HTMLDivElement>(null);
+  const [annotationWindowOffsetTop, setAnnotationWindowOffsetTop] = useState(0);
 
   useEffect(() => {
     setCollapsedOutlineIds(new Set());
+    setConfirmingDeleteId("");
   }, [session?.id]);
 
   useEffect(() => {
@@ -1654,6 +1874,22 @@ function SidebarRows(props: {
       return next.size === current.size ? current : next;
     });
   }, [session?.outline]);
+
+  useEffect(() => {
+    if (props.mode !== "annotations") {
+      return;
+    }
+
+    const offsetTop = annotationWindowRef.current?.offsetTop ?? 0;
+    setAnnotationWindowOffsetTop((current) => (current === offsetTop ? current : offsetTop));
+  }, [
+    annotationTagFilter,
+    annotationTypeFilter,
+    props.mode,
+    session?.annotations.length,
+    session?.id,
+    showHiddenAnnotations
+  ]);
 
   const outlineRows = useMemo(
     () => session?.status === "ready" ? visibleOutlineRows(session.outline, collapsedOutlineIds) : [],
@@ -1739,13 +1975,157 @@ function SidebarRows(props: {
     return session.bookmarks.map((bookmark) => (
       <button
         key={bookmark.id}
-        className="sidebar-row"
+        className={`sidebar-row ${isSameReaderLocation(bookmark.location, session.location) ? "active" : ""}`}
         type="button"
+        aria-current={isSameReaderLocation(bookmark.location, session.location) ? "true" : undefined}
         onClick={() => props.onJump(bookmark.location)}
       >
         {bookmark.title}
       </button>
     ));
+  }
+
+  if (props.mode === "annotations") {
+    const hasAnnotations = session.annotations.length > 0;
+    const hasVisibleAnnotations = session.annotations.some((annotation) => !annotation.hidden);
+    const annotations = session.annotations.filter((annotation) => {
+      if (!showHiddenAnnotations && annotation.hidden) {
+        return false;
+      }
+
+      return (
+        (annotationTypeFilter === "all" || annotation.type === annotationTypeFilter) &&
+        (annotationTagFilter === "all" || annotation.tag === annotationTagFilter)
+      );
+    });
+    const range = visibleRowRange(
+      annotations.length,
+      ANNOTATION_ROW_HEIGHT,
+      Math.max(0, props.scrollTop - annotationWindowOffsetTop),
+      props.viewportHeight || ANNOTATION_FALLBACK_VIEWPORT_HEIGHT,
+      ANNOTATION_OVERSCAN_ROWS
+    );
+    const visibleAnnotations = annotations.slice(range.start, range.end);
+
+    return (
+      <div className="annotation-sidebar">
+        <div className="annotation-filters">
+          <select
+            aria-label="Annotation type filter"
+            value={annotationTypeFilter}
+            onChange={(event) => setAnnotationTypeFilter(event.currentTarget.value as AnnotationType | "all")}
+          >
+            <option value="all">All types</option>
+            {annotationTypes.map((type) => (
+              <option key={type} value={type}>{annotationTypeLabel(type)}</option>
+            ))}
+          </select>
+          <select
+            aria-label="Annotation tag filter"
+            value={annotationTagFilter}
+            onChange={(event) => setAnnotationTagFilter(event.currentTarget.value as AnnotationTag | "all")}
+          >
+            <option value="all">All tags</option>
+            {annotationTags.map((tag) => (
+              <option key={tag} value={tag}>{tag}</option>
+            ))}
+          </select>
+          <label>
+            <input
+              type="checkbox"
+              checked={showHiddenAnnotations}
+              onChange={(event) => setShowHiddenAnnotations(event.currentTarget.checked)}
+            />
+            Show hidden
+          </label>
+        </div>
+        <div className="annotation-bulk-actions">
+          <button
+            type="button"
+            disabled={!hasAnnotations}
+            onClick={() => props.onExportAnnotations(session)}
+          >
+            Export annotations
+          </button>
+          <button
+            type="button"
+            disabled={!hasAnnotations}
+            onClick={props.onToggleAllAnnotationsHidden}
+          >
+            {hasVisibleAnnotations ? "Hide all annotations" : "Show all annotations"}
+          </button>
+        </div>
+        {annotations.length === 0 ? (
+          <p className="empty-note">No annotations match these filters.</p>
+        ) : (
+          <div
+            ref={annotationWindowRef}
+            className="annotation-window"
+            style={{
+              ...outlineWindowStyle,
+              height: `${annotations.length * ANNOTATION_ROW_HEIGHT}px`
+            }}
+          >
+            {visibleAnnotations.map((annotation, offset) => {
+              const index = range.start + offset;
+              const title = annotationTitle(annotation);
+              const confirmingDelete = confirmingDeleteId === annotation.id;
+
+              return (
+                <div
+                  key={annotation.id}
+                  className={`annotation-row ${annotation.hidden ? "hidden" : ""}`}
+                  style={{
+                    position: "absolute",
+                    top: `${index * ANNOTATION_ROW_HEIGHT}px`,
+                    left: 0,
+                    right: 0,
+                    height: `${ANNOTATION_ROW_HEIGHT}px`,
+                    boxSizing: "border-box"
+                  }}
+                >
+                  <button
+                    className="annotation-row-main"
+                    type="button"
+                    onClick={() => props.onJump(annotation.location)}
+                  >
+                    <span>
+                      <strong>{title}</strong>
+                      <small>{annotationTypeLabel(annotation.type)} · {annotation.tag}</small>
+                    </span>
+                  </button>
+                  <div className="annotation-row-actions">
+                    <button
+                      type="button"
+                      aria-label={`${annotation.hidden ? "Show" : "Hide"} annotation ${title}`}
+                      onClick={() => props.onToggleAnnotationHidden(annotation.id)}
+                    >
+                      {annotation.hidden ? "Show" : "Hide"}
+                    </button>
+                    <button
+                      type="button"
+                      className={confirmingDelete ? "danger" : ""}
+                      aria-label={`${confirmingDelete ? "Confirm delete" : "Delete"} annotation ${title}`}
+                      onClick={() => {
+                        if (confirmingDelete) {
+                          props.onDeleteAnnotation(annotation.id);
+                          setConfirmingDeleteId("");
+                          return;
+                        }
+
+                        setConfirmingDeleteId(annotation.id);
+                      }}
+                    >
+                      {confirmingDelete ? "Confirm" : "Delete"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
   }
 
   if (session.searchResults.length === 0) {
@@ -1774,10 +2154,11 @@ function SidebarRows(props: {
         return (
           <button
             key={result.id}
-            className="search-result-row"
+            className={`search-result-row ${props.searchSelection?.currentIndex === index ? "active" : ""}`}
             type="button"
             aria-label={`${result.label}, result ${index + 1}: ${result.snippet}`}
-            onClick={() => props.onJump(result.location)}
+            aria-current={props.searchSelection?.currentIndex === index ? "true" : undefined}
+            onClick={() => props.onSelectSearchResult(index)}
             style={{
               position: "absolute",
               top: `${index * SEARCH_RESULT_ROW_HEIGHT}px`,
@@ -1969,6 +2350,9 @@ function ReaderViewport(props: {
   onSearchReady: (handler: (query: string) => Promise<SearchResult[]>, wasmDocuments?: SearchWorkerDocument[]) => void;
   searchQuery: string;
   searchSelection?: SearchSelection;
+  annotationDraft: AnnotationDraft;
+  onAnnotationDraftChange: (draft: AnnotationDraft) => void;
+  onAddAnnotation: () => void;
   onPinchZoom: (event: React.WheelEvent<HTMLElement>) => void;
 }) {
   const session = props.session;
@@ -1995,6 +2379,11 @@ function ReaderViewport(props: {
       aria-label={`${session.title} reader`}
       onWheel={props.onPinchZoom}
     >
+      <AnnotationBar
+        draft={props.annotationDraft}
+        onChange={props.onAnnotationDraftChange}
+        onAdd={props.onAddAnnotation}
+      />
       {session.format === "pdf" ? (
         <PdfReader
           session={session}
@@ -2005,6 +2394,7 @@ function ReaderViewport(props: {
           onOutlineChange={props.onOutlineChange}
           onPageCountChange={props.onPageCountChange}
           onSearchReady={props.onSearchReady}
+          searchQuery={props.searchQuery}
           searchSelection={props.searchSelection}
         />
       ) : (
@@ -2021,6 +2411,66 @@ function ReaderViewport(props: {
         />
       )}
     </section>
+  );
+}
+
+function AnnotationBar(props: {
+  draft: AnnotationDraft;
+  onChange: (draft: AnnotationDraft) => void;
+  onAdd: () => void;
+}) {
+  return (
+    <form
+      className="annotation-bar"
+      onSubmit={(event) => {
+        event.preventDefault();
+        props.onAdd();
+      }}
+    >
+      <select
+        aria-label="Annotation type"
+        value={props.draft.type}
+        onChange={(event) => props.onChange({ ...props.draft, type: event.currentTarget.value as AnnotationType })}
+      >
+        {annotationTypes.map((type) => (
+          <option key={type} value={type}>{annotationTypeLabel(type)}</option>
+        ))}
+      </select>
+      <select
+        aria-label="Annotation tag"
+        value={props.draft.tag}
+        onChange={(event) => props.onChange({ ...props.draft, tag: event.currentTarget.value as AnnotationTag })}
+      >
+        {annotationTags.map((tag) => (
+          <option key={tag} value={tag}>{tag}</option>
+        ))}
+      </select>
+      <select
+        aria-label="Annotation color"
+        value={props.draft.color}
+        onChange={(event) => props.onChange({ ...props.draft, color: event.currentTarget.value })}
+      >
+        {annotationColors.map((color) => (
+          <option key={color} value={color}>{color}</option>
+        ))}
+      </select>
+      <select
+        aria-label="Annotation thickness"
+        value={props.draft.thickness}
+        onChange={(event) => props.onChange({ ...props.draft, thickness: Number(event.currentTarget.value) })}
+      >
+        {annotationThicknesses.map((thickness) => (
+          <option key={thickness} value={thickness}>{thickness}px</option>
+        ))}
+      </select>
+      <input
+        aria-label="Annotation note"
+        placeholder="Note"
+        value={props.draft.note}
+        onChange={(event) => props.onChange({ ...props.draft, note: event.currentTarget.value })}
+      />
+      <button type="submit">Add annotation</button>
+    </form>
   );
 }
 
@@ -2113,6 +2563,7 @@ function PdfReader(props: {
   onOutlineChange: (outline: OutlineItem[]) => void;
   onPageCountChange: (pageCount: number) => void;
   onSearchReady: (handler: (query: string) => Promise<SearchResult[]>, wasmDocuments?: SearchWorkerDocument[]) => void;
+  searchQuery: string;
   searchSelection?: SearchSelection;
 }) {
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -2270,6 +2721,10 @@ function PdfReader(props: {
                 ? "match"
                 : undefined
           }
+          searchQuery={props.searchQuery}
+          annotations={props.session.annotations.filter((annotation) =>
+            annotation.location.kind === "page" && annotation.location.page === pageNumber && !annotation.hidden
+          )}
           onVisiblePage={handleVisiblePage}
           onPdfKitFallback={() => setPdfKitNotice("PDFKit unavailable; using PDF.js.")}
         />
@@ -2285,6 +2740,8 @@ function PdfPage(props: {
   pdfKitPath?: string;
   renderImmediately: boolean;
   searchMatch?: "match" | "current";
+  searchQuery: string;
+  annotations: ReaderAnnotation[];
   onVisiblePage: (pageNumber: number) => void;
   onPdfKitFallback?: () => void;
 }) {
@@ -2294,6 +2751,7 @@ function PdfPage(props: {
   const [imageDataUrl, setImageDataUrl] = useState("");
   const [loading, setLoading] = useState(true);
   const [shouldRender, setShouldRender] = useState(props.renderImmediately);
+  const [searchHighlights, setSearchHighlights] = useState<PdfSearchHighlight[]>([]);
 
   useEffect(() => {
     if (props.renderImmediately || shouldRender) {
@@ -2407,6 +2865,34 @@ function PdfPage(props: {
     return () => observer.disconnect();
   }, [props.onVisiblePage, props.pageNumber]);
 
+  useEffect(() => {
+    let disposed = false;
+    const query = props.searchQuery.trim();
+
+    if (!shouldRender || !query || !props.searchMatch) {
+      setSearchHighlights([]);
+      return;
+    }
+
+    props.pdf.getPage(props.pageNumber)
+      .then(async (page) => {
+        const viewport = page.getViewport({ scale: props.zoom * 1.35 });
+        const items = await getCachedPdfTextContentItems(props.pdf, props.pageNumber, page);
+        if (!disposed) {
+          setSearchHighlights(pdfSearchHighlightsFromTextContent(items, query, viewport.height, props.zoom * 1.35));
+        }
+      })
+      .catch(() => {
+        if (!disposed) {
+          setSearchHighlights([]);
+        }
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [props.pageNumber, props.pdf, props.searchMatch, props.searchQuery, props.zoom, shouldRender]);
+
   return (
     <article
       ref={pageRef}
@@ -2429,6 +2915,44 @@ function PdfPage(props: {
       ) : (
         <canvas ref={canvasRef} />
       )}
+      {searchHighlights.length > 0 ? (
+        <div className="pdf-search-layer" aria-hidden="true">
+          {searchHighlights.map((highlight) => (
+            <span
+              key={highlight.id}
+              className="pdf-search-highlight"
+              style={{
+                left: `${highlight.left}px`,
+                top: `${highlight.top}px`,
+                width: `${highlight.width}px`,
+                height: `${highlight.height}px`
+              }}
+            />
+          ))}
+        </div>
+      ) : null}
+      {props.annotations.length > 0 ? (
+        <div className="pdf-annotation-layer" aria-label={`Page ${props.pageNumber} annotations`}>
+          {props.annotations.map((annotation, index) => (
+            <span
+              key={annotation.id}
+              className={`pdf-annotation-marker ${annotation.type}`}
+              style={{
+                borderColor: safeAnnotationColor(annotation.color),
+                backgroundColor:
+                  annotation.type === "highlight" || annotation.type === "note"
+                    ? safeAnnotationColor(annotation.color)
+                    : "transparent",
+                borderWidth: `${safeAnnotationThickness(annotation.thickness)}px`,
+                top: `${24 + index * 30}px`
+              }}
+              title={annotationTitle(annotation)}
+            >
+              {annotationTypeLabel(annotation.type)}
+            </span>
+          ))}
+        </div>
+      ) : null}
       <span className="page-number">{props.pageNumber}</span>
     </article>
   );
@@ -2555,7 +3079,7 @@ function EpubReader(props: {
       return;
     }
 
-    const index = metadata?.chapters.findIndex((chapter) => chapter.href === chapterHref) ?? -1;
+    const index = metadata ? chapterIndexForLocation(metadata.chapters, props.session.location) : -1;
     if (index >= 0) {
       setActiveChapterIndex(index);
       containerRef.current?.scrollTo?.({ top: props.session.location.scrollTop ?? 0 });
@@ -2569,7 +3093,19 @@ function EpubReader(props: {
       return;
     }
 
-    const location = locationForChapter(chapter, metadata.chapters, props.session.location.kind === "epub" ? props.session.location.scrollTop : undefined);
+    const currentHref =
+      props.session.location.kind === "epub" &&
+      props.session.location.chapterHref &&
+      isSameEpubChapterHref(props.session.location.chapterHref, chapter.href)
+        ? props.session.location.chapterHref
+        : chapter.href;
+    const location = locationForChapter(
+      chapter,
+      metadata.chapters,
+      props.session.location.kind === "epub" ? props.session.location.scrollTop : undefined,
+      currentHref,
+      props.session.location.kind === "epub" ? props.session.location.chapterLabel : undefined
+    );
     if (pendingLocalChapterHrefRef.current === chapter.href) {
       props.onNavigate(location);
     } else {
@@ -2685,17 +3221,56 @@ function EpubReader(props: {
   const currentSearchChapterHref =
     currentSearchResult?.location.kind === "epub" ? currentSearchResult.location.chapterHref : undefined;
   const currentSearchMatchIndex = currentSearchResult?.matchIndex ?? 0;
+  const visibleChapterAnnotations = useMemo(
+    () =>
+      activeChapter
+        ? props.session.annotations.filter((annotation) =>
+            !annotation.hidden && annotation.location.kind === "epub" &&
+            annotation.location.chapterHref &&
+            isSameEpubChapterHref(annotation.location.chapterHref, activeChapter.href)
+          )
+        : [],
+    [activeChapter?.href, props.session.annotations]
+  );
   const highlightedHtml = useMemo(() => {
     if (!activeChapter) {
       return "";
     }
 
-    if (!trimmedSearchQuery || currentSearchChapterHref !== activeChapter.href) {
-      return activeChapter.html;
+    const searchTarget =
+      trimmedSearchQuery &&
+      currentSearchChapterHref &&
+      isSameEpubChapterHref(currentSearchChapterHref, activeChapter.href)
+        ? { query: trimmedSearchQuery, occurrenceIndex: currentSearchMatchIndex }
+        : undefined;
+
+    return renderEpubHtml(activeChapter.html, visibleChapterAnnotations, searchTarget);
+  }, [
+    activeChapter?.href,
+    activeChapter?.html,
+    currentSearchChapterHref,
+    currentSearchMatchIndex,
+    trimmedSearchQuery,
+    visibleChapterAnnotations
+  ]);
+
+  useEffect(() => {
+    if (!activeChapter || props.session.location.kind !== "epub" || !props.session.location.chapterHref) {
+      return;
     }
 
-    return highlightCurrentSearchMatch(activeChapter.html, trimmedSearchQuery, currentSearchMatchIndex);
-  }, [activeChapter?.href, activeChapter?.html, currentSearchChapterHref, currentSearchMatchIndex, trimmedSearchQuery]);
+    const fragment = epubHrefFragment(props.session.location.chapterHref);
+    if (!fragment) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      const target = surfaceRef.current?.querySelector<HTMLElement>(
+        `[id="${cssEscape(fragment)}"], [name="${cssEscape(fragment)}"]`
+      );
+      target?.scrollIntoView?.({ block: "start" });
+    });
+  }, [activeChapter?.href, highlightedHtml, props.session.location]);
 
   if (readerError) {
     return <InlineReaderError title={readerError.title} message={readerError.message} />;
@@ -2760,6 +3335,15 @@ function EpubReader(props: {
           <span style={{ width: `${chapterPercent}%` }} />
         </div>
         <div className="epub-content" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+        {visibleChapterAnnotations.length > 0 ? (
+          <div className="epub-annotation-anchors" aria-label="Chapter annotations">
+            {visibleChapterAnnotations.map((annotation) => (
+              <span key={annotation.id} className={`epub-annotation-anchor ${annotation.type}`}>
+                {annotationTitle(annotation)}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </article>
     </div>
   );
@@ -2896,19 +3480,21 @@ function chapterIndexForLocation(chapters: EpubChapterMetadata[], location: Read
     return 0;
   }
 
-  const index = chapters.findIndex((chapter) => chapter.href === location.chapterHref);
+  const index = chapters.findIndex((chapter) => isSameEpubChapterHref(chapter.href, location.chapterHref ?? ""));
   return index >= 0 ? index : 0;
 }
 
 function locationForChapter(
   chapter: EpubChapterMetadata,
   chapters: EpubChapterMetadata[],
-  scrollTop?: number
+  scrollTop?: number,
+  chapterHref = chapter.href,
+  chapterLabel = chapter.label
 ): ReaderLocation {
   return {
     kind: "epub",
-    chapterHref: chapter.href,
-    chapterLabel: chapter.label,
+    chapterHref,
+    chapterLabel,
     progress: chapters.length > 1 ? chapter.index / (chapters.length - 1) : 0,
     scrollTop
   };
@@ -3005,7 +3591,7 @@ function desktopDocumentToEpubMetadata(path: string, document: DesktopEpubDocume
     outline: document.outline.map((item) => {
       const chapter = typeof item.index === "number"
         ? document.chapters[item.index]
-        : document.chapters.find((entry) => entry.href === item.href);
+        : document.chapters.find((entry) => isSameEpubChapterHref(entry.href, item.href));
 
       return {
         id: item.id,
@@ -3328,12 +3914,105 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function renderEpubHtml(
+  html: string,
+  annotations: ReaderAnnotation[],
+  searchTarget?: { query: string; occurrenceIndex: number }
+): string {
+  const hasTextAnnotations = annotations.some((annotation) => Boolean(annotation.selectedText?.trim()));
+  const query = searchTarget?.query.trim() ?? "";
+
+  if (!hasTextAnnotations && !query) {
+    return html;
+  }
+
+  const document = new DOMParser().parseFromString(html, "text/html");
+
+  if (hasTextAnnotations) {
+    annotations.forEach((annotation) => {
+      const selectedText = annotation.selectedText?.trim();
+      if (selectedText) {
+        applyAnnotationToDocument(document, annotation, selectedText);
+      }
+    });
+  }
+
+  if (query) {
+    applySearchHighlightToDocument(document, query, searchTarget?.occurrenceIndex ?? 0);
+  }
+
+  return document.body.innerHTML;
+}
+
+function applyAnnotationToDocument(document: Document, annotation: ReaderAnnotation, selectedText: string) {
+  const matcher = new RegExp(selectedText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+
+  while (node) {
+    const textNode = node as Text;
+    const text = textNode.nodeValue ?? "";
+    const match = matcher.exec(text);
+
+    if (!match) {
+      node = walker.nextNode();
+      continue;
+    }
+
+    const fragment = document.createDocumentFragment();
+    if (match.index > 0) {
+      fragment.append(document.createTextNode(text.slice(0, match.index)));
+    }
+
+    const span = document.createElement("span");
+    span.className = `reader-annotation ${annotation.type}`;
+    span.setAttribute("data-annotation-id", annotation.id);
+    span.setAttribute("title", annotationTitle(annotation));
+    span.setAttribute("style", annotationInlineStyle(annotation));
+    span.textContent = match[0];
+    fragment.append(span);
+
+    const cursor = match.index + match[0].length;
+    if (cursor < text.length) {
+      fragment.append(document.createTextNode(text.slice(cursor)));
+    }
+
+    textNode.replaceWith(fragment);
+    break;
+  }
+}
+
+function annotationInlineStyle(annotation: ReaderAnnotation): string {
+  const color = safeAnnotationColor(annotation.color);
+  const thickness = safeAnnotationThickness(annotation.thickness);
+
+  if (annotation.type === "underline") {
+    return `text-decoration: underline; text-decoration-color: ${color}; text-decoration-thickness: ${thickness}px;`;
+  }
+
+  if (annotation.type === "strike") {
+    return `text-decoration: line-through; text-decoration-color: ${color}; text-decoration-thickness: ${thickness}px;`;
+  }
+
+  if (annotation.type === "note") {
+    return `border-bottom: ${thickness}px solid ${color};`;
+  }
+
+  return `background: ${color};`;
+}
+
 function highlightCurrentSearchMatch(html: string, query: string, occurrenceIndex = 0): string {
   if (!query) {
     return html;
   }
 
   const document = new DOMParser().parseFromString(html, "text/html");
+  applySearchHighlightToDocument(document, query, occurrenceIndex);
+
+  return document.body.innerHTML;
+}
+
+function applySearchHighlightToDocument(document: Document, query: string, occurrenceIndex = 0) {
   const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const matcher = new RegExp(escapedQuery, "i");
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -3382,8 +4061,117 @@ function highlightCurrentSearchMatch(html: string, query: string, occurrenceInde
     textNode.replaceWith(fragment);
     break;
   }
+}
 
-  return document.body.innerHTML;
+function pdfSearchHighlightsFromTextContent(
+  items: unknown[],
+  query: string,
+  viewportHeight: number,
+  scale: number
+): PdfSearchHighlight[] {
+  const normalizedQuery = query.toLowerCase();
+  const { ranges, text } = pdfTextContentRangeMap(items);
+  const normalizedText = text.toLowerCase();
+  const highlights: PdfSearchHighlight[] = [];
+  let matchIndex = normalizedText.indexOf(normalizedQuery);
+
+  while (matchIndex >= 0) {
+    const matchEnd = matchIndex + normalizedQuery.length;
+
+    ranges.forEach((range) => {
+      if (range.end <= matchIndex || range.start >= matchEnd) {
+        return;
+      }
+
+      const left = Math.max(0, range.item.transform[4] * scale);
+      const height = Math.max(12, (range.item.height ?? 12) * scale);
+      const top = Math.max(0, viewportHeight - range.item.transform[5] * scale - height);
+
+      highlights.push({
+        id: `search-highlight-${matchIndex}-${range.index}`,
+        left,
+        top,
+        width: Math.max(48, (range.item.width ?? range.item.str.length * 7) * scale),
+        height
+      });
+    });
+
+    matchIndex = normalizedText.indexOf(normalizedQuery, matchEnd);
+  }
+
+  return highlights;
+}
+
+function pdfTextContentRangeMap(items: unknown[]): { ranges: PdfTextContentRange[]; text: string } {
+  const ranges: PdfTextContentRange[] = [];
+  let text = "";
+
+  items.forEach((item, index) => {
+    const itemText = isPdfTextContentItem(item) ? item.str : "";
+    const start = text.length;
+    text += itemText;
+
+    if (isPdfTextContentItem(item) && itemText) {
+      ranges.push({
+        item,
+        index,
+        start,
+        end: start + itemText.length
+      });
+    }
+
+    if (index < items.length - 1) {
+      text += " ";
+    }
+  });
+
+  return { ranges, text };
+}
+
+function getCachedPdfTextContentItems(
+  pdf: PDFDocumentProxy,
+  pageNumber: number,
+  page?: PDFPageProxy
+): Promise<unknown[]> {
+  let documentCache = pdfTextContentCache.get(pdf);
+
+  if (!documentCache) {
+    documentCache = new Map();
+    pdfTextContentCache.set(pdf, documentCache);
+  }
+
+  const cached = documentCache.get(pageNumber);
+  if (cached) {
+    return cached;
+  }
+
+  const items = (page ? Promise.resolve(page) : pdf.getPage(pageNumber))
+    .then((pdfPage) => pdfPage.getTextContent())
+    .then((textContent) => textContent.items as unknown[])
+    .catch((error) => {
+      documentCache?.delete(pageNumber);
+      throw error;
+    });
+
+  documentCache.set(pageNumber, items);
+  return items;
+}
+
+function isPdfTextContentItem(value: unknown): value is {
+  str: string;
+  transform: number[];
+  width?: number;
+  height?: number;
+} {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "str" in value &&
+    typeof value.str === "string" &&
+    "transform" in value &&
+    Array.isArray(value.transform) &&
+    value.transform.length >= 6
+  );
 }
 
 function renderPdfPage(page: PDFPageProxy, canvas: HTMLCanvasElement | null, zoom: number): PdfRenderTask | undefined {
@@ -3577,8 +4365,105 @@ function modeLabel(mode: SidebarMode): string {
     contents: "Contents",
     thumbnails: "Thumbnails",
     bookmarks: "Marks",
-    search: "Search"
+    search: "Search",
+    annotations: "Annotations"
   }[mode];
+}
+
+function annotationTypeLabel(type: AnnotationType): string {
+  return {
+    highlight: "Highlight",
+    underline: "Underline",
+    strike: "Strike",
+    note: "Note"
+  }[type];
+}
+
+function annotationTitle(annotation: ReaderAnnotation): string {
+  return annotation.note?.trim() || annotation.selectedText?.trim() || locationToStatus(annotation.location);
+}
+
+function createAnnotationId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return `annotation-${globalThis.crypto.randomUUID()}`;
+  }
+
+  return `annotation-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function safeAnnotationColor(color: string): string {
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : annotationColors[0];
+}
+
+function safeAnnotationThickness(thickness: number): number {
+  return annotationThicknesses.includes(thickness) ? thickness : 2;
+}
+
+function annotationsToMarkdown(session: DocumentSession): string {
+  const documentTitle = markdownExportValue(session.title);
+  const lines = [
+    `# ${documentTitle} annotations`,
+    "",
+    `- Document: ${documentTitle}`,
+    `- Exported at: ${formatAnnotationTime(Date.now())}`,
+    `- Count: ${session.annotations.length}`,
+    ""
+  ];
+
+  session.annotations.forEach((annotation, index) => {
+    lines.push(
+      `## ${index + 1}. ${markdownExportValue(annotationTitle(annotation))}`,
+      "",
+      `- Document: ${documentTitle}`,
+      `- Location: ${markdownExportValue(locationToStatus(annotation.location, session.pageCount))}`,
+      `- Type: ${annotationTypeLabel(annotation.type)}`,
+      `- Tag: ${annotation.tag}`,
+      `- Color: ${annotation.color}`,
+      `- Thickness: ${annotation.thickness}`,
+      `- Selected text: ${markdownExportValue(annotation.selectedText?.trim() ?? "")}`,
+      `- Note: ${markdownExportValue(annotation.note?.trim() ?? "")}`,
+      `- Created: ${formatAnnotationTime(annotation.createdAt)}`,
+      `- Updated: ${formatAnnotationTime(annotation.updatedAt)}`,
+      ""
+    );
+  });
+
+  return lines.join("\n");
+}
+
+function markdownExportValue(value: string): string {
+  return escapeHtml(value.trim().replace(/\r\n?/g, "\n"))
+    .replace(/([\\`*_{}\[\]()#+!|>\-])/g, "\\$1")
+    .replace(/\n/g, "\\n");
+}
+
+function formatAnnotationTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+function downloadSafeName(name: string): string {
+  const safeName = name.trim().replace(/[\\/:*?"<>|]+/g, "-");
+  return safeName || "document";
+}
+
+function downloadTextFile(content: string, filename: string, type: string) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function cssEscape(value: string): string {
+  return typeof CSS !== "undefined" && typeof CSS.escape === "function"
+    ? CSS.escape(value)
+    : value.replace(/["\\]/g, "\\$&");
 }
 
 type IconName =

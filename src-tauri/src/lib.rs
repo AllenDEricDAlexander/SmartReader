@@ -1277,6 +1277,12 @@ fn parse_epub_package(
     }
 
     let nav_labels = read_epub_nav_items(archive, nav_path.as_deref(), ncx_path.as_deref())?;
+    let mut nav_label_by_href = HashMap::new();
+    for item in &nav_labels {
+        nav_label_by_href
+            .entry(normalize_epub_href(&item.href))
+            .or_insert_with(|| item.title.clone());
+    }
     let mut chapters = Vec::new();
 
     for (index, idref) in spine_ids.iter().enumerate() {
@@ -1287,10 +1293,9 @@ fn parse_epub_package(
             return Err(ENCRYPTED_DOCUMENT_ERROR.to_string());
         }
         let href = item.href.clone();
-        let label = nav_labels
-            .iter()
-            .find(|item| item.href == href)
-            .map(|item| item.title.clone())
+        let label = nav_label_by_href
+            .get(&href)
+            .cloned()
             .unwrap_or_else(|| format!("Chapter {}", index + 1));
 
         chapters.push(EpubChapterMetadataDto {
@@ -1311,7 +1316,9 @@ fn parse_epub_package(
         .map(|(index, item)| EpubOutlineItemDto {
             id: format!("outline-{}-{}", index, item.href),
             title: item.title,
-            index: chapter_indexes.get(&item.href).copied(),
+            index: chapter_indexes
+                .get(&normalize_epub_href(&item.href))
+                .copied(),
             href: item.href,
             level: item.level,
         })
@@ -1468,9 +1475,8 @@ fn parse_epub_nav(nav_path: &str, nav_text: &str) -> Vec<NavItem> {
             }
             Ok(Event::Start(start)) if tag_matches(start.name().as_ref(), "a") => {
                 active_href = xml_attr(&start, "href")
-                    .map(|href| href.split('#').next().unwrap_or("").to_string())
-                    .filter(|href| !href.is_empty())
-                    .map(|href| resolve_epub_path(&base_path, &href));
+                    .map(|href| resolve_epub_href(&base_path, &href))
+                    .filter(|href| !href.is_empty());
                 active_text.clear();
             }
             Ok(Event::Text(text)) if active_href.is_some() => {
@@ -1505,16 +1511,19 @@ fn parse_epub_ncx(ncx_path: &str, ncx_text: &str) -> Vec<NavItem> {
     loop {
         match reader.read_event() {
             Ok(Event::Start(start)) if tag_matches(start.name().as_ref(), "navPoint") => {
+                let level = points.len().saturating_sub(1);
+                emit_ncx_point(points.last_mut(), level, &mut nav_items);
                 points.push(NcxPoint::default());
             }
             Ok(Event::Start(start)) | Ok(Event::Empty(start))
                 if tag_matches(start.name().as_ref(), "content") =>
             {
+                let level = points.len().saturating_sub(1);
                 if let Some(point) = points.last_mut() {
                     point.href = xml_attr(&start, "src")
-                        .map(|href| href.split('#').next().unwrap_or("").to_string())
-                        .filter(|href| !href.is_empty())
-                        .map(|href| resolve_epub_path(&base_path, &href));
+                        .map(|href| resolve_epub_href(&base_path, &href))
+                        .filter(|href| !href.is_empty());
+                    emit_ncx_point(Some(point), level, &mut nav_items);
                 }
             }
             Ok(Event::Start(start)) if tag_matches(start.name().as_ref(), "text") => {
@@ -1533,23 +1542,18 @@ fn parse_epub_ncx(ncx_path: &str, ncx_text: &str) -> Vec<NavItem> {
                 }
             }
             Ok(Event::End(end)) if tag_matches(end.name().as_ref(), "text") => {
+                let level = points.len().saturating_sub(1);
                 if let Some(point) = points.last_mut() {
                     point.in_label = false;
+                    emit_ncx_point(Some(point), level, &mut nav_items);
                 }
             }
             Ok(Event::End(end)) if tag_matches(end.name().as_ref(), "navPoint") => {
-                if let Some(point) = points.pop() {
-                    if let Some(href) = point.href {
-                        let title = normalize_whitespace(&point.title);
-                        if !title.is_empty() {
-                            nav_items.push(NavItem {
-                                href,
-                                title,
-                                level: points.len(),
-                            });
-                        }
-                    }
+                let level = points.len().saturating_sub(1);
+                if let Some(point) = points.last_mut() {
+                    emit_ncx_point(Some(point), level, &mut nav_items);
                 }
+                points.pop();
             }
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
@@ -1557,6 +1561,26 @@ fn parse_epub_ncx(ncx_path: &str, ncx_text: &str) -> Vec<NavItem> {
     }
 
     nav_items
+}
+
+// NCX navPoints can nest; emit each point as soon as its own href and label are complete.
+fn emit_ncx_point(point: Option<&mut NcxPoint>, level: usize, nav_items: &mut Vec<NavItem>) {
+    let Some(point) = point else {
+        return;
+    };
+    if point.emitted {
+        return;
+    }
+    let Some(href) = point.href.clone() else {
+        return;
+    };
+    let title = normalize_whitespace(&point.title);
+    if title.is_empty() {
+        return;
+    }
+
+    point.emitted = true;
+    nav_items.push(NavItem { href, title, level });
 }
 
 fn sanitize_epub_html(html: &str) -> String {
@@ -1744,6 +1768,20 @@ fn resolve_epub_path(base_path: &str, href: &str) -> String {
     resolved.join("/")
 }
 
+// Outline hrefs keep anchors, while chapter lookup normalizes back to the base file path.
+fn resolve_epub_href(base_path: &str, href: &str) -> String {
+    let (path, fragment) = href.split_once('#').unwrap_or((href, ""));
+    let resolved = resolve_epub_path(base_path, path);
+    if resolved.is_empty() {
+        return resolved;
+    }
+    if fragment.is_empty() {
+        resolved
+    } else {
+        format!("{resolved}#{fragment}")
+    }
+}
+
 fn normalize_epub_href(href: &str) -> String {
     resolve_epub_path("", href.split('#').next().unwrap_or(""))
 }
@@ -1903,6 +1941,7 @@ struct NcxPoint {
     href: Option<String>,
     title: String,
     in_label: bool,
+    emitted: bool,
 }
 
 pub fn run() {
@@ -2247,6 +2286,72 @@ mod tests {
     }
 
     #[test]
+    fn open_epub_document_preserves_nav_fragments_and_outline_order() {
+        let path = test_path("fragment-nav.epub");
+        write_test_epub(
+            &path,
+            TestEpubOptions {
+                fragmented_nav: true,
+                ..TestEpubOptions::default()
+            },
+        )
+        .unwrap();
+
+        let document = open_epub_document_from_path(path.clone()).unwrap();
+
+        assert_eq!(document.chapters[0].label, "Opening");
+        assert_eq!(document.outline.len(), 3);
+        assert_eq!(document.outline[0].title, "Opening");
+        assert_eq!(document.outline[0].href, "OPS/chapter-one.xhtml#opening");
+        assert_eq!(document.outline[0].index, Some(0));
+        assert_eq!(document.outline[0].level, 0);
+        assert_eq!(document.outline[1].title, "Opening detail");
+        assert_eq!(document.outline[1].href, "OPS/chapter-one.xhtml#detail");
+        assert_eq!(document.outline[1].index, Some(0));
+        assert_eq!(document.outline[1].level, 1);
+        assert_eq!(
+            document.outline[2].href,
+            "OPS/chapter-two.xhtml#chapter-two"
+        );
+        assert_eq!(document.outline[2].index, Some(1));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn open_epub_document_preserves_ncx_fragments_and_parent_before_child() {
+        let path = test_path("fragment-ncx.epub");
+        write_test_epub(
+            &path,
+            TestEpubOptions {
+                include_nav: false,
+                include_ncx: true,
+                fragmented_ncx: true,
+                ..TestEpubOptions::default()
+            },
+        )
+        .unwrap();
+
+        let document = open_epub_document_from_path(path.clone()).unwrap();
+
+        assert_eq!(document.chapters[0].label, "NCX Opening");
+        assert_eq!(document.outline.len(), 3);
+        assert_eq!(document.outline[0].title, "NCX Opening");
+        assert_eq!(document.outline[0].href, "OPS/chapter-one.xhtml#opening");
+        assert_eq!(document.outline[0].index, Some(0));
+        assert_eq!(document.outline[0].level, 0);
+        assert_eq!(document.outline[1].title, "NCX Opening detail");
+        assert_eq!(document.outline[1].href, "OPS/chapter-one.xhtml#detail");
+        assert_eq!(document.outline[1].index, Some(0));
+        assert_eq!(document.outline[1].level, 1);
+        assert_eq!(
+            document.outline[2].href,
+            "OPS/chapter-two.xhtml#chapter-two"
+        );
+        assert_eq!(document.outline[2].index, Some(1));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn open_epub_document_rejects_rights_xml_as_encrypted_document() {
         let path = test_path("rights.epub");
         write_test_epub(
@@ -2312,6 +2417,23 @@ mod tests {
         assert_eq!(chapter.label, "Chapter 2");
         assert!(chapter.sanitized_html.contains("Second chapter"));
         assert!(!chapter.sanitized_html.contains("First chapter"));
+        assert!(chapter.text.contains("Second chapter"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn read_epub_chapter_accepts_fragment_href() {
+        let path = test_path("chapter-fragment.epub");
+        write_test_epub(&path, TestEpubOptions::default()).unwrap();
+
+        let chapter = read_epub_chapter_from_path(
+            path.clone(),
+            "OPS/chapter-two.xhtml#chapter-two".to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(chapter.href, "OPS/chapter-two.xhtml");
+        assert_eq!(chapter.index, 1);
         assert!(chapter.text.contains("Second chapter"));
         fs::remove_file(path).unwrap();
     }
@@ -2528,6 +2650,47 @@ mod tests {
     }
 
     #[test]
+    fn export_and_import_cache_preserves_annotations_payload() {
+        let root = test_path("cache-annotations");
+        let paths = test_cache_paths(&root);
+        let mut source_cache = valid_test_cache();
+        source_cache["session"]["tabs"][0]["annotations"] = serde_json::json!([
+            {
+                "id": "annotation-1",
+                "type": "highlight",
+                "tag": "重点",
+                "color": "#ffd166",
+                "thickness": 2,
+                "location": {
+                    "href": "OPS/chapter-one.xhtml#detail",
+                    "start": 12,
+                    "end": 20
+                },
+                "selectedText": "important text",
+                "note": "reader note",
+                "hidden": false,
+                "createdAt": "2026-05-26T00:00:00Z",
+                "updatedAt": "2026-05-26T00:00:00Z"
+            }
+        ]);
+        save_cache_to_paths(&paths, source_cache.clone()).unwrap();
+        let export_path = root.join("backup").join("smartreader-cache.json");
+
+        export_cache_from_paths(&paths, export_path.clone(), None).unwrap();
+        let imported = import_cache_from_paths(&paths, export_path, true).unwrap();
+
+        assert_eq!(
+            imported.cache["session"]["tabs"][0]["annotations"],
+            source_cache["session"]["tabs"][0]["annotations"]
+        );
+        assert_eq!(
+            read_cache_file(&paths.default_dir.join(CACHE_FILE_NAME)).unwrap(),
+            source_cache
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn invalid_import_does_not_overwrite_existing_cache() {
         let root = test_path("cache-invalid-import");
         let paths = test_cache_paths(&root);
@@ -2731,6 +2894,8 @@ mod tests {
         encrypted_resources: Vec<&'static str>,
         omitted_chapters: Vec<&'static str>,
         chapter_count: usize,
+        fragmented_nav: bool,
+        fragmented_ncx: bool,
     }
 
     impl Default for TestEpubOptions {
@@ -2746,6 +2911,8 @@ mod tests {
                 encrypted_resources: Vec::new(),
                 omitted_chapters: Vec::new(),
                 chapter_count: 2,
+                fragmented_nav: false,
+                fragmented_ncx: false,
             }
         }
     }
@@ -2831,12 +2998,18 @@ mod tests {
         if options.include_nav {
             zip.start_file("OPS/nav.xhtml", file_options)?;
             let mut nav = "<html><body><nav><ol>".to_string();
-            for index in 0..options.chapter_count {
-                nav.push_str(&format!(
-                    r#"<li><a href="{}">{}</a></li>"#,
-                    test_epub_chapter_file(index, options.chapter_count),
-                    test_epub_chapter_label(index, options.chapter_count)
-                ));
+            if options.fragmented_nav {
+                nav.push_str(
+                    r##"<li><a href="chapter-one.xhtml#opening">Opening</a><ol><li><a href="chapter-one.xhtml#detail">Opening detail</a></li></ol></li><li><a href="chapter-two.xhtml#chapter-two">Chapter 2</a></li>"##,
+                );
+            } else {
+                for index in 0..options.chapter_count {
+                    nav.push_str(&format!(
+                        r#"<li><a href="{}">{}</a></li>"#,
+                        test_epub_chapter_file(index, options.chapter_count),
+                        test_epub_chapter_label(index, options.chapter_count)
+                    ));
+                }
             }
             nav.push_str("</ol></nav></body></html>");
             zip.write_all(nav.as_bytes())?;
@@ -2845,12 +3018,18 @@ mod tests {
         if options.include_ncx {
             zip.start_file("OPS/toc.ncx", file_options)?;
             let mut ncx = r#"<?xml version="1.0"?><ncx><navMap>"#.to_string();
-            for index in 0..options.chapter_count {
-                ncx.push_str(&format!(
-                    r#"<navPoint><navLabel><text>{}</text></navLabel><content src="{}"/></navPoint>"#,
-                    test_epub_ncx_chapter_label(index, options.chapter_count),
-                    test_epub_chapter_file(index, options.chapter_count)
-                ));
+            if options.fragmented_ncx {
+                ncx.push_str(
+                    r##"<navPoint><navLabel><text>NCX Opening</text></navLabel><content src="chapter-one.xhtml#opening"/><navPoint><navLabel><text>NCX Opening detail</text></navLabel><content src="chapter-one.xhtml#detail"/></navPoint></navPoint><navPoint><navLabel><text>NCX Chapter 2</text></navLabel><content src="chapter-two.xhtml#chapter-two"/></navPoint>"##,
+                );
+            } else {
+                for index in 0..options.chapter_count {
+                    ncx.push_str(&format!(
+                        r#"<navPoint><navLabel><text>{}</text></navLabel><content src="{}"/></navPoint>"#,
+                        test_epub_ncx_chapter_label(index, options.chapter_count),
+                        test_epub_chapter_file(index, options.chapter_count)
+                    ));
+                }
             }
             ncx.push_str("</navMap></ncx>");
             zip.write_all(ncx.as_bytes())?;

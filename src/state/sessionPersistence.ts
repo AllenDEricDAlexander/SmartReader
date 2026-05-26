@@ -130,6 +130,7 @@ function persistDocumentSession(
     fitMode: session.fitMode,
     sidebarMode: session.sidebarMode,
     bookmarks: session.bookmarks,
+    annotations: session.annotations,
     pageCount: session.pageCount,
     epubSettings: session.epubSettings,
     openedAt: session.openedAt,
@@ -152,7 +153,8 @@ function restoreDocumentSession(
     source: undefined,
     objectUrl: undefined,
     outline: [],
-    searchResults: []
+    searchResults: [],
+    annotations: session.annotations ?? []
   };
 }
 

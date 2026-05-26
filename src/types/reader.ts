@@ -1,6 +1,6 @@
 export type DocumentFormat = "empty" | "pdf" | "epub" | "unsupported";
 
-export type SidebarMode = "contents" | "thumbnails" | "bookmarks" | "search";
+export type SidebarMode = "contents" | "thumbnails" | "bookmarks" | "search" | "annotations";
 
 export type FitMode = "continuous" | "single" | "fit-width" | "fit-page" | "actual-size";
 
@@ -76,6 +76,31 @@ export interface Bookmark {
   createdAt: number;
 }
 
+export type AnnotationType = "highlight" | "underline" | "strike" | "note";
+
+export type AnnotationTag =
+  | "重点"
+  | "疑问"
+  | "引用备注"
+  | "创新点"
+  | "实验数据"
+  | "缺陷"
+  | "个人思考";
+
+export interface ReaderAnnotation {
+  id: string;
+  type: AnnotationType;
+  tag: AnnotationTag;
+  color: string;
+  thickness: number;
+  location: ReaderLocation;
+  selectedText?: string;
+  note?: string;
+  hidden?: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface EpubReadingSettings {
   fontSize: number;
   theme: ReaderTheme;
@@ -99,6 +124,7 @@ export interface DocumentSession {
   outline: OutlineItem[];
   searchResults: SearchResult[];
   bookmarks: Bookmark[];
+  annotations: ReaderAnnotation[];
   pageCount?: number;
   epubSettings: EpubReadingSettings;
   openedAt: number;
@@ -221,6 +247,7 @@ export interface PersistedDocumentSession {
   fitMode: FitMode;
   sidebarMode: SidebarMode;
   bookmarks: Bookmark[];
+  annotations: ReaderAnnotation[];
   pageCount?: number;
   epubSettings: EpubReadingSettings;
   openedAt: number;

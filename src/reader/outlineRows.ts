@@ -56,9 +56,47 @@ export function isSameReaderLocation(first: ReaderLocation, second: ReaderLocati
     case "page":
       return second.kind === "page" && first.page === second.page;
     case "epub":
-      return second.kind === "epub" &&
-        first.chapterHref === second.chapterHref &&
-        first.cfi === second.cfi &&
-        first.progress === second.progress;
+      if (second.kind !== "epub") {
+        return false;
+      }
+
+      if (first.chapterHref || second.chapterHref) {
+        return first.chapterHref !== undefined &&
+          second.chapterHref !== undefined &&
+          normalizeEpubHref(first.chapterHref) === normalizeEpubHref(second.chapterHref);
+      }
+
+      return first.cfi === second.cfi && first.progress === second.progress;
   }
+}
+
+export function baseEpubHref(href: string): string {
+  return href.split("#")[0];
+}
+
+export function epubHrefFragment(href: string): string | undefined {
+  const fragment = href.split("#")[1];
+  if (!fragment) {
+    return undefined;
+  }
+
+  try {
+    return decodeURIComponent(fragment);
+  } catch {
+    return fragment;
+  }
+}
+
+export function isSameEpubChapterHref(first: string, second: string): boolean {
+  return normalizeEpubPath(baseEpubHref(first)) === normalizeEpubPath(baseEpubHref(second));
+}
+
+function normalizeEpubHref(href: string): string {
+  const [base, fragment] = href.split("#");
+  const normalizedBase = normalizeEpubPath(base);
+  return fragment ? `${normalizedBase}#${fragment}` : normalizedBase;
+}
+
+function normalizeEpubPath(href: string): string {
+  return href.replace(/^\.\//, "");
 }

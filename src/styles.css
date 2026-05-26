@@ -451,7 +451,7 @@ button {
 
 .sidebar-modes {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 4px;
   padding: 6px 7px;
   border-bottom: 1px solid var(--border);
@@ -568,6 +568,108 @@ button {
   line-height: 1.35;
 }
 
+.search-result-row.active,
+.annotation-row.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.annotation-sidebar {
+  display: grid;
+  gap: 8px;
+}
+
+.annotation-filters {
+  display: grid;
+  gap: 6px;
+  padding: 4px;
+}
+
+.annotation-filters select,
+.annotation-filters label,
+.annotation-bulk-actions button,
+.annotation-row-actions button {
+  min-height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.annotation-filters label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.annotation-bulk-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.annotation-bulk-actions button {
+  padding: 0 8px;
+}
+
+.annotation-bulk-actions button:disabled {
+  opacity: 0.55;
+}
+
+.annotation-row {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+
+.annotation-row.hidden {
+  opacity: 0.58;
+}
+
+.annotation-row-main {
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.annotation-row-main span {
+  display: grid;
+  gap: 2px;
+}
+
+.annotation-row-main strong,
+.annotation-row-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotation-row-main small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.annotation-row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.annotation-row-actions button {
+  padding: 0 8px;
+}
+
+.annotation-row-actions button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .empty-note {
   margin: 26px 14px;
   color: var(--muted);
@@ -583,6 +685,40 @@ button {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 42px),
     var(--reader-matte);
+}
+
+.annotation-bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(92px, auto) minmax(88px, auto) minmax(84px, auto) minmax(72px, auto) minmax(120px, 1fr) auto;
+  gap: 7px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--chrome) 92%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.annotation-bar select,
+.annotation-bar input,
+.annotation-bar button {
+  min-width: 0;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.annotation-bar input {
+  padding: 0 9px;
+}
+
+.annotation-bar button {
+  padding: 0 10px;
+  font-weight: 600;
 }
 
 .pdf-canvas {
@@ -616,6 +752,42 @@ button {
 
 .pdf-page-frame.search-current {
   box-shadow: var(--shadow-paper), 0 0 0 4px rgba(155, 99, 63, 0.72);
+}
+
+.pdf-search-layer,
+.pdf-annotation-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pdf-search-highlight {
+  position: absolute;
+  border-radius: 3px;
+  background: rgba(255, 226, 138, 0.68);
+  box-shadow: 0 0 0 1px rgba(155, 99, 63, 0.22);
+}
+
+.pdf-annotation-marker {
+  position: absolute;
+  left: 18px;
+  max-width: calc(100% - 36px);
+  overflow: hidden;
+  padding: 3px 7px;
+  border-style: solid;
+  border-radius: 6px;
+  color: #3a2a17;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.88;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdf-annotation-marker.underline,
+.pdf-annotation-marker.strike {
+  background: rgba(255, 253, 248, 0.72);
 }
 
 .page-number {
@@ -841,6 +1013,41 @@ button {
 
 .search-highlight.current {
   background: #f2ad62;
+}
+
+.reader-annotation {
+  border-radius: 3px;
+}
+
+.reader-annotation.note::after {
+  content: " note";
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-size: 0.72em;
+  font-weight: 700;
+}
+
+.epub-annotation-anchors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 28px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+  font-family: var(--font-ui);
+}
+
+.epub-annotation-anchor {
+  max-width: 240px;
+  overflow: hidden;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 253, 248, 0.72);
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .empty-state,

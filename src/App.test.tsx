@@ -17,6 +17,27 @@ const pdfMocks = vi.hoisted(() => {
   ];
   const getViewport = vi.fn(() => ({ width: 640, height: 900 }));
   const getPageIndex = vi.fn(async (ref: { num: number }) => Math.max(0, ref.num - 1));
+  let textContentItems = [
+    {
+      str: "Native PDF result",
+      transform: [1, 0, 0, 1, 72, 760],
+      width: 112,
+      height: 14
+    }
+  ];
+  const getTextContent = vi.fn(async () => ({
+    items: textContentItems
+  }));
+  const resetTextContentItems = () => {
+    textContentItems = [
+      {
+        str: "Native PDF result",
+        transform: [1, 0, 0, 1, 72, 760],
+        width: 112,
+        height: 14
+      }
+    ];
+  };
   const createDocumentTask = () => ({
     promise: Promise.resolve({
       numPages: 2,
@@ -25,7 +46,7 @@ const pdfMocks = vi.hoisted(() => {
       getPageIndex,
       getPage: vi.fn(async () => ({
         getViewport,
-        getTextContent: vi.fn(async () => ({ items: [] })),
+        getTextContent,
         render: vi.fn(() => ({ promise: Promise.resolve() }))
       })),
       destroy: vi.fn()
@@ -34,7 +55,18 @@ const pdfMocks = vi.hoisted(() => {
   const getDocument = vi.fn(createDocumentTask);
   const modernGetDocument = vi.fn(createDocumentTask);
 
-  return { getDocument, getPageIndex, getViewport, modernGetDocument, outlineItems };
+  return {
+    getDocument,
+    getPageIndex,
+    getTextContent,
+    getViewport,
+    modernGetDocument,
+    outlineItems,
+    resetTextContentItems,
+    setTextContentItems: (items: typeof textContentItems) => {
+      textContentItems = items;
+    }
+  };
 });
 
 const tauriMocks = vi.hoisted(() => {
@@ -63,6 +95,7 @@ const tauriMocks = vi.hoisted(() => {
       outline: [],
       searchResults: [],
       bookmarks: [],
+      annotations: [],
       epubSettings: {
         fontSize: 18,
         theme: "system"
@@ -270,6 +303,8 @@ describe("App desktop open delivery", () => {
     tauriMocks.reset();
     pdfMocks.getDocument.mockClear();
     pdfMocks.modernGetDocument.mockClear();
+    pdfMocks.getTextContent.mockClear();
+    pdfMocks.resetTextContentItems();
     pdfMocks.getViewport.mockClear();
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
@@ -285,6 +320,10 @@ describe("App desktop open delivery", () => {
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     HTMLCanvasElement.prototype.getContext = vi.fn(() => ({})) as unknown as typeof HTMLCanvasElement.prototype.getContext;
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn()
+    });
+    Object.defineProperty(HTMLAnchorElement.prototype, "click", {
       configurable: true,
       value: vi.fn()
     });
@@ -486,6 +525,32 @@ describe("App desktop open delivery", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "50%" })).toBeInTheDocument();
     });
+  });
+
+  it("reuses PDF text content for search overlays after zoom changes", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.click(screen.getByLabelText("Find"));
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "native" }
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+
+    await waitFor(() => {
+      expect(pdfMocks.getTextContent).toHaveBeenCalledTimes(1);
+    });
+    pdfMocks.getTextContent.mockClear();
+
+    fireEvent.click(screen.getByLabelText("Zoom in"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "110%" })).toBeInTheDocument();
+    });
+    await act(async () => undefined);
+    expect(pdfMocks.getTextContent).not.toHaveBeenCalled();
   });
 
   it("coalesces pinch wheel zoom updates until the next animation frame", async () => {
@@ -939,6 +1004,421 @@ describe("App desktop open delivery", () => {
     expect(document.querySelector('[data-page-number="2"]')).not.toHaveAttribute("data-search-match");
   });
 
+  it("selects the clicked search result and marks it active before jumping", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    tauriMocks.searchPdfDocument.mockResolvedValueOnce([
+      { id: "pdf-search-1-4", label: "Page 1", snippet: "First native result", page: 1 },
+      { id: "pdf-search-2-4", label: "Page 2", snippet: "Second native result", page: 2 }
+    ]);
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.click(screen.getByLabelText("Find"));
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "native" }
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+
+    const secondResult = await screen.findByRole("button", { name: /Page 2, result 2: Second native result/ });
+    fireEvent.click(secondResult);
+
+    await waitFor(() => {
+      expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("Page or location")).toHaveValue("2");
+    expect(secondResult).toHaveAttribute("aria-current", "true");
+  });
+
+  it("renders PDF text-content search overlays instead of only highlighting the page frame", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    tauriMocks.searchPdfDocument.mockResolvedValueOnce([
+      { id: "pdf-search-1-4", label: "Page 1", snippet: "Native PDF result", page: 1 }
+    ]);
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.click(screen.getByLabelText("Find"));
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "native" }
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+
+    expect(await screen.findByText("1 / 1")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.querySelector(".pdf-search-highlight")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "" }
+    });
+
+    await waitFor(() => {
+      expect(document.querySelector(".pdf-search-highlight")).not.toBeInTheDocument();
+    });
+  });
+
+  it("renders PDF search overlays for phrase matches split across text items", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    tauriMocks.searchPdfDocument.mockResolvedValueOnce([
+      { id: "pdf-search-1-4", label: "Page 1", snippet: "Native PDF result", page: 1 }
+    ]);
+    pdfMocks.setTextContentItems([
+      { str: "Native", transform: [1, 0, 0, 1, 72, 760], width: 44, height: 14 },
+      { str: "PDF", transform: [1, 0, 0, 1, 120, 760], width: 28, height: 14 },
+      { str: "result", transform: [1, 0, 0, 1, 152, 760], width: 42, height: 14 }
+    ]);
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.click(screen.getByLabelText("Find"));
+    fireEvent.change(screen.getByLabelText("Find in document"), {
+      target: { value: "native pdf" }
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+
+    expect(await screen.findByText("1 / 1")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.querySelectorAll(".pdf-search-highlight")).toHaveLength(2);
+    });
+  });
+
+  it("marks the active bookmark row and toolbar state for the current PDF page", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.click(screen.getByLabelText("Bookmark"));
+    fireEvent.click(screen.getByRole("tab", { name: "Marks" }));
+
+    const pageOneMark = await screen.findByRole("button", { name: "Page 1" });
+    expect(pageOneMark).toHaveAttribute("aria-current", "true");
+    expect(screen.getByLabelText("Bookmark")).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Contents" }));
+    fireEvent.click(screen.getByText("Later chapter"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Bookmark")).toHaveAttribute("aria-pressed", "false");
+    });
+  });
+
+  it("keeps EPUB TOC fragment rows ordered and only activates the clicked anchor item", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
+    tauriMocks.openEpubDocument.mockResolvedValueOnce({
+      id: "/Users/mario/Books/story.epub",
+      title: "Story",
+      chapters: [
+        { id: "chapter-1", href: "OPS/chapter-1.xhtml", label: "Chapter One", index: 0 }
+      ],
+      outline: [
+        { id: "parent", title: "Parent Chapter", href: "OPS/chapter-1.xhtml", index: 0, level: 0 },
+        { id: "child", title: "Deep Anchor", href: "OPS/chapter-1.xhtml#deep", index: 0, level: 1 }
+      ]
+    });
+    tauriMocks.readEpubChapter.mockResolvedValueOnce({
+      id: "chapter-1",
+      href: "OPS/chapter-1.xhtml",
+      label: "Chapter One",
+      index: 0,
+      sanitizedHtml: `<p id="deep">Native chapter body</p>`,
+      text: "Native chapter body",
+      resources: [] as EpubResourceMetadata[]
+    });
+
+    render(<App />);
+
+    await screen.findByText("Native chapter body");
+    const rowsBeforeClick = Array.from(document.querySelectorAll(".sidebar-row button:last-child")).map((row) => row.textContent);
+    expect(rowsBeforeClick).toEqual(["Parent Chapter", "Deep Anchor"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Deep Anchor" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Deep Anchor" }).closest(".sidebar-row")).toHaveClass("active");
+    });
+    expect(screen.getByRole("button", { name: "Parent Chapter" }).closest(".sidebar-row")).not.toHaveClass("active");
+    expect(tauriMocks.readEpubChapter).toHaveBeenCalledWith("/Users/mario/Books/story.epub", "OPS/chapter-1.xhtml");
+  });
+
+  it("scrolls to an EPUB fragment anchor when a child TOC item is clicked", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView
+    });
+    tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
+    tauriMocks.openEpubDocument.mockResolvedValueOnce({
+      id: "/Users/mario/Books/story.epub",
+      title: "Story",
+      chapters: [
+        { id: "chapter-1", href: "OPS/chapter-1.xhtml", label: "Chapter One", index: 0 }
+      ],
+      outline: [
+        { id: "parent", title: "Parent Chapter", href: "OPS/chapter-1.xhtml", index: 0, level: 0 },
+        { id: "child", title: "Deep Anchor", href: "OPS/chapter-1.xhtml#deep", index: 0, level: 1 }
+      ]
+    });
+    tauriMocks.readEpubChapter.mockResolvedValueOnce({
+      id: "chapter-1",
+      href: "OPS/chapter-1.xhtml",
+      label: "Chapter One",
+      index: 0,
+      sanitizedHtml: `<p id="deep">Native chapter body</p>`,
+      text: "Native chapter body",
+      resources: [] as EpubResourceMetadata[]
+    });
+
+    render(<App />);
+
+    await screen.findByText("Native chapter body");
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Deep Anchor" }));
+
+    await waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+    });
+    expect(screen.getByRole("button", { name: "Deep Anchor" }).closest(".sidebar-row")).toHaveClass("active");
+  });
+
+  it("creates, exports, filters, globally hides, globally shows, confirms delete, and persists PDF annotations from the front end", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.change(screen.getByLabelText("Annotation note"), {
+      target: { value: "Important result" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Annotations" }));
+
+    expect(await screen.findByText("Important result")).toBeInTheDocument();
+    expect(document.querySelector(".pdf-annotation-marker")).toBeInTheDocument();
+    expect(localStorage.getItem("smartreader.appSession.v1")).toContain("\"annotations\":[");
+
+    fireEvent.click(screen.getByRole("button", { name: "Export annotations" }));
+    expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    const exportedBlob = vi.mocked(URL.createObjectURL).mock.calls.at(-1)?.[0] as Blob;
+    const exportedText = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(exportedBlob);
+    });
+    expect(exportedText).toContain("# start.pdf annotations");
+    expect(exportedText).toContain("- Document: start.pdf");
+    expect(exportedText).toContain("- Location: 1 / 2");
+    expect(exportedText).toContain("- Type: Highlight");
+    expect(exportedText).toContain("- Tag: 重点");
+    expect(exportedText).toContain("- Color: #ffe28a");
+    expect(exportedText).toContain("- Thickness: 2");
+    expect(exportedText).toContain("- Note: Important result");
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:smartreader-test");
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide all annotations" }));
+    expect(document.querySelector(".pdf-annotation-marker")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show all annotations" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show all annotations" }));
+    expect(document.querySelector(".pdf-annotation-marker")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide all annotations" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Annotation tag filter"), {
+      target: { value: "重点" }
+    });
+    expect(screen.getByText("Important result")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Annotation tag filter"), {
+      target: { value: "疑问" }
+    });
+    expect(screen.queryByText("Important result")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Annotation tag filter"), {
+      target: { value: "all" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Hide annotation Important result" }));
+    expect(document.querySelector(".pdf-annotation-marker")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete annotation Important result" }));
+    expect(screen.getByText("Important result")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm delete annotation Important result" }));
+    expect(screen.queryByText("Important result")).not.toBeInTheDocument();
+  });
+
+  it("escapes Markdown-sensitive annotation export content", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("markdown-export", 1);
+    snapshot.sessions[0].title = "Report\n# Injected <script>";
+    snapshot.sessions[0].sidebarMode = "annotations";
+    snapshot.sessions[0].annotations = [
+      {
+        id: "annotation-markdown",
+        type: "note" as const,
+        tag: "引用备注" as const,
+        color: "#ffe28a",
+        thickness: 2,
+        location: {
+          kind: "epub" as const,
+          chapterHref: "OPS/chapter.xhtml#intro",
+          chapterLabel: "Chapter\n# forged location <i>raw</i>",
+          progress: 0.25
+        },
+        selectedText: "Quote\n- forged item <b>raw</b>",
+        note: "Note\n## forged heading <img src=x>",
+        hidden: false,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ];
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    const exportButton = await screen.findByRole("button", { name: "Export annotations" });
+    fireEvent.click(exportButton);
+
+    const exportedBlob = vi.mocked(URL.createObjectURL).mock.calls.at(-1)?.[0] as Blob;
+    const exportedText = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(exportedBlob);
+    });
+
+    expect(exportedText).toContain("# Report\\n\\# Injected &lt;script&gt; annotations");
+    expect(exportedText).toContain("## 1. Note\\n\\#\\# forged heading &lt;img src=x&gt;");
+    expect(exportedText).toContain("- Location: Chapter\\n\\# forged location &lt;i&gt;raw&lt;/i&gt;");
+    expect(exportedText).toContain("- Selected text: Quote\\n\\- forged item &lt;b&gt;raw&lt;/b&gt;");
+    expect(exportedText).toContain("- Note: Note\\n\\#\\# forged heading &lt;img src=x&gt;");
+    expect(exportedText).not.toContain("\n# Injected <script>");
+    expect(exportedText).not.toContain("\n# forged location <i>raw</i>");
+    expect(exportedText).not.toContain("\n## forged heading <img src=x>");
+  });
+
+  it("creates unique annotation ids for annotations added in the same millisecond", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    vi.spyOn(Date, "now").mockReturnValue(10);
+
+    render(<App />);
+
+    await screen.findByText("Intro");
+    fireEvent.change(screen.getByLabelText("Annotation note"), {
+      target: { value: "First note" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
+    fireEvent.change(screen.getByLabelText("Annotation note"), {
+      target: { value: "Second note" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
+
+    const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+    const ids = stored.sessions[0].annotations.map((annotation) => annotation.id);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it("restores PDF annotations after restart and keeps management actions working", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("pdf-annotations", 1);
+    snapshot.sessions[0].sidebarMode = "annotations";
+    snapshot.sessions[0].annotations = [
+      {
+        id: "annotation-recovered",
+        type: "note" as const,
+        tag: "个人思考" as const,
+        color: "#b7f7d4",
+        thickness: 3,
+        location: { kind: "page" as const, page: 2 },
+        note: "Recovered note",
+        selectedText: "Recovered selection",
+        hidden: false,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ];
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    expect(await screen.findByText("Recovered note")).toBeInTheDocument();
+    expect(document.querySelector('[data-page-number="2"] .pdf-annotation-marker.note')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Export annotations" }));
+    const exportedBlob = vi.mocked(URL.createObjectURL).mock.calls.at(-1)?.[0] as Blob;
+    const exportedText = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(exportedBlob);
+    });
+    expect(exportedText).toContain("- Type: Note");
+    expect(exportedText).toContain("- Tag: 个人思考");
+    expect(exportedText).toContain("- Note: Recovered note");
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide all annotations" }));
+    expect(document.querySelector(".pdf-annotation-marker")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show all annotations" }));
+    expect(document.querySelector('[data-page-number="2"] .pdf-annotation-marker.note')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Recovered note").closest("button")!);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete annotation Recovered note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm delete annotation Recovered note" }));
+    expect(screen.queryByText("Recovered note")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(localStorage.getItem("smartreader.appSession.v1")).not.toContain("Recovered note");
+    });
+  });
+
+  it("windows large annotation sidebars without dropping annotation state", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("pdf-annotations", 1);
+    snapshot.sessions[0].sidebarMode = "annotations";
+    snapshot.sessions[0].annotations = Array.from({ length: 10000 }, (_, index) => ({
+      id: `annotation-${index}`,
+      type: "highlight" as const,
+      tag: "重点" as const,
+      color: "#ffe28a",
+      thickness: 2,
+      location: { kind: "page" as const, page: (index % 2) + 1 },
+      note: `Annotation ${index}`,
+      hidden: false,
+      createdAt: index,
+      updatedAt: index
+    }));
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    await screen.findByText("Annotation 0");
+    expect(screen.queryByText("Annotation 9700")).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".annotation-row").length).toBeLessThan(200);
+
+    const sidebarContent = document.querySelector(".sidebar-content");
+    expect(sidebarContent).toBeInstanceOf(HTMLElement);
+    Object.defineProperty(sidebarContent, "clientHeight", {
+      configurable: true,
+      value: 420
+    });
+    Object.defineProperty(sidebarContent, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 9700 * 82
+    });
+
+    fireEvent.scroll(sidebarContent as HTMLElement);
+
+    await screen.findByText("Annotation 9700");
+    expect(screen.queryByText("Annotation 0")).not.toBeInTheDocument();
+  });
+
   it("shows no-result search feedback without moving the current location", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
     tauriMocks.searchPdfDocument.mockResolvedValueOnce([]);
@@ -1282,6 +1762,16 @@ describe("App desktop open delivery", () => {
     fireEvent.click(screen.getByLabelText("More"));
 
     expect(await screen.findByRole("dialog", { name: "Preferences" })).toBeInTheDocument();
+    expect(parseSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not parse unchanged EPUB chapter HTML without search or text annotations", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
+    const parseSpy = vi.spyOn(DOMParser.prototype, "parseFromString");
+
+    render(<App />);
+
+    await screen.findByText(/Native chapter body/);
     expect(parseSpy).not.toHaveBeenCalled();
   });
 
@@ -1800,6 +2290,7 @@ function createSnapshotSession(id: string, path: string, page: number): AppSessi
     fitMode: "continuous",
     sidebarMode: "contents",
     bookmarks: [],
+    annotations: [],
     pageCount: 100,
     epubSettings: {
       fontSize: 18,

@@ -153,6 +153,7 @@ function createBaseSession(input: {
     outline: [],
     searchResults: [],
     bookmarks: [],
+    annotations: [],
     epubSettings: defaultEpubSettings,
     openedAt: now,
     updatedAt: now
