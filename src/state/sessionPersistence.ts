@@ -4,6 +4,7 @@ import type {
   DocumentSession,
   PersistedDocumentSession,
   Preferences,
+  ReaderAnnotation,
   ReaderLocation
 } from "../types/reader";
 
@@ -130,7 +131,11 @@ function persistDocumentSession(
     fitMode: session.fitMode,
     sidebarMode: session.sidebarMode,
     bookmarks: session.bookmarks,
-    annotations: session.annotations,
+    annotations: stripManagedPdfKitCopyPaths(session.annotations),
+    pendingDeletedAnnotations: session.pendingDeletedAnnotations
+      ? stripManagedPdfKitCopyPaths(session.pendingDeletedAnnotations)
+      : undefined,
+    nativePdfAnnotations: session.nativePdfAnnotations,
     pageCount: session.pageCount,
     epubSettings: session.epubSettings,
     openedAt: session.openedAt,
@@ -154,8 +159,33 @@ function restoreDocumentSession(
     objectUrl: undefined,
     outline: [],
     searchResults: [],
-    annotations: session.annotations ?? []
+    annotations: stripManagedPdfKitCopyPaths(session.annotations ?? []),
+    pendingDeletedAnnotations: session.pendingDeletedAnnotations
+      ? stripManagedPdfKitCopyPaths(session.pendingDeletedAnnotations)
+      : undefined,
+    nativePdfAnnotations: session.nativePdfAnnotations,
+    pdfKitManagedCopyPath: undefined
   };
+}
+
+function stripManagedPdfKitCopyPaths(annotations: ReaderAnnotation[]): ReaderAnnotation[] {
+  return annotations.map((annotation) => {
+    const nativePdfKitWithLegacyPath = annotation.nativePdfKit as
+      | (NonNullable<ReaderAnnotation["nativePdfKit"]> & { writePath?: string })
+      | undefined;
+
+    if (!nativePdfKitWithLegacyPath?.managedCopyPath && !nativePdfKitWithLegacyPath?.writePath) {
+      return annotation;
+    }
+
+    const {
+      managedCopyPath: _managedCopyPath,
+      writePath: _writePath,
+      ...nativePdfKit
+    } = nativePdfKitWithLegacyPath;
+
+    return { ...annotation, nativePdfKit };
+  });
 }
 
 function isAppSessionSnapshot(value: AppSessionSnapshot): value is AppSessionSnapshot {

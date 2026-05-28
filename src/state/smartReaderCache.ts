@@ -1,6 +1,7 @@
 import type {
   AnnotationTag,
   AnnotationType,
+  EpubTextAnchor,
   RecentFile,
   ReaderAnnotation,
   SmartReaderAdapterCache,
@@ -298,6 +299,11 @@ function sanitizePersistedDocumentSession(tab: unknown): PersistedDocumentSessio
   const error = sanitizeReaderError(tab.error);
   const bookmarks = sanitizeArray(Array.isArray(tab.bookmarks) ? tab.bookmarks : [], sanitizeBookmark);
   const annotations = sanitizeArray(Array.isArray(tab.annotations) ? tab.annotations : [], sanitizeAnnotation);
+  const pendingDeletedAnnotations = sanitizeArray(
+    Array.isArray(tab.pendingDeletedAnnotations) ? tab.pendingDeletedAnnotations : [],
+    sanitizeAnnotation
+  );
+  const nativePdfAnnotations = sanitizeNativePdfAnnotationSnapshot(tab.nativePdfAnnotations);
   const epubSettings = sanitizeEpubSettings(tab.epubSettings);
   const location = sanitizeReaderLocation(tab.location);
   const lastLocation = sanitizeReaderLocation(tab.lastLocation);
@@ -315,6 +321,7 @@ function sanitizePersistedDocumentSession(tab: unknown): PersistedDocumentSessio
     !isSidebarMode(tab.sidebarMode) ||
     !bookmarks ||
     !annotations ||
+    !pendingDeletedAnnotations ||
     !epubSettings ||
     typeof tab.openedAt !== "number" ||
     typeof tab.updatedAt !== "number"
@@ -337,6 +344,8 @@ function sanitizePersistedDocumentSession(tab: unknown): PersistedDocumentSessio
     sidebarMode: tab.sidebarMode,
     bookmarks,
     annotations,
+    pendingDeletedAnnotations: pendingDeletedAnnotations.length > 0 ? pendingDeletedAnnotations : undefined,
+    nativePdfAnnotations,
     pageCount: typeof tab.pageCount === "number" ? tab.pageCount : undefined,
     epubSettings,
     openedAt: tab.openedAt,
@@ -354,7 +363,7 @@ function sanitizeSearchIndexMetadata(
   if (
     typeof item.documentId !== "string" ||
     !isReadableFormat(item.format) ||
-    (item.adapter !== "rust" && item.adapter !== "wasm" && item.adapter !== "pdfjs" && item.adapter !== "jszip") ||
+    (item.adapter !== "rust" && item.adapter !== "wasm" && item.adapter !== "jszip") ||
     typeof item.version !== "string" ||
     typeof item.updatedAt !== "number"
   ) {
@@ -461,13 +470,20 @@ function sanitizeAnnotation(value: unknown): ReaderAnnotation | undefined {
   ) {
     return {
       id: value.id,
+      name: typeof value.name === "string" ? value.name : undefined,
       type: value.type,
       tag: value.tag,
       color: value.color,
       thickness: value.thickness,
       location,
       selectedText: typeof value.selectedText === "string" ? value.selectedText : undefined,
+      area: sanitizeAnnotationArea(value.area),
+      rects: sanitizeAnnotationRects(value.rects),
       note: typeof value.note === "string" ? value.note : undefined,
+      noteFontFamily: typeof value.noteFontFamily === "string" ? value.noteFontFamily : undefined,
+      noteFontSize: typeof value.noteFontSize === "number" ? value.noteFontSize : undefined,
+      nativeEpub: sanitizeNativeEpubAnnotation(value.nativeEpub),
+      nativePdfKit: sanitizeNativePdfKitAnnotation(value.nativePdfKit),
       hidden: typeof value.hidden === "boolean" ? value.hidden : undefined,
       createdAt: value.createdAt,
       updatedAt: value.updatedAt
@@ -475,6 +491,118 @@ function sanitizeAnnotation(value: unknown): ReaderAnnotation | undefined {
   }
 
   return undefined;
+}
+
+function sanitizeNativeEpubAnnotation(value: unknown): ReaderAnnotation["nativeEpub"] | undefined {
+  if (!isRecord(value) || typeof value.status !== "string") {
+    return undefined;
+  }
+
+  return {
+    supported: typeof value.supported === "boolean" ? value.supported : undefined,
+    status: value.status,
+    reason: typeof value.reason === "string" ? value.reason : undefined,
+    lastError: typeof value.lastError === "string" ? value.lastError : undefined,
+    failedAt: typeof value.failedAt === "number" ? value.failedAt : undefined,
+    syncedAt: typeof value.syncedAt === "number" ? value.syncedAt : undefined
+  };
+}
+
+function sanitizeNativePdfKitAnnotation(value: unknown): ReaderAnnotation["nativePdfKit"] | undefined {
+  if (!isRecord(value) || typeof value.status !== "string") {
+    return undefined;
+  }
+
+  return {
+    supported: typeof value.supported === "boolean" ? value.supported : undefined,
+    status: value.status,
+    annotationId: typeof value.annotationId === "string" ? value.annotationId : undefined,
+    nativeId: typeof value.nativeId === "string" ? value.nativeId : undefined,
+    reason: typeof value.reason === "string" ? value.reason : undefined,
+    dirty: typeof value.dirty === "boolean" ? value.dirty : undefined,
+    pendingOperation: isPdfKitPendingOperation(value.pendingOperation) ? value.pendingOperation : undefined,
+    lastSyncError: typeof value.lastSyncError === "string" ? value.lastSyncError : undefined,
+    failedAt: typeof value.failedAt === "number" ? value.failedAt : undefined,
+    syncedAt: typeof value.syncedAt === "number" ? value.syncedAt : undefined
+  };
+}
+
+function isPdfKitPendingOperation(value: unknown): value is NonNullable<ReaderAnnotation["nativePdfKit"]>["pendingOperation"] {
+  return value === "upsert" || value === "delete";
+}
+
+function sanitizeNativePdfAnnotationSnapshot(value: unknown): PersistedDocumentSession["nativePdfAnnotations"] | undefined {
+  if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.annotations)) {
+    return undefined;
+  }
+
+  const annotations = sanitizeJsonArray(value.annotations);
+  if (!annotations) {
+    return undefined;
+  }
+
+  return {
+    schemaVersion: 1,
+    annotations,
+    updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : Date.now()
+  };
+}
+
+function sanitizeJsonArray(value: unknown[]): unknown[] | undefined {
+  try {
+    const cloned = JSON.parse(JSON.stringify(value)) as unknown;
+
+    return Array.isArray(cloned) ? cloned : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function sanitizeAnnotationArea(value: unknown): ReaderAnnotation["area"] | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (
+    typeof value.page === "number" &&
+    typeof value.left === "number" &&
+    typeof value.top === "number" &&
+    typeof value.width === "number" &&
+    typeof value.height === "number"
+  ) {
+    const area: ReaderAnnotation["area"] = {
+      page: value.page,
+      left: value.left,
+      top: value.top,
+      width: value.width,
+      height: value.height
+    };
+
+    if (isPositiveFiniteNumber(value.viewportHeight)) {
+      area.viewportHeight = value.viewportHeight;
+    }
+
+    if (isPositiveFiniteNumber(value.viewportScale)) {
+      area.viewportScale = value.viewportScale;
+    }
+
+    return area;
+  }
+
+  return undefined;
+}
+
+function sanitizeAnnotationRects(value: unknown): ReaderAnnotation["rects"] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const rects = sanitizeArray(value, sanitizeAnnotationArea);
+  return rects && rects.length > 0 ? rects : undefined;
+}
+
+function isPositiveFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 function sanitizeEpubSettings(value: unknown) {
@@ -559,7 +687,15 @@ function isSidebarMode(value: unknown) {
 }
 
 function isAnnotationType(value: unknown): value is AnnotationType {
-  return value === "highlight" || value === "underline" || value === "strike" || value === "note";
+  return (
+    value === "highlight" ||
+    value === "underline" ||
+    value === "strike" ||
+    value === "wavy" ||
+    value === "red-text" ||
+    value === "note" ||
+    value === "area"
+  );
 }
 
 function isAnnotationTag(value: unknown): value is AnnotationTag {
@@ -599,6 +735,8 @@ function isReaderLocation(value: unknown): value is PersistedDocumentSession["lo
     return (
       typeof value.progress === "number" &&
       (value.cfi === undefined || typeof value.cfi === "string") &&
+      (value.anchor === undefined || isEpubTextAnchor(value.anchor)) &&
+      (value.anchorOccurrenceIndex === undefined || typeof value.anchorOccurrenceIndex === "number") &&
       (value.chapterHref === undefined || typeof value.chapterHref === "string") &&
       (value.chapterLabel === undefined || typeof value.chapterLabel === "string") &&
       (value.scrollTop === undefined || typeof value.scrollTop === "number")
@@ -624,10 +762,47 @@ function sanitizeReaderLocation(value: unknown): PersistedDocumentSession["locat
   return {
     kind: "epub",
     cfi: value.cfi,
+    anchor: sanitizeEpubTextAnchor(value.anchor),
+    anchorOccurrenceIndex: value.anchorOccurrenceIndex,
     chapterHref: value.chapterHref,
     chapterLabel: value.chapterLabel,
     progress: value.progress,
     scrollTop: value.scrollTop
+  };
+}
+
+function isEpubTextAnchor(value: unknown): value is EpubTextAnchor {
+  return (
+    isRecord(value) &&
+    typeof value.chapterHref === "string" &&
+    typeof value.selectedText === "string" &&
+    typeof value.occurrenceIndex === "number" &&
+    typeof value.startOffset === "number" &&
+    typeof value.endOffset === "number" &&
+    typeof value.prefix === "string" &&
+    typeof value.suffix === "string" &&
+    typeof value.textHash === "string" &&
+    typeof value.anchorHash === "string" &&
+    (value.cfiHint === undefined || typeof value.cfiHint === "string")
+  );
+}
+
+function sanitizeEpubTextAnchor(value: unknown): EpubTextAnchor | undefined {
+  if (!isEpubTextAnchor(value)) {
+    return undefined;
+  }
+
+  return {
+    chapterHref: value.chapterHref,
+    selectedText: value.selectedText,
+    occurrenceIndex: value.occurrenceIndex,
+    startOffset: value.startOffset,
+    endOffset: value.endOffset,
+    prefix: value.prefix,
+    suffix: value.suffix,
+    textHash: value.textHash,
+    anchorHash: value.anchorHash,
+    cfiHint: value.cfiHint
   };
 }
 

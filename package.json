@@ -18,10 +18,11 @@
     "desktop:build:debug:dmg": "tauri build --debug --bundles dmg"
   },
   "dependencies": {
+    "@embedpdf/react-pdf-viewer": "^2.14.3",
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-fs": "^2.5.1",
     "jszip": "^3.10.1",
-    "pdfjs-dist": "^5.7.284",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

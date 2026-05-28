@@ -7,15 +7,6 @@ export interface SearchableEpubChapter {
   text: string;
 }
 
-export interface SearchablePdfDocument {
-  numPages: number;
-  getPage: (pageNumber: number) => Promise<{
-    getTextContent: () => Promise<{
-      items: unknown[];
-    }>;
-  }>;
-}
-
 export async function searchEpubChapters(
   chapters: SearchableEpubChapter[],
   query: string
@@ -43,35 +34,6 @@ export async function searchEpubChapters(
   );
 }
 
-export async function searchPdfDocumentText(
-  pdf: SearchablePdfDocument,
-  query: string
-): Promise<SearchResult[]> {
-  const normalizedQuery = query.toLowerCase();
-  const results: SearchResult[] = [];
-
-  if (!normalizedQuery) {
-    return results;
-  }
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const content = await page.getTextContent();
-    const text = content.items.map(textItemString).join(" ");
-
-    findAllTextMatches(text, normalizedQuery).forEach((index) => {
-      results.push({
-        id: `search-${pageNumber}-${index}`,
-        label: `Page ${pageNumber}`,
-        snippet: snippetFor(text, index, query.length),
-        location: { kind: "page", page: pageNumber }
-      });
-    });
-  }
-
-  return results;
-}
-
 function findAllTextMatches(text: string, normalizedQuery: string): number[] {
   const normalizedText = text.toLowerCase();
   const matches: number[] = [];
@@ -87,10 +49,4 @@ function findAllTextMatches(text: string, normalizedQuery: string): number[] {
 
 function snippetFor(text: string, index: number, queryLength: number): string {
   return text.slice(Math.max(0, index - 40), index + queryLength + 60);
-}
-
-function textItemString(item: unknown): string {
-  return typeof item === "object" && item !== null && "str" in item && typeof item.str === "string"
-    ? item.str
-    : "";
 }

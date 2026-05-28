@@ -12,6 +12,8 @@ export type ReaderLocation =
   | {
       kind: "epub";
       cfi?: string;
+      anchor?: EpubTextAnchor;
+      anchorOccurrenceIndex?: number;
       chapterHref?: string;
       chapterLabel?: string;
       progress: number;
@@ -69,6 +71,19 @@ export interface EpubResourceMetadata {
   rewrittenUrl?: string;
 }
 
+export interface EpubTextAnchor {
+  chapterHref: string;
+  selectedText: string;
+  occurrenceIndex: number;
+  startOffset: number;
+  endOffset: number;
+  prefix: string;
+  suffix: string;
+  textHash: string;
+  anchorHash: string;
+  cfiHint?: string;
+}
+
 export interface Bookmark {
   id: string;
   title: string;
@@ -76,7 +91,7 @@ export interface Bookmark {
   createdAt: number;
 }
 
-export type AnnotationType = "highlight" | "underline" | "strike" | "note";
+export type AnnotationType = "highlight" | "underline" | "strike" | "wavy" | "red-text" | "note" | "area";
 
 export type AnnotationTag =
   | "重点"
@@ -89,15 +104,65 @@ export type AnnotationTag =
 
 export interface ReaderAnnotation {
   id: string;
+  name?: string;
   type: AnnotationType;
   tag: AnnotationTag;
   color: string;
   thickness: number;
   location: ReaderLocation;
   selectedText?: string;
+  area?: {
+    page: number;
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    viewportWidth?: number;
+    viewportHeight?: number;
+    viewportScale?: number;
+  };
+  rects?: Array<{
+    page: number;
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    viewportWidth?: number;
+    viewportHeight?: number;
+    viewportScale?: number;
+  }>;
   note?: string;
+  noteFontFamily?: string;
+  noteFontSize?: number;
+  nativeEpub?: {
+    supported?: boolean;
+    status: string;
+    reason?: string;
+    lastError?: string;
+    failedAt?: number;
+    syncedAt?: number;
+  };
+  nativePdfKit?: {
+    supported?: boolean;
+    status: string;
+    annotationId?: string;
+    nativeId?: string;
+    managedCopyPath?: string;
+    reason?: string;
+    dirty?: boolean;
+    pendingOperation?: "upsert" | "delete";
+    lastSyncError?: string;
+    failedAt?: number;
+    syncedAt?: number;
+  };
   hidden?: boolean;
   createdAt: number;
+  updatedAt: number;
+}
+
+export interface NativePdfAnnotationSnapshot {
+  schemaVersion: 1;
+  annotations: unknown[];
   updatedAt: number;
 }
 
@@ -125,6 +190,9 @@ export interface DocumentSession {
   searchResults: SearchResult[];
   bookmarks: Bookmark[];
   annotations: ReaderAnnotation[];
+  pendingDeletedAnnotations?: ReaderAnnotation[];
+  nativePdfAnnotations?: NativePdfAnnotationSnapshot;
+  pdfKitManagedCopyPath?: string;
   pageCount?: number;
   epubSettings: EpubReadingSettings;
   openedAt: number;
@@ -211,7 +279,7 @@ export interface SmartReaderSearchIndexMetadata {
   documentId: string;
   path?: string;
   format: Exclude<DocumentFormat, "empty" | "unsupported">;
-  adapter: "rust" | "wasm" | "pdfjs" | "jszip";
+  adapter: "rust" | "wasm" | "jszip";
   version: string;
   updatedAt: number;
 }
@@ -248,6 +316,8 @@ export interface PersistedDocumentSession {
   sidebarMode: SidebarMode;
   bookmarks: Bookmark[];
   annotations: ReaderAnnotation[];
+  pendingDeletedAnnotations?: ReaderAnnotation[];
+  nativePdfAnnotations?: NativePdfAnnotationSnapshot;
   pageCount?: number;
   epubSettings: EpubReadingSettings;
   openedAt: number;

@@ -2136,6 +2136,8 @@ checksum = "c14ed801ae810c6ba487cedd7616bb48f9a8e37940042f57e862538e2c7db117"
 dependencies = [
  "bitflags 2.11.1",
  "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation",
 ]
@@ -2988,17 +2990,17 @@ version = "0.1.0"
 dependencies = [
  "lopdf",
  "objc2",
+ "objc2-app-kit",
  "objc2-core-foundation",
- "objc2-core-graphics",
  "objc2-foundation",
  "objc2-pdf-kit",
- "png 0.18.1",
  "quick-xml",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "tauri-plugin-fs",
  "zip",
 ]
 

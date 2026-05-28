@@ -2,7 +2,7 @@ import type { DocumentSession, RendererAdapter, SearchResult } from "../types/re
 
 /**
  * Renderer integrations must satisfy this contract so the shell can swap
- * PDF.js, epub.js, or a future PDFKit bridge without changing app state.
+ * EmbedPDF, EPUB, or future native/WASM renderers without changing app state.
  */
 export type { RendererAdapter };
 

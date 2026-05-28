@@ -395,7 +395,7 @@ function AdvancedPreferences(props: {
           checked={props.pdfKitEnabled}
           onChange={(event) => props.onTogglePdfKit(event.currentTarget.checked)}
         />
-        Enable experimental PDFKit renderer
+        Enable native PDFKit annotation copy
       </label>
       <div className="advanced-status-grid">
         <StatusPair label="Enabled" value={props.wasm.status.enabled ? "Yes" : "No"} />

@@ -304,7 +304,8 @@ button {
 }
 
 .toolbar-button:hover:not(:disabled),
-.zoom-value:hover:not(:disabled) {
+.zoom-value:hover:not(:disabled),
+.toolbar-text-button:hover:not(:disabled) {
   background: #e9e2d7;
   border-color: #d6cbbe;
 }
@@ -316,6 +317,7 @@ button {
 }
 
 .toolbar-button:disabled,
+.toolbar-text-button:disabled,
 .zoom-value:disabled,
 .fit-select:disabled,
 .location-form input:disabled {
@@ -354,6 +356,28 @@ button {
 .toolbar-spacer {
   flex: 1;
   min-width: 0;
+}
+
+.pdf-annotation-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.toolbar-text-button {
+  height: 30px;
+  max-width: 190px;
+  overflow: hidden;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #363027;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .location-form {
@@ -439,7 +463,21 @@ button {
 }
 
 .reader-workspace.with-sidebar {
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: var(--sidebar-width, 260px) 6px minmax(0, 1fr);
+}
+
+.sidebar-resize-handle {
+  position: relative;
+  z-index: 4;
+  width: 6px;
+  margin-left: -3px;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle:focus-visible {
+  background: rgba(155, 99, 63, 0.22);
 }
 
 .reader-sidebar {
@@ -486,7 +524,6 @@ button {
 
 .sidebar-row,
 .search-result-row,
-.thumbnail-row,
 .recent-row {
   width: 100%;
   border: 1px solid transparent;
@@ -504,7 +541,6 @@ button {
 
 .sidebar-row:hover,
 .search-result-row:hover,
-.thumbnail-row:hover,
 .recent-row:hover {
   background: #e9e1d6;
   border-color: #d7cabe;
@@ -517,43 +553,28 @@ button {
   font-weight: 600;
 }
 
-.thumbnail-row {
+.mark-row {
   display: grid;
-  grid-template-columns: 42px 1fr;
-  align-items: center;
-  gap: 9px;
-  padding: 7px;
-  font-size: 12px;
+  gap: 6px;
 }
 
-.thumbnail-row.active {
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
-  color: var(--accent);
+.mark-row button {
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
 }
 
-.thumbnail-box {
-  display: grid;
-  place-items: center;
-  height: 54px;
+.mark-row input {
+  width: 100%;
+  height: 26px;
   border: 1px solid var(--border);
-  border-radius: 5px;
-  background: linear-gradient(#fffdf8, #f6f1e9);
-  color: var(--muted);
-  font-size: 11px;
-  box-shadow: 0 2px 5px rgba(45, 37, 28, 0.08);
-}
-
-.thumbnail-box img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-
-.thumbnail-row small {
-  grid-column: 2;
-  color: var(--danger);
-  font-size: 11px;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 7px;
 }
 
 .search-result-row {
@@ -670,6 +691,58 @@ button {
   color: var(--danger);
 }
 
+.annotation-detail-editor {
+  display: grid;
+  gap: 8px;
+  padding: 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.annotation-detail-editor label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.annotation-detail-editor input,
+.annotation-detail-editor select,
+.annotation-detail-editor textarea,
+.annotation-detail-editor button {
+  width: 100%;
+  min-height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.annotation-detail-editor textarea {
+  min-height: 64px;
+  padding: 7px;
+  resize: vertical;
+}
+
+.annotation-detail-check {
+  display: flex !important;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 7px;
+}
+
+.annotation-detail-check input {
+  width: auto;
+}
+
+.annotation-detail-editor button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .empty-note {
   margin: 26px 14px;
   color: var(--muted);
@@ -721,6 +794,54 @@ button {
   font-weight: 600;
 }
 
+.annotation-quick-menu {
+  position: fixed;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 10px 28px rgba(45, 37, 28, 0.18);
+}
+
+.annotation-quick-menu button,
+.annotation-quick-menu summary {
+  min-height: 28px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 8px;
+}
+
+.annotation-quick-menu button {
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+.annotation-quick-menu button:hover,
+.annotation-quick-menu summary:hover {
+  background: var(--accent-soft);
+}
+
+.annotation-quick-menu details {
+  position: relative;
+}
+
+.annotation-quick-menu summary {
+  display: grid;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+}
+
+.annotation-quick-menu details[open] > div,
+.annotation-quick-menu details[open] button {
+  display: block;
+}
+
 .pdf-canvas {
   display: grid;
   justify-content: center;
@@ -729,65 +850,50 @@ button {
   padding: 28px 34px 46px;
 }
 
-.pdf-page-frame {
+.pdf-canvas.embedpdf-reader-shell {
   position: relative;
-  min-width: 420px;
-  min-height: 540px;
-  background: #fffdf8;
-  border-radius: 4px;
-  box-shadow: var(--shadow-paper);
-  overflow: hidden;
-}
-
-.pdf-page-frame canvas,
-.pdf-page-image {
   display: block;
-  max-width: min(100%, calc(100vw - 360px));
-  height: auto !important;
-}
-
-.pdf-page-frame.search-match {
-  box-shadow: var(--shadow-paper), 0 0 0 3px rgba(199, 146, 112, 0.42);
-}
-
-.pdf-page-frame.search-current {
-  box-shadow: var(--shadow-paper), 0 0 0 4px rgba(155, 99, 63, 0.72);
-}
-
-.pdf-search-layer,
-.pdf-annotation-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.pdf-search-highlight {
-  position: absolute;
-  border-radius: 3px;
-  background: rgba(255, 226, 138, 0.68);
-  box-shadow: 0 0 0 1px rgba(155, 99, 63, 0.22);
-}
-
-.pdf-annotation-marker {
-  position: absolute;
-  left: 18px;
-  max-width: calc(100% - 36px);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
   overflow: hidden;
-  padding: 3px 7px;
-  border-style: solid;
-  border-radius: 6px;
-  color: #3a2a17;
-  font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 700;
-  opacity: 0.88;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.pdf-annotation-marker.underline,
-.pdf-annotation-marker.strike {
-  background: rgba(255, 253, 248, 0.72);
+.embedpdf-reader,
+.embedpdf-reader embedpdf-container {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pdf-text-unavailable {
+  position: absolute;
+  right: 14px;
+  bottom: 30px;
+  z-index: 3;
+  display: grid;
+  gap: 7px;
+  max-width: 300px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.94);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.pdf-text-unavailable button {
+  justify-self: start;
+  min-height: 28px;
+  border: 1px solid var(--accent-line);
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .page-number {
@@ -1017,6 +1123,10 @@ button {
 
 .reader-annotation {
   border-radius: 3px;
+}
+
+.reader-annotation.selected {
+  outline: 2px solid rgba(155, 99, 63, 0.42);
 }
 
 .reader-annotation.note::after {
@@ -1699,15 +1809,6 @@ button {
 
   .pdf-canvas {
     padding-inline: 16px;
-  }
-
-  .pdf-page-frame {
-    min-width: min(420px, calc(100vw - 32px));
-    min-height: 520px;
-  }
-
-  .pdf-page-frame canvas {
-    max-width: 100%;
   }
 
   .empty-state,

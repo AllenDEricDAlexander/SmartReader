@@ -33,6 +33,9 @@ const CACHE_SCHEMA_VERSION: u64 = 1;
 const CACHE_DIRECTORY_ERROR: &str = "SmartReader cache path must be a directory";
 const CACHE_ACCESS_ERROR: &str = "SmartReader cannot access this cache location.";
 const CACHE_SCHEMA_ERROR: &str = "Invalid SmartReader cache schema.";
+// Keep annotation IPC validation independent from opening the PDF while rejecting
+// page-space bounds that are far outside a normal PDF page.
+const PDF_ANNOTATION_MAX_PAGE_SPACE_BOUND: f64 = 14_400.0;
 
 type SmartReaderCacheEnvelope = serde_json::Value;
 
@@ -112,47 +115,153 @@ struct PdfOutlineItemDto {
     level: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
-struct PdfSearchResultDto {
-    id: String,
-    label: String,
-    snippet: String,
-    page: usize,
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum PdfAnnotationKind {
+    #[serde(alias = "square")]
+    Area,
+    Note,
+    Highlight,
+    Underline,
+    Strike,
+    Wavy,
+    RedText,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum PdfAnnotationWriteMode {
+    Copy,
+}
+
+// PDFKit annotation bounds use PDF page-space points; the frontend converts
+// viewport areas before IPC.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PdfRasterPageRequest {
-    page: usize,
-    scale: Option<f64>,
-    output: Option<PdfRasterOutputKind>,
-    max_pixels: Option<u64>,
+struct PdfAnnotationRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PdfKitAnnotationCapabilitiesDto {
+    supported: bool,
+    status: String,
+    write_modes: Vec<String>,
+    annotations: Vec<PdfKitAnnotationCapabilityDto>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PdfKitAnnotationCapabilityDto {
+    kind: PdfAnnotationKind,
+    supported: bool,
+    multi_rect: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-enum PdfRasterOutputKind {
-    Bytes,
-    TempFile,
+enum PdfKitAnnotationOperation {
+    Upsert,
+    Delete,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PdfKitAnnotationSyncItem {
+    id: String,
+    operation: PdfKitAnnotationOperation,
+    page: usize,
+    kind: PdfAnnotationKind,
+    color: String,
+    thickness: Option<f64>,
+    note: Option<String>,
+    rects: Vec<PdfAnnotationRect>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PdfKitAnnotationSyncRequest {
+    write_mode: PdfAnnotationWriteMode,
+    managed_copy_path: Option<String>,
+    annotations: Vec<PdfKitAnnotationSyncItem>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PdfRasterPageDto {
+struct PdfKitAnnotationSyncDto {
     supported: bool,
     status: String,
-    path: String,
+    source_path: String,
+    managed_copy_path: String,
+    annotations: Vec<PdfKitAnnotationSyncItemDto>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PdfKitAnnotationSyncItemDto {
+    id: String,
+    status: String,
     page: usize,
-    width: u32,
-    height: u32,
-    scale: f64,
+    kind: PdfAnnotationKind,
+    native_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    mime_type: Option<String>,
-    byte_count: usize,
+    reason: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PdfAnnotationColor {
+    red: f64,
+    green: f64,
+    blue: f64,
+    alpha: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EpubAnchorCreateRequest {
+    chapter_href: String,
+    selected_text: String,
+    occurrence_index: Option<usize>,
+    cfi_hint: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EpubTextAnchorDto {
+    chapter_href: String,
+    selected_text: String,
+    occurrence_index: usize,
+    start_offset: usize,
+    end_offset: usize,
+    prefix: String,
+    suffix: String,
+    text_hash: String,
+    anchor_hash: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    bytes: Option<Vec<u8>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    temp_path: Option<String>,
+    cfi_hint: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EpubAnchorResolveRequest {
+    anchor: EpubTextAnchorDto,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EpubAnchorResolveDto {
+    status: String,
+    anchor: EpubTextAnchorDto,
+    selected_text: String,
+    occurrence_index: usize,
+    start_offset: usize,
+    end_offset: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -278,37 +387,32 @@ async fn open_pdf_document(path: String) -> Result<PdfDocumentDto, String> {
 }
 
 #[tauri::command]
-async fn search_pdf_document(
-    path: String,
-    query: String,
-) -> Result<Vec<PdfSearchResultDto>, String> {
-    let document_path = PathBuf::from(path);
-
-    tauri::async_runtime::spawn_blocking(move || {
-        search_pdf_document_from_path(document_path, query)
-    })
-    .await
-    .map_err(|_| DOCUMENT_READ_CANCELLED_ERROR.to_string())?
+async fn get_pdfkit_annotation_capabilities() -> Result<PdfKitAnnotationCapabilitiesDto, String> {
+    Ok(pdfkit_annotation_capabilities())
 }
 
 #[tauri::command]
-async fn render_pdf_page_pdfkit(
+async fn sync_pdfkit_annotations(
+    app_handle: tauri::AppHandle,
     path: String,
-    page: usize,
-    scale: Option<f64>,
-    output: Option<PdfRasterOutputKind>,
-    max_pixels: Option<u64>,
-) -> Result<PdfRasterPageDto, String> {
+    managed_copy_path: Option<String>,
+    write_mode: PdfAnnotationWriteMode,
+    annotations: Vec<PdfKitAnnotationSyncItem>,
+) -> Result<PdfKitAnnotationSyncDto, String> {
     let document_path = PathBuf::from(path);
-    let request = PdfRasterPageRequest {
-        page,
-        scale,
-        output,
-        max_pixels,
+    let managed_copy_dir = pdfkit_managed_copy_dir_from_app(&app_handle);
+    let request = PdfKitAnnotationSyncRequest {
+        write_mode,
+        managed_copy_path,
+        annotations,
     };
 
     tauri::async_runtime::spawn_blocking(move || {
-        render_pdf_page_pdfkit_from_path(document_path, request)
+        sync_pdfkit_annotations_from_path_with_managed_copy_dir(
+            document_path,
+            request,
+            managed_copy_dir,
+        )
     })
     .await
     .map_err(|_| DOCUMENT_READ_CANCELLED_ERROR.to_string())?
@@ -332,6 +436,59 @@ async fn search_epub_document(
 
     tauri::async_runtime::spawn_blocking(move || {
         search_epub_document_from_path(document_path, query)
+    })
+    .await
+    .map_err(|_| DOCUMENT_READ_CANCELLED_ERROR.to_string())?
+}
+
+#[tauri::command]
+async fn create_epub_anchor(
+    path: String,
+    chapter_href: String,
+    selected_text: String,
+    occurrence_index: Option<usize>,
+    cfi_hint: Option<String>,
+) -> Result<EpubTextAnchorDto, String> {
+    let document_path = PathBuf::from(path);
+    let request = EpubAnchorCreateRequest {
+        chapter_href,
+        selected_text,
+        occurrence_index,
+        cfi_hint,
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        create_epub_anchor_from_path(document_path, request)
+    })
+    .await
+    .map_err(|_| DOCUMENT_READ_CANCELLED_ERROR.to_string())?
+}
+
+#[tauri::command]
+async fn resolve_epub_anchor(
+    path: String,
+    anchor: EpubTextAnchorDto,
+) -> Result<EpubAnchorResolveDto, String> {
+    let document_path = PathBuf::from(path);
+    let request = EpubAnchorResolveRequest { anchor };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        resolve_epub_anchor_from_path(document_path, request)
+    })
+    .await
+    .map_err(|_| DOCUMENT_READ_CANCELLED_ERROR.to_string())?
+}
+
+#[tauri::command]
+async fn rebind_epub_anchor(
+    path: String,
+    anchor: EpubTextAnchorDto,
+) -> Result<EpubAnchorResolveDto, String> {
+    let document_path = PathBuf::from(path);
+    let request = EpubAnchorResolveRequest { anchor };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        rebind_epub_anchor_from_path(document_path, request)
     })
     .await
     .map_err(|_| DOCUMENT_READ_CANCELLED_ERROR.to_string())?
@@ -445,6 +602,20 @@ fn stable_cache_fallback_root() -> PathBuf {
     env::current_dir()
         .unwrap_or_else(|_| env::temp_dir())
         .join(".smartreader-state")
+}
+
+fn pdfkit_managed_copy_dir_from_app(app_handle: &tauri::AppHandle) -> PathBuf {
+    cache_paths_from_app(app_handle)
+        .default_dir
+        .join("managed-copy")
+}
+
+#[cfg(test)]
+fn default_pdfkit_managed_copy_dir() -> PathBuf {
+    stable_cache_fallback_root()
+        .join("data")
+        .join("cache")
+        .join("managed-copy")
 }
 
 fn cache_info_from_paths(paths: &CachePaths) -> Result<CacheInfoDto, String> {
@@ -852,49 +1023,211 @@ fn open_pdf_document_from_path(document_path: PathBuf) -> Result<PdfDocumentDto,
     })
 }
 
-fn search_pdf_document_from_path(
-    document_path: PathBuf,
-    query: String,
-) -> Result<Vec<PdfSearchResultDto>, String> {
-    validate_pdf_path(&document_path)?;
+fn pdfkit_annotation_capabilities() -> PdfKitAnnotationCapabilitiesDto {
+    PdfKitAnnotationCapabilitiesDto {
+        supported: cfg!(target_os = "macos"),
+        status: if cfg!(target_os = "macos") {
+            "available".to_string()
+        } else {
+            "unsupported-platform".to_string()
+        },
+        write_modes: vec!["copy".to_string()],
+        annotations: vec![
+            pdfkit_annotation_capability(PdfAnnotationKind::Area, true, false, None),
+            pdfkit_annotation_capability(PdfAnnotationKind::Note, true, false, None),
+            pdfkit_annotation_capability(PdfAnnotationKind::Highlight, true, true, None),
+            pdfkit_annotation_capability(PdfAnnotationKind::Underline, true, true, None),
+            pdfkit_annotation_capability(PdfAnnotationKind::Strike, true, true, None),
+            pdfkit_annotation_capability(
+                PdfAnnotationKind::Wavy,
+                false,
+                false,
+                Some("unsupported-native-mapping"),
+            ),
+            pdfkit_annotation_capability(
+                PdfAnnotationKind::RedText,
+                false,
+                false,
+                Some("unsupported-native-mapping"),
+            ),
+        ],
+    }
+}
 
-    let query = normalize_whitespace(&query);
-    if query.is_empty() {
-        return Ok(Vec::new());
+fn pdfkit_annotation_capability(
+    kind: PdfAnnotationKind,
+    supported: bool,
+    multi_rect: bool,
+    reason: Option<&str>,
+) -> PdfKitAnnotationCapabilityDto {
+    PdfKitAnnotationCapabilityDto {
+        kind,
+        supported,
+        multi_rect,
+        reason: reason.map(str::to_string),
+    }
+}
+
+#[cfg(test)]
+fn sync_pdfkit_annotations_from_path(
+    document_path: PathBuf,
+    request: PdfKitAnnotationSyncRequest,
+) -> Result<PdfKitAnnotationSyncDto, String> {
+    sync_pdfkit_annotations_from_path_with_managed_copy_dir(
+        document_path,
+        request,
+        default_pdfkit_managed_copy_dir(),
+    )
+}
+
+fn sync_pdfkit_annotations_from_path_with_managed_copy_dir(
+    document_path: PathBuf,
+    request: PdfKitAnnotationSyncRequest,
+    managed_copy_dir: PathBuf,
+) -> Result<PdfKitAnnotationSyncDto, String> {
+    validate_pdfkit_annotation_sync_request(&request)?;
+    validate_pdf_path(&document_path)?;
+    pdfkit::sync_pdfkit_annotations_from_path(document_path, request, managed_copy_dir)
+}
+
+fn validate_pdfkit_annotation_sync_request(
+    request: &PdfKitAnnotationSyncRequest,
+) -> Result<(), String> {
+    match request.write_mode {
+        PdfAnnotationWriteMode::Copy => {}
     }
 
-    let document =
-        PdfDocument::load(&document_path).map_err(|_| DOCUMENT_ACCESS_ERROR.to_string())?;
-    let lower_query = query.to_lowercase();
-    let mut results = Vec::new();
+    if request.annotations.len() > 10_000 {
+        return Err("Invalid PDFKit annotation sync request".to_string());
+    }
 
-    for page_number in document.get_pages().keys() {
-        let text = document.extract_text(&[*page_number]).unwrap_or_default();
-        let normalized_text = normalize_whitespace(&text);
-        let lower_text = normalized_text.to_lowercase();
-        let mut search_start = 0;
+    for annotation in &request.annotations {
+        validate_pdfkit_annotation_sync_item(annotation)?;
+    }
 
-        while let Some(relative_index) = lower_text[search_start..].find(&lower_query) {
-            let match_index = search_start + relative_index;
-            results.push(PdfSearchResultDto {
-                id: format!("pdf-search-{}-{}", page_number, match_index),
-                label: format!("Page {}", page_number),
-                snippet: snippet_around(&normalized_text, match_index, query.len()),
-                page: usize::try_from(*page_number).unwrap_or(usize::MAX),
-            });
-            search_start = match_index + lower_query.len();
+    Ok(())
+}
+
+fn validate_pdfkit_annotation_sync_item(
+    annotation: &PdfKitAnnotationSyncItem,
+) -> Result<(), String> {
+    if annotation.id.trim().is_empty() || annotation.id.len() > 256 {
+        return Err("Invalid PDFKit annotation id".to_string());
+    }
+
+    if annotation.page == 0 {
+        return Err("Invalid PDF annotation page".to_string());
+    }
+
+    if !pdfkit_annotation_kind_supported(annotation.kind) {
+        return Err("Unsupported PDFKit annotation kind".to_string());
+    }
+
+    if let Some(thickness) = annotation.thickness {
+        if !thickness.is_finite() || thickness <= 0.0 || thickness > 100.0 {
+            return Err("Invalid PDF annotation thickness".to_string());
         }
     }
 
-    Ok(results)
+    if annotation
+        .note
+        .as_deref()
+        .map(|note| note.len() > 4096)
+        .unwrap_or(false)
+    {
+        return Err("Invalid PDF annotation note".to_string());
+    }
+
+    if matches!(annotation.operation, PdfKitAnnotationOperation::Delete) {
+        return Ok(());
+    }
+
+    parse_pdf_annotation_color(&annotation.color)?;
+    if annotation.rects.is_empty()
+        || annotation
+            .rects
+            .iter()
+            .any(|rect| !is_valid_pdf_annotation_rect(rect))
+    {
+        return Err("Invalid PDF annotation rect".to_string());
+    }
+    if !pdfkit_annotation_kind_allows_multi_rect(annotation.kind) && annotation.rects.len() != 1 {
+        return Err("Invalid PDF annotation rect".to_string());
+    }
+
+    Ok(())
 }
 
-fn render_pdf_page_pdfkit_from_path(
-    document_path: PathBuf,
-    request: PdfRasterPageRequest,
-) -> Result<PdfRasterPageDto, String> {
-    validate_pdf_path(&document_path)?;
-    pdfkit::render_pdf_page_pdfkit_from_path(document_path, request)
+fn pdfkit_annotation_kind_supported(kind: PdfAnnotationKind) -> bool {
+    matches!(
+        kind,
+        PdfAnnotationKind::Area
+            | PdfAnnotationKind::Note
+            | PdfAnnotationKind::Highlight
+            | PdfAnnotationKind::Underline
+            | PdfAnnotationKind::Strike
+    )
+}
+
+fn pdfkit_annotation_kind_allows_multi_rect(kind: PdfAnnotationKind) -> bool {
+    matches!(
+        kind,
+        PdfAnnotationKind::Highlight | PdfAnnotationKind::Underline | PdfAnnotationKind::Strike
+    )
+}
+
+fn is_valid_pdf_annotation_rect(rect: &PdfAnnotationRect) -> bool {
+    let max_x = rect.x + rect.width;
+    let max_y = rect.y + rect.height;
+
+    rect.x.is_finite()
+        && rect.y.is_finite()
+        && rect.width.is_finite()
+        && rect.height.is_finite()
+        && max_x.is_finite()
+        && max_y.is_finite()
+        && rect.x >= 0.0
+        && rect.y >= 0.0
+        && rect.width > 0.0
+        && rect.height > 0.0
+        && rect.x <= PDF_ANNOTATION_MAX_PAGE_SPACE_BOUND
+        && rect.y <= PDF_ANNOTATION_MAX_PAGE_SPACE_BOUND
+        && rect.width <= PDF_ANNOTATION_MAX_PAGE_SPACE_BOUND
+        && rect.height <= PDF_ANNOTATION_MAX_PAGE_SPACE_BOUND
+        && max_x <= PDF_ANNOTATION_MAX_PAGE_SPACE_BOUND
+        && max_y <= PDF_ANNOTATION_MAX_PAGE_SPACE_BOUND
+}
+
+fn parse_pdf_annotation_color(color: &str) -> Result<PdfAnnotationColor, String> {
+    let hex = color
+        .strip_prefix('#')
+        .ok_or_else(|| "Invalid PDF annotation color".to_string())?;
+    if hex.len() != 6 && hex.len() != 8 {
+        return Err("Invalid PDF annotation color".to_string());
+    }
+    if !hex.chars().all(|character| character.is_ascii_hexdigit()) {
+        return Err("Invalid PDF annotation color".to_string());
+    }
+
+    let red = u8::from_str_radix(&hex[0..2], 16)
+        .map_err(|_| "Invalid PDF annotation color".to_string())?;
+    let green = u8::from_str_radix(&hex[2..4], 16)
+        .map_err(|_| "Invalid PDF annotation color".to_string())?;
+    let blue = u8::from_str_radix(&hex[4..6], 16)
+        .map_err(|_| "Invalid PDF annotation color".to_string())?;
+    let alpha = if hex.len() == 8 {
+        u8::from_str_radix(&hex[6..8], 16)
+            .map_err(|_| "Invalid PDF annotation color".to_string())?
+    } else {
+        u8::MAX
+    };
+
+    Ok(PdfAnnotationColor {
+        red: f64::from(red) / 255.0,
+        green: f64::from(green) / 255.0,
+        blue: f64::from(blue) / 255.0,
+        alpha: f64::from(alpha) / 255.0,
+    })
 }
 
 fn validate_pdf_path(document_path: &Path) -> Result<(), String> {
@@ -1075,6 +1408,248 @@ fn search_epub_document_from_path(
     }
 
     Ok(results)
+}
+
+fn create_epub_anchor_from_path(
+    document_path: PathBuf,
+    request: EpubAnchorCreateRequest,
+) -> Result<EpubTextAnchorDto, String> {
+    let text = read_epub_canonical_chapter_text(&document_path, &request.chapter_href)?;
+
+    create_epub_text_anchor(
+        &request.chapter_href,
+        &text,
+        &request.selected_text,
+        request.occurrence_index,
+        request.cfi_hint,
+    )
+}
+
+fn resolve_epub_anchor_from_path(
+    document_path: PathBuf,
+    request: EpubAnchorResolveRequest,
+) -> Result<EpubAnchorResolveDto, String> {
+    let text = read_epub_canonical_chapter_text(&document_path, &request.anchor.chapter_href)?;
+
+    resolve_epub_text_anchor(&request.anchor, &text)
+}
+
+fn rebind_epub_anchor_from_path(
+    document_path: PathBuf,
+    request: EpubAnchorResolveRequest,
+) -> Result<EpubAnchorResolveDto, String> {
+    let text = read_epub_canonical_chapter_text(&document_path, &request.anchor.chapter_href)?;
+
+    rebind_epub_text_anchor(&request.anchor, &text)
+}
+
+fn read_epub_canonical_chapter_text(document_path: &Path, href: &str) -> Result<String, String> {
+    validate_epub_path(document_path)?;
+    let mut archive = open_epub_archive(document_path)?;
+    let package = read_epub_package(&mut archive)?;
+    let requested_href = normalize_epub_href(href);
+    let chapter = package
+        .chapters
+        .iter()
+        .find(|chapter| normalize_epub_href(&chapter.href) == requested_href)
+        .ok_or_else(|| "Invalid EPUB: missing chapter".to_string())?;
+    let raw = read_zip_text(&mut archive, &chapter.href)
+        .map_err(|_| "Invalid EPUB: missing chapter".to_string())?;
+    let sanitized_html = sanitize_epub_html(&raw);
+
+    Ok(text_from_sanitized_html(&sanitized_html))
+}
+
+fn create_epub_text_anchor(
+    chapter_href: &str,
+    canonical_text: &str,
+    selected_text: &str,
+    occurrence_index: Option<usize>,
+    cfi_hint: Option<String>,
+) -> Result<EpubTextAnchorDto, String> {
+    let selected_text = normalize_whitespace(selected_text);
+    if selected_text.is_empty() {
+        return Err("Invalid EPUB anchor text".to_string());
+    }
+
+    let occurrences = text_occurrences(canonical_text, &selected_text);
+    let occurrence_index = occurrence_index.unwrap_or(0);
+    let Some(start_byte) = occurrences.get(occurrence_index).copied() else {
+        return Err("EPUB anchor text not found".to_string());
+    };
+    let end_byte = start_byte + selected_text.len();
+
+    Ok(build_epub_text_anchor(
+        chapter_href,
+        canonical_text,
+        selected_text,
+        occurrence_index,
+        start_byte,
+        end_byte,
+        cfi_hint,
+    ))
+}
+
+fn resolve_epub_text_anchor(
+    anchor: &EpubTextAnchorDto,
+    canonical_text: &str,
+) -> Result<EpubAnchorResolveDto, String> {
+    let text_hash = deterministic_hash(canonical_text);
+    if anchor.text_hash != text_hash {
+        return rebind_epub_text_anchor(anchor, canonical_text);
+    }
+
+    let occurrences = text_occurrences(canonical_text, &anchor.selected_text);
+    let Some(start_byte) = occurrences.get(anchor.occurrence_index).copied() else {
+        return rebind_epub_text_anchor(anchor, canonical_text);
+    };
+    let end_byte = start_byte + anchor.selected_text.len();
+    let resolved = build_epub_text_anchor(
+        &anchor.chapter_href,
+        canonical_text,
+        anchor.selected_text.clone(),
+        anchor.occurrence_index,
+        start_byte,
+        end_byte,
+        anchor.cfi_hint.clone(),
+    );
+
+    if resolved.anchor_hash != anchor.anchor_hash {
+        return rebind_epub_text_anchor(anchor, canonical_text);
+    }
+
+    Ok(epub_anchor_resolution("resolved", resolved))
+}
+
+fn rebind_epub_text_anchor(
+    anchor: &EpubTextAnchorDto,
+    canonical_text: &str,
+) -> Result<EpubAnchorResolveDto, String> {
+    let occurrences = text_occurrences(canonical_text, &anchor.selected_text);
+    for (occurrence_index, start_byte) in occurrences.iter().copied().enumerate() {
+        let end_byte = start_byte + anchor.selected_text.len();
+        if anchor_context_matches(canonical_text, start_byte, end_byte, anchor) {
+            let rebound = build_epub_text_anchor(
+                &anchor.chapter_href,
+                canonical_text,
+                anchor.selected_text.clone(),
+                occurrence_index,
+                start_byte,
+                end_byte,
+                anchor.cfi_hint.clone(),
+            );
+            return Ok(epub_anchor_resolution("rebound", rebound));
+        }
+    }
+
+    let Some(start_byte) = occurrences.get(anchor.occurrence_index).copied() else {
+        return Err("EPUB anchor text not found".to_string());
+    };
+    let end_byte = start_byte + anchor.selected_text.len();
+    let rebound = build_epub_text_anchor(
+        &anchor.chapter_href,
+        canonical_text,
+        anchor.selected_text.clone(),
+        anchor.occurrence_index,
+        start_byte,
+        end_byte,
+        anchor.cfi_hint.clone(),
+    );
+
+    Ok(epub_anchor_resolution("rebound", rebound))
+}
+
+fn build_epub_text_anchor(
+    chapter_href: &str,
+    canonical_text: &str,
+    selected_text: String,
+    occurrence_index: usize,
+    start_byte: usize,
+    end_byte: usize,
+    cfi_hint: Option<String>,
+) -> EpubTextAnchorDto {
+    let prefix = anchor_prefix(canonical_text, start_byte);
+    let suffix = anchor_suffix(canonical_text, end_byte);
+    let text_hash = deterministic_hash(canonical_text);
+    let anchor_hash = deterministic_hash(&format!(
+        "{chapter_href}\n{selected_text}\n{occurrence_index}\n{prefix}\n{suffix}\n{text_hash}"
+    ));
+
+    EpubTextAnchorDto {
+        chapter_href: chapter_href.to_string(),
+        selected_text,
+        occurrence_index,
+        start_offset: char_offset(canonical_text, start_byte),
+        end_offset: char_offset(canonical_text, end_byte),
+        prefix,
+        suffix,
+        text_hash,
+        anchor_hash,
+        cfi_hint,
+    }
+}
+
+fn epub_anchor_resolution(status: &str, anchor: EpubTextAnchorDto) -> EpubAnchorResolveDto {
+    EpubAnchorResolveDto {
+        status: status.to_string(),
+        selected_text: anchor.selected_text.clone(),
+        occurrence_index: anchor.occurrence_index,
+        start_offset: anchor.start_offset,
+        end_offset: anchor.end_offset,
+        anchor,
+    }
+}
+
+fn text_occurrences(text: &str, needle: &str) -> Vec<usize> {
+    let mut occurrences = Vec::new();
+    let mut search_start = 0;
+
+    while let Some(relative_index) = text[search_start..].find(needle) {
+        let start = search_start + relative_index;
+        occurrences.push(start);
+        search_start = start + needle.len();
+    }
+
+    occurrences
+}
+
+fn anchor_context_matches(
+    canonical_text: &str,
+    start_byte: usize,
+    end_byte: usize,
+    anchor: &EpubTextAnchorDto,
+) -> bool {
+    canonical_text[..start_byte].ends_with(&anchor.prefix)
+        && canonical_text[end_byte..].starts_with(&anchor.suffix)
+}
+
+fn anchor_prefix(text: &str, end_byte: usize) -> String {
+    text[..end_byte]
+        .chars()
+        .rev()
+        .take(32)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
+fn anchor_suffix(text: &str, start_byte: usize) -> String {
+    text[start_byte..].chars().take(32).collect()
+}
+
+fn char_offset(text: &str, byte_offset: usize) -> usize {
+    text[..byte_offset].chars().count()
+}
+
+fn deterministic_hash(value: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+
+    format!("fnv1a64:{hash:016x}")
 }
 
 fn validate_epub_path(document_path: &Path) -> Result<(), String> {
@@ -1949,16 +2524,20 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(startup_files)
         .invoke_handler(tauri::generate_handler![
             pending_open_files,
             read_document,
             open_pdf_document,
-            search_pdf_document,
-            render_pdf_page_pdfkit,
+            get_pdfkit_annotation_capabilities,
+            sync_pdfkit_annotations,
             open_epub_document,
             read_epub_chapter,
             search_epub_document,
+            create_epub_anchor,
+            resolve_epub_anchor,
+            rebind_epub_anchor,
             get_cache_info,
             load_smartreader_cache,
             save_smartreader_cache,
@@ -2150,72 +2729,165 @@ mod tests {
     }
 
     #[test]
-    fn search_pdf_document_finds_text_without_renderer_pdfjs() {
-        let path = test_path("search.pdf");
-        write_test_pdf(&path, &["Intro body", "Native PDF result"], false).unwrap();
+    fn pdfkit_annotation_capabilities_reports_native_support_matrix() {
+        let capabilities = pdfkit_annotation_capabilities();
 
-        let results =
-            search_pdf_document_from_path(path.clone(), "Native PDF".to_string()).unwrap();
-
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].page, 2);
-        assert_eq!(results[0].label, "Page 2");
-        assert!(results[0].snippet.contains("Native PDF result"));
-        fs::remove_file(path).unwrap();
+        assert_eq!(capabilities.write_modes, vec!["copy"]);
+        assert!(capabilities
+            .annotations
+            .iter()
+            .any(|item| item.kind == PdfAnnotationKind::Area && item.supported));
+        assert!(capabilities
+            .annotations
+            .iter()
+            .any(|item| item.kind == PdfAnnotationKind::Note && item.supported));
+        assert!(capabilities.annotations.iter().any(|item| {
+            item.kind == PdfAnnotationKind::Highlight && item.supported && item.multi_rect
+        }));
+        assert!(capabilities.annotations.iter().any(|item| {
+            item.kind == PdfAnnotationKind::Underline && item.supported && item.multi_rect
+        }));
+        assert!(capabilities.annotations.iter().any(|item| {
+            item.kind == PdfAnnotationKind::Strike && item.supported && item.multi_rect
+        }));
+        assert!(capabilities.annotations.iter().any(|item| {
+            item.kind == PdfAnnotationKind::Wavy
+                && !item.supported
+                && item.reason.as_deref() == Some("unsupported-native-mapping")
+        }));
+        assert!(capabilities.annotations.iter().any(|item| {
+            item.kind == PdfAnnotationKind::RedText
+                && !item.supported
+                && item.reason.as_deref() == Some("unsupported-native-mapping")
+        }));
     }
 
     #[test]
-    fn search_pdf_document_returns_all_matching_pages_without_limit() {
-        let path = test_path("search-all.pdf");
-        let page_texts = (0..120)
-            .map(|index| format!("unbounded pdf match {index}"))
-            .collect::<Vec<_>>();
-        let page_refs = page_texts.iter().map(String::as_str).collect::<Vec<_>>();
-        write_test_pdf(&path, &page_refs, false).unwrap();
-
-        let results = search_pdf_document_from_path(path.clone(), "unbounded".to_string()).unwrap();
-
-        assert_eq!(results.len(), 120);
-        assert_eq!(results[0].page, 1);
-        assert_eq!(results[119].page, 120);
-        fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn render_pdf_page_pdfkit_reports_platform_status() {
-        let path = test_path("raster.pdf");
-        write_test_pdf(&path, &["Raster body"], false).unwrap();
-
-        let result = render_pdf_page_pdfkit_from_path(
-            path.clone(),
-            PdfRasterPageRequest {
+    fn sync_pdfkit_annotations_rejects_unsupported_native_styles_explicitly() {
+        let result = validate_pdfkit_annotation_sync_request(&PdfKitAnnotationSyncRequest {
+            write_mode: PdfAnnotationWriteMode::Copy,
+            managed_copy_path: None,
+            annotations: vec![PdfKitAnnotationSyncItem {
+                id: "annotation-wavy".to_string(),
+                operation: PdfKitAnnotationOperation::Upsert,
                 page: 1,
-                scale: Some(0.25),
-                output: Some(PdfRasterOutputKind::Bytes),
-                max_pixels: Some(1_000_000),
+                kind: PdfAnnotationKind::Wavy,
+                color: "#ff0000".to_string(),
+                thickness: Some(2.0),
+                note: None,
+                rects: vec![valid_pdf_annotation_rect()],
+            }],
+        });
+
+        assert_eq!(result.unwrap_err(), "Unsupported PDFKit annotation kind");
+    }
+
+    #[test]
+    fn sync_pdfkit_annotations_accepts_multirect_markup_contract() {
+        let result = validate_pdfkit_annotation_sync_request(&PdfKitAnnotationSyncRequest {
+            write_mode: PdfAnnotationWriteMode::Copy,
+            managed_copy_path: None,
+            annotations: vec![PdfKitAnnotationSyncItem {
+                id: "annotation-highlight".to_string(),
+                operation: PdfKitAnnotationOperation::Upsert,
+                page: 1,
+                kind: PdfAnnotationKind::Highlight,
+                color: "#ffcc00".to_string(),
+                thickness: Some(2.0),
+                note: Some("markup note".to_string()),
+                rects: vec![
+                    valid_pdf_annotation_rect(),
+                    PdfAnnotationRect {
+                        x: 10.0,
+                        y: 60.0,
+                        width: 80.0,
+                        height: 20.0,
+                    },
+                ],
+            }],
+        });
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn sync_pdfkit_annotations_reports_managed_copy_result_without_touching_source() {
+        let path = test_path("annotation-sync.pdf");
+        write_test_pdf(&path, &["Annotation body"], false).unwrap();
+        let source_bytes = fs::read(&path).unwrap();
+
+        let result = sync_pdfkit_annotations_from_path(
+            path.clone(),
+            PdfKitAnnotationSyncRequest {
+                write_mode: PdfAnnotationWriteMode::Copy,
+                managed_copy_path: None,
+                annotations: vec![PdfKitAnnotationSyncItem {
+                    id: "annotation-area".to_string(),
+                    operation: PdfKitAnnotationOperation::Upsert,
+                    page: 1,
+                    kind: PdfAnnotationKind::Area,
+                    color: "#ffcc00".to_string(),
+                    thickness: Some(2.0),
+                    note: Some("Review".to_string()),
+                    rects: vec![valid_pdf_annotation_rect()],
+                }],
             },
         )
         .unwrap();
 
         if cfg!(target_os = "macos") {
             assert!(result.supported);
-            assert_eq!(result.status, "rendered");
-            assert_eq!(result.page, 1);
-            assert_eq!(result.mime_type.as_deref(), Some("image/png"));
-            assert!(result
-                .bytes
-                .as_ref()
-                .map(|bytes| !bytes.is_empty())
-                .unwrap_or(false));
-            assert!(result.width > 0);
-            assert!(result.height > 0);
+            assert_eq!(result.status, "synced");
+            assert_ne!(result.managed_copy_path, path.to_string_lossy());
+            assert_eq!(result.annotations[0].id, "annotation-area");
+            assert_eq!(result.annotations[0].status, "upserted");
+            fs::remove_file(&result.managed_copy_path).unwrap();
         } else {
             assert!(!result.supported);
             assert_eq!(result.status, "unsupported-platform");
-            assert!(result.bytes.is_none());
         }
 
+        assert_eq!(fs::read(&path).unwrap(), source_bytes);
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn sync_pdfkit_annotations_ignores_unsafe_managed_copy_path() {
+        let path = test_path("annotation-sync-source.pdf");
+        let hostile_path = test_path("annotation-sync-victim.pdf");
+        let managed_copy_dir = test_path("annotation-sync-managed-root");
+        write_test_pdf(&path, &["Annotation body"], false).unwrap();
+        write_test_pdf(&hostile_path, &["Victim body"], false).unwrap();
+        let hostile_bytes = fs::read(&hostile_path).unwrap();
+
+        let result = sync_pdfkit_annotations_from_path_with_managed_copy_dir(
+            path.clone(),
+            PdfKitAnnotationSyncRequest {
+                write_mode: PdfAnnotationWriteMode::Copy,
+                managed_copy_path: Some(hostile_path.to_string_lossy().into_owned()),
+                annotations: vec![PdfKitAnnotationSyncItem {
+                    id: "annotation-area".to_string(),
+                    operation: PdfKitAnnotationOperation::Upsert,
+                    page: 1,
+                    kind: PdfAnnotationKind::Area,
+                    color: "#ffcc00".to_string(),
+                    thickness: Some(2.0),
+                    note: Some("Review".to_string()),
+                    rects: vec![valid_pdf_annotation_rect()],
+                }],
+            },
+            managed_copy_dir.clone(),
+        )
+        .unwrap();
+
+        assert_ne!(result.managed_copy_path, hostile_path.to_string_lossy());
+        assert!(Path::new(&result.managed_copy_path).starts_with(&managed_copy_dir));
+        assert_eq!(fs::read(&hostile_path).unwrap(), hostile_bytes);
+
+        fs::remove_file(path).unwrap();
+        fs::remove_file(hostile_path).unwrap();
+        let _ = fs::remove_file(result.managed_copy_path);
+        let _ = fs::remove_dir_all(managed_copy_dir);
     }
 
     #[test]
@@ -2560,6 +3232,113 @@ mod tests {
     }
 
     #[test]
+    fn create_epub_anchor_uses_occurrence_context_and_deterministic_hashes() {
+        let path = test_path("anchor-duplicates.epub");
+        write_test_epub(
+            &path,
+            TestEpubOptions {
+                custom_chapter_texts: vec![
+                    "Alpha repeat beta repeat gamma repeat delta".to_string(),
+                    "Second chapter".to_string(),
+                ],
+                ..TestEpubOptions::default()
+            },
+        )
+        .unwrap();
+
+        let first = create_epub_anchor_from_path(
+            path.clone(),
+            EpubAnchorCreateRequest {
+                chapter_href: "OPS/chapter-one.xhtml".to_string(),
+                selected_text: "repeat".to_string(),
+                occurrence_index: Some(1),
+                cfi_hint: Some("epubcfi(/6/2[legacy])".to_string()),
+            },
+        )
+        .unwrap();
+        let second = create_epub_anchor_from_path(
+            path.clone(),
+            EpubAnchorCreateRequest {
+                chapter_href: "OPS/chapter-one.xhtml".to_string(),
+                selected_text: "repeat".to_string(),
+                occurrence_index: Some(1),
+                cfi_hint: Some("epubcfi(/6/2[legacy])".to_string()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(first.chapter_href, "OPS/chapter-one.xhtml");
+        assert_eq!(first.selected_text, "repeat");
+        assert_eq!(first.occurrence_index, 1);
+        assert_eq!(first.prefix, "Opening Alpha repeat beta ");
+        assert_eq!(first.suffix, " gamma repeat delta");
+        assert!(first.text_hash.starts_with("fnv1a64:"));
+        assert!(first.anchor_hash.starts_with("fnv1a64:"));
+        assert_eq!(first.cfi_hint.as_deref(), Some("epubcfi(/6/2[legacy])"));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn resolve_epub_anchor_is_authoritative_over_legacy_cfi_hint() {
+        let path = test_path("anchor-resolve.epub");
+        write_test_epub(
+            &path,
+            TestEpubOptions {
+                custom_chapter_texts: vec![
+                    "Alpha repeat beta repeat gamma repeat delta".to_string(),
+                    "Second chapter".to_string(),
+                ],
+                ..TestEpubOptions::default()
+            },
+        )
+        .unwrap();
+        let anchor = create_epub_anchor_from_path(
+            path.clone(),
+            EpubAnchorCreateRequest {
+                chapter_href: "OPS/chapter-one.xhtml".to_string(),
+                selected_text: "repeat".to_string(),
+                occurrence_index: Some(2),
+                cfi_hint: Some("epubcfi(/wrong/legacy/hint)".to_string()),
+            },
+        )
+        .unwrap();
+
+        let resolved = resolve_epub_anchor_from_path(
+            path.clone(),
+            EpubAnchorResolveRequest {
+                anchor: anchor.clone(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(resolved.status, "resolved");
+        assert_eq!(resolved.anchor, anchor);
+        assert_eq!(resolved.selected_text, "repeat");
+        assert_eq!(resolved.occurrence_index, 2);
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn rebind_epub_anchor_uses_context_when_occurrence_shifts() {
+        let original = "Alpha repeat beta repeat gamma repeat delta";
+        let changed = "Inserted repeat Alpha repeat beta repeat gamma repeat delta";
+        let anchor =
+            create_epub_text_anchor("OPS/chapter-one.xhtml", original, "repeat", Some(1), None)
+                .unwrap();
+
+        let rebound = rebind_epub_text_anchor(&anchor, changed).unwrap();
+
+        assert_eq!(rebound.status, "rebound");
+        assert_eq!(rebound.anchor.occurrence_index, 2);
+        assert_eq!(rebound.selected_text, "repeat");
+        assert!(rebound.anchor.prefix.ends_with("Alpha repeat beta "));
+        assert_eq!(rebound.anchor.suffix, " gamma repeat delta");
+    }
+
+    #[test]
     fn validate_cache_envelope_rejects_non_object_or_wrong_schema() {
         assert!(validate_cache_envelope(&serde_json::json!(null)).is_err());
         assert!(validate_cache_envelope(&serde_json::json!({"schemaVersion": 2})).is_err());
@@ -2833,6 +3612,15 @@ mod tests {
         ))
     }
 
+    fn valid_pdf_annotation_rect() -> PdfAnnotationRect {
+        PdfAnnotationRect {
+            x: 10.0,
+            y: 20.0,
+            width: 120.0,
+            height: 32.0,
+        }
+    }
+
     fn test_cache_paths(root: &Path) -> CachePaths {
         CachePaths {
             default_dir: root.join("default-cache"),
@@ -2894,6 +3682,7 @@ mod tests {
         encrypted_resources: Vec<&'static str>,
         omitted_chapters: Vec<&'static str>,
         chapter_count: usize,
+        custom_chapter_texts: Vec<String>,
         fragmented_nav: bool,
         fragmented_ncx: bool,
     }
@@ -2911,6 +3700,7 @@ mod tests {
                 encrypted_resources: Vec::new(),
                 omitted_chapters: Vec::new(),
                 chapter_count: 2,
+                custom_chapter_texts: Vec::new(),
                 fragmented_nav: false,
                 fragmented_ncx: false,
             }
@@ -3055,7 +3845,11 @@ mod tests {
 
             zip.start_file(chapter_path, file_options)?;
             let label = test_epub_chapter_label(index, options.chapter_count);
-            let text = test_epub_chapter_text(index, options.chapter_count);
+            let text = options
+                .custom_chapter_texts
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| test_epub_chapter_text(index, options.chapter_count));
             let resource_html = if options.include_chapter_resource_reference && index == 0 {
                 r#"<img src="images/cover.png" alt="cover"/>"#
             } else {

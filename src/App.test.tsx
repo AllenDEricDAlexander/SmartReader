@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import JSZip from "jszip";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { validateSmartReaderCacheEnvelope } from "./state/smartReaderCache";
 import type {
   AppSessionSnapshot,
   DocumentSession,
@@ -9,65 +10,6 @@ import type {
   SmartReaderCacheEnvelope
 } from "./types/reader";
 import type { SearchWorkerDocument } from "./lib/wasmAdapter";
-
-const pdfMocks = vi.hoisted(() => {
-  const outlineItems = [
-    { title: "Intro", dest: [{ num: 1, gen: 0 }], items: [] },
-    { title: "Later chapter", dest: [{ num: 2, gen: 0 }], items: [] }
-  ];
-  const getViewport = vi.fn(() => ({ width: 640, height: 900 }));
-  const getPageIndex = vi.fn(async (ref: { num: number }) => Math.max(0, ref.num - 1));
-  let textContentItems = [
-    {
-      str: "Native PDF result",
-      transform: [1, 0, 0, 1, 72, 760],
-      width: 112,
-      height: 14
-    }
-  ];
-  const getTextContent = vi.fn(async () => ({
-    items: textContentItems
-  }));
-  const resetTextContentItems = () => {
-    textContentItems = [
-      {
-        str: "Native PDF result",
-        transform: [1, 0, 0, 1, 72, 760],
-        width: 112,
-        height: 14
-      }
-    ];
-  };
-  const createDocumentTask = () => ({
-    promise: Promise.resolve({
-      numPages: 2,
-      getOutline: vi.fn(async () => outlineItems),
-      getDestination: vi.fn(async () => null),
-      getPageIndex,
-      getPage: vi.fn(async () => ({
-        getViewport,
-        getTextContent,
-        render: vi.fn(() => ({ promise: Promise.resolve() }))
-      })),
-      destroy: vi.fn()
-    })
-  });
-  const getDocument = vi.fn(createDocumentTask);
-  const modernGetDocument = vi.fn(createDocumentTask);
-
-  return {
-    getDocument,
-    getPageIndex,
-    getTextContent,
-    getViewport,
-    modernGetDocument,
-    outlineItems,
-    resetTextContentItems,
-    setTextContentItems: (items: typeof textContentItems) => {
-      textContentItems = items;
-    }
-  };
-});
 
 const tauriMocks = vi.hoisted(() => {
   let desktopOpenHandler: ((path: string) => void) | undefined;
@@ -151,21 +93,57 @@ const tauriMocks = vi.hoisted(() => {
       { id: "outline-2", title: "Later chapter", page: 2, level: 0 }
     ]
   }));
-  const searchPdfDocument = vi.fn(async () => [
-    {
-      id: "pdf-search-2-4",
-      label: "Page 2",
-      snippet: "Native PDF result",
-      page: 2
-    }
-  ]);
-  const renderPdfPageImage = vi.fn(async (_path: string, page = 1, scale = 1) => ({
-    page,
-    width: 640,
-    height: 900,
-    scale,
-    dataUrl: "data:image/png;base64,pdfkit",
-    renderer: "pdfkit" as const
+  const syncPdfKitAnnotations = vi.fn(async (request: {
+    path: string;
+    managedCopyPath?: string;
+    annotations: Array<{ id: string; page: number; kind: string; operation: string }>;
+  }) => ({
+    supported: !request.annotations.some((annotation) => annotation.kind === "wavy" || annotation.kind === "redText"),
+    status: request.annotations.some((annotation) => annotation.kind === "wavy" || annotation.kind === "redText")
+      ? "unsupported-native-mapping"
+      : "synced",
+    sourcePath: request.path,
+    managedCopyPath: request.managedCopyPath ?? "/tmp/smartreader-pdfkit-managed.pdf",
+    annotations: request.annotations.map((annotation) => ({
+      id: annotation.id,
+      status: annotation.kind === "wavy" || annotation.kind === "redText"
+        ? "unsupported-native-mapping"
+        : annotation.operation === "delete"
+          ? "deleted"
+          : "upserted",
+      page: annotation.page,
+      kind: annotation.kind,
+      nativeId: `smartreader:${annotation.id}`,
+      reason: annotation.kind === "wavy" || annotation.kind === "redText" ? "unsupported-native-mapping" : undefined
+    }))
+  }));
+  const createEpubAnchor = vi.fn(async () => ({
+    chapterHref: "OPS/chapter-1.xhtml",
+    selectedText: "Native chapter body",
+    occurrenceIndex: 0,
+    startOffset: 0,
+    endOffset: 19,
+    prefix: "",
+    suffix: "",
+    textHash: "fnv1a64:text",
+    anchorHash: "fnv1a64:anchor",
+    cfiHint: "epubcfi(/legacy)"
+  }));
+  const resolveEpubAnchor = vi.fn(async (_path: string, anchor: unknown) => ({
+    status: "resolved",
+    anchor,
+    selectedText: "repeat",
+    occurrenceIndex: 1,
+    startOffset: 13,
+    endOffset: 19
+  }));
+  const rebindEpubAnchor = vi.fn(async (_path: string, anchor: unknown) => ({
+    status: "rebound",
+    anchor,
+    selectedText: "repeat",
+    occurrenceIndex: 1,
+    startOffset: 13,
+    endOffset: 19
   }));
   const getSmartReaderCacheInfo = vi.fn(async () => ({
     defaultPath: "/Users/mario/Library/Application Support/SmartReader/cache",
@@ -190,6 +168,7 @@ const tauriMocks = vi.hoisted(() => {
 
   return {
     createDesktopSession,
+    createEpubAnchor,
     exportSmartReaderCacheFile,
     getSmartReaderCacheInfo,
     importSmartReaderCacheFile,
@@ -208,11 +187,12 @@ const tauriMocks = vi.hoisted(() => {
     openDesktopFileDialog: vi.fn(async () => undefined),
     readEpubChapter,
     readFileSource,
-    renderPdfPageImage,
     saveSmartReaderCache,
     searchEpubDocument,
-    searchPdfDocument,
     setSmartReaderCacheLocation,
+    rebindEpubAnchor,
+    resolveEpubAnchor,
+    syncPdfKitAnnotations,
     emitDesktopOpen: (path: string) => desktopOpenHandler?.(path),
     reset: () => {
       desktopOpenHandler = undefined;
@@ -220,6 +200,7 @@ const tauriMocks = vi.hoisted(() => {
       pendingPaths = ["/Users/mario/Books/start.pdf"];
       desktopRuntime = true;
       createDesktopSession.mockClear();
+      createEpubAnchor.mockClear();
       exportSmartReaderCacheFile.mockClear();
       getSmartReaderCacheInfo.mockClear();
       importSmartReaderCacheFile.mockClear();
@@ -228,11 +209,12 @@ const tauriMocks = vi.hoisted(() => {
       openPendingDesktopFiles.mockClear();
       readEpubChapter.mockClear();
       readFileSource.mockClear();
-      renderPdfPageImage.mockClear();
       saveSmartReaderCache.mockClear();
       searchEpubDocument.mockClear();
-      searchPdfDocument.mockClear();
       setSmartReaderCacheLocation.mockClear();
+      rebindEpubAnchor.mockClear();
+      resolveEpubAnchor.mockClear();
+      syncPdfKitAnnotations.mockClear();
     },
     setDesktopRuntime: (enabled: boolean) => {
       desktopRuntime = enabled;
@@ -250,6 +232,268 @@ const tauriMocks = vi.hoisted(() => {
   };
 });
 
+const embedPdfMocks = vi.hoisted(() => {
+  type PageChangeHandler = (event: { documentId: string; pageNumber: number; totalPages: number }) => void;
+  type SelectionChangeHandler = (event: { documentId: string; selection: unknown }) => void;
+  type EndSelectionHandler = (event: { documentId: string; modeId: string }) => void;
+  type SearchResultPayload = {
+    pageIndex: number;
+    charIndex: number;
+    charCount: number;
+    context?: {
+      before?: string;
+      match?: string;
+      after?: string;
+      truncatedLeft?: boolean;
+      truncatedRight?: boolean;
+    };
+  };
+
+  let pageChangeHandler: PageChangeHandler | undefined;
+  let scrollHandler: ((event: { documentId: string }) => void) | undefined;
+  let layoutChangeHandler: ((event: { documentId: string }) => void) | undefined;
+  let selectionChangeHandler: SelectionChangeHandler | undefined;
+  let endSelectionHandler: EndSelectionHandler | undefined;
+  let annotationEventHandler: (() => void) | undefined;
+  let scrollOffset = { x: 0, y: 0 };
+  let searchResults: SearchResultPayload[] = [];
+  const scrollToPage = vi.fn();
+  const onPageChange = vi.fn((handler: PageChangeHandler) => {
+    pageChangeHandler = handler;
+    return vi.fn();
+  });
+  const onScroll = vi.fn((handler: (event: { documentId: string }) => void) => {
+    scrollHandler = handler;
+    return vi.fn();
+  });
+  const onLayoutChange = vi.fn((handler: (event: { documentId: string }) => void) => {
+    layoutChangeHandler = handler;
+    return vi.fn();
+  });
+  const getMetrics = vi.fn(() => ({
+    scrollOffset
+  }));
+  const getLayout = vi.fn(() => ({
+    virtualItems: [
+      {
+        pageLayouts: [
+          { pageNumber: 1, height: 900 },
+          { pageNumber: 2, height: 900 }
+        ]
+      }
+    ]
+  }));
+  const getRectPositionForPage = vi.fn((_page: number, rect: { origin: { x: number; y: number }; size: { width: number; height: number } }) => rect);
+  const scrollCapability = {
+    forDocument: vi.fn(() => ({
+      getMetrics,
+      getLayout,
+      getRectPositionForPage,
+      scrollToPage
+    })),
+    onPageChange,
+    onScroll,
+    onLayoutChange,
+    scrollToPage
+  };
+  const documentManagerCapability = {
+    getActiveDocumentId: vi.fn(() => "smartreader-test-document")
+  };
+  const searchAllPages = vi.fn(() => ({
+    wait: vi.fn(),
+    toPromise: vi.fn(async () => ({ results: searchResults, total: searchResults.length }))
+  }));
+  const searchCapability = {
+    goToResult: vi.fn(),
+    nextResult: vi.fn(),
+    previousResult: vi.fn(),
+    searchAllPages,
+    setShowAllResults: vi.fn(),
+    startSearch: vi.fn(),
+    stopSearch: vi.fn()
+  };
+  const annotationScope = {
+    setActiveTool: vi.fn(),
+    exportAnnotations: vi.fn(() => ({
+      toPromise: vi.fn(async () => [])
+    })),
+    importAnnotations: vi.fn(),
+    onAnnotationEvent: vi.fn((handler: () => void) => {
+      annotationEventHandler = handler;
+      return vi.fn();
+    })
+  };
+  const annotationCapability = {
+    forDocument: vi.fn(() => annotationScope),
+    setToolDefaults: vi.fn()
+  };
+  const requestZoom = vi.fn();
+  const zoomCapability = {
+    forDocument: vi.fn(() => ({
+      requestZoom
+    })),
+    requestZoom
+  };
+  let selectedTextItems = ["Native PDF selection"];
+  let formattedSelectionItems = [
+    {
+      pageIndex: 0,
+      rect: { origin: { x: 80, y: 120 }, size: { width: 180, height: 24 } },
+      segmentRects: [
+        { origin: { x: 80, y: 120 }, size: { width: 180, height: 24 } }
+      ]
+    }
+  ];
+  const selectedText = vi.fn(async () => selectedTextItems);
+  const formattedSelection = vi.fn(() => formattedSelectionItems);
+  const selectionCapability = {
+    getFormattedSelection: formattedSelection,
+    getSelectedText: vi.fn(() => ({
+      toPromise: selectedText
+    })),
+    onEndSelection: vi.fn((handler: EndSelectionHandler) => {
+      endSelectionHandler = handler;
+      return vi.fn();
+    }),
+    onSelectionChange: vi.fn((handler: SelectionChangeHandler) => {
+      selectionChangeHandler = handler;
+      return vi.fn();
+    })
+  };
+  const registry = {
+    getPlugin: vi.fn((pluginId: string) => {
+      if (pluginId === "scroll") {
+        return { provides: () => scrollCapability };
+      }
+      if (pluginId === "document-manager") {
+        return { provides: () => documentManagerCapability };
+      }
+      if (pluginId === "search") {
+        return { provides: () => searchCapability };
+      }
+      if (pluginId === "annotation") {
+        return { provides: () => annotationCapability };
+      }
+      if (pluginId === "selection") {
+        return { provides: () => selectionCapability };
+      }
+      if (pluginId === "zoom") {
+        return { provides: () => zoomCapability };
+      }
+      return null;
+    })
+  };
+  const PDFViewer = vi.fn();
+
+  return {
+    PDFViewer,
+    documentManagerCapability,
+    emitPageChange: (pageNumber: number) => {
+      pageChangeHandler?.({
+        documentId: "smartreader-test-document",
+        pageNumber,
+        totalPages: 2
+      });
+    },
+    emitScroll: (offset = scrollOffset) => {
+      scrollOffset = offset;
+      scrollHandler?.({
+        documentId: "smartreader-test-document"
+      });
+    },
+    emitLayoutChange: () => {
+      layoutChangeHandler?.({
+        documentId: "smartreader-test-document"
+      });
+    },
+    emitSelectionChange: (selection: unknown = {}) => {
+      selectionChangeHandler?.({
+        documentId: "smartreader-test-document",
+        selection
+      });
+    },
+    emitEndSelection: () => {
+      endSelectionHandler?.({
+        documentId: "smartreader-test-document",
+        modeId: "pointerMode"
+      });
+    },
+    emitAnnotationEvent: () => {
+      annotationEventHandler?.();
+    },
+    registry,
+    reset: () => {
+      PDFViewer.mockClear();
+      documentManagerCapability.getActiveDocumentId.mockClear();
+      registry.getPlugin.mockClear();
+      scrollCapability.forDocument.mockClear();
+      getMetrics.mockClear();
+      getLayout.mockClear();
+      getRectPositionForPage.mockClear();
+      scrollToPage.mockClear();
+      onPageChange.mockClear();
+      onScroll.mockClear();
+      onLayoutChange.mockClear();
+      pageChangeHandler = undefined;
+      scrollHandler = undefined;
+      layoutChangeHandler = undefined;
+      selectionChangeHandler = undefined;
+      endSelectionHandler = undefined;
+      annotationEventHandler = undefined;
+      scrollOffset = { x: 0, y: 0 };
+      searchAllPages.mockClear();
+      searchResults = [];
+      searchCapability.goToResult.mockClear();
+      searchCapability.nextResult.mockClear();
+      searchCapability.previousResult.mockClear();
+      searchCapability.setShowAllResults.mockClear();
+      searchCapability.startSearch.mockClear();
+      searchCapability.stopSearch.mockClear();
+      annotationCapability.forDocument.mockClear();
+      annotationCapability.setToolDefaults.mockClear();
+      annotationScope.setActiveTool.mockClear();
+      annotationScope.exportAnnotations.mockClear();
+      annotationScope.importAnnotations.mockClear();
+      annotationScope.onAnnotationEvent.mockClear();
+      requestZoom.mockClear();
+      zoomCapability.forDocument.mockClear();
+      formattedSelection.mockClear();
+      selectedText.mockClear();
+      selectionCapability.getSelectedText.mockClear();
+      selectionCapability.onEndSelection.mockClear();
+      selectionCapability.onSelectionChange.mockClear();
+      selectedTextItems = ["Native PDF selection"];
+      formattedSelectionItems = [
+        {
+          pageIndex: 0,
+          rect: { origin: { x: 80, y: 120 }, size: { width: 180, height: 24 } },
+          segmentRects: [
+            { origin: { x: 80, y: 120 }, size: { width: 180, height: 24 } }
+          ]
+        }
+      ];
+    },
+    setFormattedSelection: (selection: typeof formattedSelectionItems) => {
+      formattedSelectionItems = selection;
+    },
+    setSelectedText: (text: string[]) => {
+      selectedTextItems = text;
+    },
+    setSearchResults: (results: SearchResultPayload[]) => {
+      searchResults = results;
+    },
+    scrollCapability,
+    scrollToPage,
+    searchCapability,
+    searchAllPages,
+    annotationCapability,
+    annotationScope,
+    selectionCapability,
+    requestZoom,
+    zoomCapability
+  };
+});
+
 vi.mock("./platform/fileSources", async () => ({
   ...(await vi.importActual<typeof import("./platform/fileSources")>("./platform/fileSources")),
   isTauriRuntime: () => tauriMocks.isDesktopRuntime()
@@ -257,6 +501,7 @@ vi.mock("./platform/fileSources", async () => ({
 
 vi.mock("./platform/tauriBridge", () => ({
   createDesktopSession: tauriMocks.createDesktopSession,
+  createEpubAnchor: tauriMocks.createEpubAnchor,
   exportSmartReaderCacheFile: tauriMocks.exportSmartReaderCacheFile,
   getSmartReaderCacheInfo: tauriMocks.getSmartReaderCacheInfo,
   importSmartReaderCacheFile: tauriMocks.importSmartReaderCacheFile,
@@ -270,42 +515,68 @@ vi.mock("./platform/tauriBridge", () => ({
   openPendingDesktopFiles: tauriMocks.openPendingDesktopFiles,
   readEpubChapter: tauriMocks.readEpubChapter,
   readFileSource: tauriMocks.readFileSource,
-  renderPdfPageImage: tauriMocks.renderPdfPageImage,
   saveSmartReaderCache: tauriMocks.saveSmartReaderCache,
   searchEpubDocument: tauriMocks.searchEpubDocument,
-  searchPdfDocument: tauriMocks.searchPdfDocument,
   setSmartReaderCacheLocation: tauriMocks.setSmartReaderCacheLocation,
+  rebindEpubAnchor: tauriMocks.rebindEpubAnchor,
+  resolveEpubAnchor: tauriMocks.resolveEpubAnchor,
+  syncPdfKitAnnotations: tauriMocks.syncPdfKitAnnotations,
   setupTauriMenu: tauriMocks.setupTauriMenu
 }));
 
-vi.mock("pdfjs-dist", () => ({
-  GlobalWorkerOptions: {},
-  getDocument: pdfMocks.modernGetDocument
-}));
+vi.mock("@embedpdf/react-pdf-viewer", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
 
-vi.mock("pdfjs-dist/build/pdf.worker.mjs?url", () => ({
-  default: "/pdf.worker.mjs"
-}));
+  function MockPDFViewer(props: { config?: { src?: string }; onReady?: (registry: unknown) => void }) {
+    embedPdfMocks.PDFViewer(props);
+    React.useEffect(() => {
+      props.onReady?.(embedPdfMocks.registry);
+    }, [props.onReady]);
 
-vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
-  GlobalWorkerOptions: {},
-  getDocument: pdfMocks.getDocument
-}));
+    return React.createElement(
+      "div",
+      {
+        className: "embedpdf-viewer-mock",
+        "data-testid": "embedpdf-viewer",
+        "data-src": props.config?.src ?? ""
+      },
+      React.createElement("article", { "data-page-number": "1", "data-search-match": undefined }),
+      React.createElement("article", { "data-page-number": "2", "data-search-match": undefined })
+    );
+  }
 
-vi.mock("pdfjs-dist/legacy/build/pdf.worker.mjs?url", () => ({
-  default: "/pdf.worker.legacy.mjs"
-}));
+  return {
+    AnnotationPlugin: { id: "annotation" },
+    DocumentManagerPlugin: { id: "document-manager" },
+    PDFViewer: MockPDFViewer,
+    ScrollPlugin: { id: "scroll" },
+    ScrollStrategy: { Vertical: "vertical", Horizontal: "horizontal" },
+    SelectionPlugin: { id: "selection" },
+    SearchPlugin: { id: "search" },
+    ZoomPlugin: { id: "zoom" },
+    ZoomMode: {
+      Automatic: "automatic",
+      FitPage: "fit-page",
+      FitWidth: "fit-width"
+    }
+  };
+});
 
 describe("App desktop open delivery", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(() => {
+    vi.restoreAllMocks();
     cleanup();
     localStorage.clear();
+    const selection = window.getSelection();
+    if (selection && typeof selection.removeAllRanges === "function") {
+      selection.removeAllRanges();
+    }
     tauriMocks.reset();
-    pdfMocks.getDocument.mockClear();
-    pdfMocks.modernGetDocument.mockClear();
-    pdfMocks.getTextContent.mockClear();
-    pdfMocks.resetTextContentItems();
-    pdfMocks.getViewport.mockClear();
+    embedPdfMocks.reset();
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
       writable: true,
@@ -384,59 +655,95 @@ describe("App desktop open delivery", () => {
     ).toHaveLength(1);
   });
 
-  it("loads desktop PDF metadata through Tauri for contents navigation", async () => {
+  it("lets EmbedPDF own PDF contents navigation after desktop metadata loads", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
 
     render(<App />);
 
-    expect(await screen.findByText("Intro")).toBeInTheDocument();
-    expect(screen.getByText("Later chapter")).toBeInTheDocument();
+    await waitForStartPdfReader();
     expect(tauriMocks.openPdfDocument).toHaveBeenCalledWith("/Users/mario/Books/start.pdf");
+    expect(screen.queryByRole("navigation", { name: "Document navigation" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Intro" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Later chapter" })).not.toBeInTheDocument();
+    const config = embedPdfMocks.PDFViewer.mock.calls.at(-1)?.[0].config;
+    expect(config.theme.light.accent.primary).toBe("#9b633f");
+    expect(config.disabledCategories).not.toContain("annotation");
+    expect(config.annotations.colorPresets).toContain("#ffe28a");
   });
 
-  it("loads PDF pages through the PDF.js legacy build for older WebViews", async () => {
+  it("lets EmbedPDF own duplicate PDF toolbar controls while SmartReader keeps marks and annotation transfer", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
 
     render(<App />);
 
-    await waitFor(() => {
-      expect(pdfMocks.getDocument).toHaveBeenCalled();
-    });
-    expect(pdfMocks.modernGetDocument).not.toHaveBeenCalled();
+    await waitForStartPdfReader();
+
+    expect(screen.queryByLabelText("Page or location")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Fit mode")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Find")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Annotation type")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add annotation" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bookmark" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export PDF annotations" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import PDF annotations" })).toBeInTheDocument();
   });
 
-  it("scrolls to a clicked PDF outline page after the location changes", async () => {
-    tauriMocks.setPendingPaths([]);
-    tauriMocks.setDesktopRuntime(false);
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-      callback(0);
-      return 0;
-    });
+  it("renders desktop PDF documents through EmbedPDF blob URLs", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    tauriMocks.readFileSource.mockResolvedValueOnce(new Uint8Array([37, 80, 68, 70]).buffer);
 
     render(<App />);
 
-    fireEvent.drop(screen.getByRole("main"), {
-      dataTransfer: {
-        files: [new File(["%PDF-1.7"], "local.pdf", { type: "application/pdf" })]
-      }
-    });
-
-    await screen.findByText("Intro");
-    fireEvent.click(screen.getByText("Later chapter"));
     await waitFor(() => {
-      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
+      expect(embedPdfMocks.PDFViewer).toHaveBeenCalled();
     });
+    expect(tauriMocks.readFileSource).toHaveBeenCalledWith({
+      kind: "desktop-path",
+      path: "/Users/mario/Books/start.pdf"
+    });
+    expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    const blob = (URL.createObjectURL as ReturnType<typeof vi.fn>).mock.calls[0][0] as Blob;
+    expect(blob.type).toBe("application/pdf");
+    expect(embedPdfMocks.PDFViewer.mock.calls.at(-1)?.[0].config.src).toBe("blob:smartreader-test");
+    await waitFor(() => {
+      expect(embedPdfMocks.scrollToPage).toHaveBeenCalledWith({
+        pageNumber: 1,
+        behavior: "instant"
+      });
+    });
+  });
 
-    (HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mockClear();
-    fireEvent.click(screen.getByText("Intro"));
+  it("does not render SmartReader PDF selection annotation UI when EmbedPDF owns annotations", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await waitForStartPdfReader();
+
+    expect(screen.queryByLabelText("Selection annotation quick menu")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Quick highlight annotation" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Native PDF selection")).not.toBeInTheDocument();
+    expect(embedPdfMocks.selectionCapability.onEndSelection).not.toHaveBeenCalled();
+    expect(embedPdfMocks.selectionCapability.getFormattedSelection).not.toHaveBeenCalled();
+    expect(embedPdfMocks.selectionCapability.getSelectedText).not.toHaveBeenCalled();
+  });
+
+  it("opens the EmbedPDF search surface from the reader find shortcut", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await waitForStartPdfReader();
+    fireEvent.keyDown(document, { key: "f", metaKey: true });
 
     await waitFor(() => {
-      expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+      expect(embedPdfMocks.searchCapability.startSearch).toHaveBeenCalledWith("smartreader-test-document");
+      expect(embedPdfMocks.searchCapability.setShowAllResults).toHaveBeenCalledWith(true, "smartreader-test-document");
     });
+    expect(screen.queryByLabelText("Find in document")).not.toBeInTheDocument();
   });
 
   it("updates the visible PDF page from scrolling without forcing a page snap", async () => {
-    const visiblePages = installVisiblePageObserver();
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       callback(0);
@@ -445,18 +752,16 @@ describe("App desktop open delivery", () => {
 
     render(<App />);
 
-    await screen.findByText("Intro");
-    (HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mockClear();
+    await waitForStartPdfReader();
+    await waitFor(() => expect(embedPdfMocks.scrollCapability.onPageChange).toHaveBeenCalled());
+    embedPdfMocks.scrollToPage.mockClear();
 
-    await waitFor(() => {
-      expect(visiblePages.has(2)).toBe(true);
+    act(() => {
+      embedPdfMocks.emitPageChange(2);
     });
-    visiblePages.show(2);
 
-    await waitFor(() => {
-      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
-    });
-    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+    await screen.findByText("Page 2");
+    expect(embedPdfMocks.scrollToPage).not.toHaveBeenCalled();
   });
 
   it("keeps explicit PDF next and previous shortcuts as hard page jumps", async () => {
@@ -468,23 +773,25 @@ describe("App desktop open delivery", () => {
 
     render(<App />);
 
-    await screen.findByText("Intro");
-    (HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mockClear();
+    await waitForStartPdfReader();
+    embedPdfMocks.scrollToPage.mockClear();
 
     fireEvent.keyDown(document, { key: "ArrowRight" });
 
-    await waitFor(() => {
-      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
+    await screen.findByText("Page 2");
+    expect(embedPdfMocks.scrollToPage).toHaveBeenCalledWith({
+      pageNumber: 2,
+      behavior: "instant"
     });
-    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
 
-    (HTMLElement.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>).mockClear();
+    embedPdfMocks.scrollToPage.mockClear();
     fireEvent.keyDown(document, { key: "ArrowLeft" });
 
-    await waitFor(() => {
-      expect(screen.getByLabelText("Page or location")).toHaveValue("1");
+    await screen.findByText("Page 1");
+    expect(embedPdfMocks.scrollToPage).toHaveBeenCalledWith({
+      pageNumber: 1,
+      behavior: "instant"
     });
-    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
   });
 
   it("zooms a PDF from a trackpad pinch wheel gesture and keeps zoom bounded", async () => {
@@ -497,17 +804,13 @@ describe("App desktop open delivery", () => {
     render(<App />);
 
     const reader = await screen.findByLabelText("start.pdf reader");
-    await waitFor(() => {
-      expect(pdfMocks.getViewport).toHaveBeenCalledWith({ scale: 1.35 });
-    });
+    await waitForStartPdfReader();
+    embedPdfMocks.requestZoom.mockClear();
 
     fireEvent.wheel(reader, { ctrlKey: true, deltaY: -120, clientX: 300, clientY: 240 });
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "110%" })).toBeInTheDocument();
-    });
-    await waitFor(() => {
-      expect(pdfMocks.getViewport).toHaveBeenCalledWith({ scale: 1.4850000000000003 });
+      expect(embedPdfMocks.requestZoom).toHaveBeenLastCalledWith(1.1);
     });
 
     for (let index = 0; index < 40; index += 1) {
@@ -515,7 +818,7 @@ describe("App desktop open delivery", () => {
     }
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "300%" })).toBeInTheDocument();
+      expect(embedPdfMocks.requestZoom).toHaveBeenLastCalledWith(3);
     });
 
     for (let index = 0; index < 80; index += 1) {
@@ -523,34 +826,29 @@ describe("App desktop open delivery", () => {
     }
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "50%" })).toBeInTheDocument();
+      expect(embedPdfMocks.requestZoom).toHaveBeenLastCalledWith(0.5);
     });
   });
 
-  it("reuses PDF text content for search overlays after zoom changes", async () => {
+  it("keeps EmbedPDF search state stable after pinch zoom changes", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
 
     render(<App />);
 
-    await screen.findByText("Intro");
-    fireEvent.click(screen.getByLabelText("Find"));
-    fireEvent.change(screen.getByLabelText("Find in document"), {
-      target: { value: "native" }
-    });
-    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+    await waitForStartPdfReader();
+    await act(async () => undefined);
+    const reader = screen.getByLabelText("start.pdf reader");
+    fireEvent.keyDown(document, { key: "f", metaKey: true });
+    await waitFor(() => expect(embedPdfMocks.searchCapability.startSearch).toHaveBeenCalledWith("smartreader-test-document"));
+    embedPdfMocks.searchAllPages.mockClear();
+
+    fireEvent.wheel(reader, { ctrlKey: true, deltaY: -120, clientX: 300, clientY: 240 });
 
     await waitFor(() => {
-      expect(pdfMocks.getTextContent).toHaveBeenCalledTimes(1);
-    });
-    pdfMocks.getTextContent.mockClear();
-
-    fireEvent.click(screen.getByLabelText("Zoom in"));
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "110%" })).toBeInTheDocument();
+      expect(embedPdfMocks.requestZoom).toHaveBeenLastCalledWith(1.1);
     });
     await act(async () => undefined);
-    expect(pdfMocks.getTextContent).not.toHaveBeenCalled();
+    expect(embedPdfMocks.searchAllPages).not.toHaveBeenCalled();
   });
 
   it("coalesces pinch wheel zoom updates until the next animation frame", async () => {
@@ -565,49 +863,27 @@ describe("App desktop open delivery", () => {
 
     const reader = await screen.findByLabelText("start.pdf reader");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "100%" })).toBeInTheDocument();
+      expect(embedPdfMocks.PDFViewer).toHaveBeenCalled();
     });
+    embedPdfMocks.requestZoom.mockClear();
 
     fireEvent.wheel(reader, { ctrlKey: true, deltaY: -120, clientX: 300, clientY: 240 });
     fireEvent.wheel(reader, { ctrlKey: true, deltaY: -120, clientX: 300, clientY: 240 });
 
-    expect(screen.getByRole("button", { name: "100%" })).toBeInTheDocument();
+    expect(embedPdfMocks.requestZoom).not.toHaveBeenCalled();
 
     await act(async () => {
       animationFrame?.(0);
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "120%" })).toBeInTheDocument();
+      expect(embedPdfMocks.requestZoom).toHaveBeenLastCalledWith(1.2);
     });
   });
 
-  it("cancels a stale PDF.js render task instead of showing a render failure", async () => {
+  it("renders browser-file PDFs through EmbedPDF without the legacy page renderer", async () => {
     tauriMocks.setDesktopRuntime(false);
     tauriMocks.setPendingPaths([]);
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-      callback(0);
-      return 0;
-    });
-    const firstRender = createControlledRenderTask();
-    const secondRender = createControlledRenderTask();
-    const pageRender = vi.fn()
-      .mockReturnValueOnce(firstRender.task)
-      .mockReturnValueOnce(secondRender.task);
-    pdfMocks.getDocument.mockImplementationOnce(() => ({
-      promise: Promise.resolve({
-        numPages: 1,
-        getOutline: vi.fn(async () => []),
-        getDestination: vi.fn(async () => null),
-        getPageIndex: pdfMocks.getPageIndex,
-        getPage: vi.fn(async () => ({
-          getViewport: pdfMocks.getViewport,
-          getTextContent: vi.fn(async () => ({ items: [] })),
-          render: pageRender
-        })),
-        destroy: vi.fn()
-      })
-    }));
 
     render(<App />);
 
@@ -617,115 +893,44 @@ describe("App desktop open delivery", () => {
       }
     });
 
-    const reader = await screen.findByLabelText("local.pdf reader");
     await waitFor(() => {
-      expect(pageRender).toHaveBeenCalledTimes(1);
+      expect(embedPdfMocks.PDFViewer).toHaveBeenCalled();
     });
-
-    fireEvent.wheel(reader, { ctrlKey: true, deltaY: -120, clientX: 300, clientY: 240 });
-
     await waitFor(() => {
-      expect(firstRender.cancel).toHaveBeenCalled();
+      expect(embedPdfMocks.scrollCapability.onPageChange).toHaveBeenCalled();
     });
-
-    await act(async () => {
-      firstRender.reject(Object.assign(new Error("stale render failed"), { name: "RenderingCancelledException" }));
-      secondRender.resolve();
+    act(() => {
+      embedPdfMocks.emitPageChange(2);
     });
-
+    await screen.findByText("Page 2");
     expect(screen.queryByText("Page render failed.")).not.toBeInTheDocument();
   });
 
-  it("separates outline expand toggles from title jumps and hides collapsed descendants", async () => {
-    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
-    tauriMocks.openPdfDocument.mockResolvedValueOnce({
-      id: "/Users/mario/Books/start.pdf",
-      pageCount: 4,
-      outline: [
-        { id: "outline-parent", title: "Getting Started", page: 1, level: 0 },
-        { id: "outline-child", title: "Install", page: 2, level: 1 },
-        { id: "outline-grandchild", title: "Verify", page: 3, level: 2 },
-        { id: "outline-next", title: "Reference", page: 4, level: 0 }
-      ]
-    });
+  it("keeps browser-file PDF search inside EmbedPDF instead of SmartReader search UI", async () => {
+    tauriMocks.setDesktopRuntime(false);
+    tauriMocks.setPendingPaths([]);
 
     render(<App />);
 
-    await screen.findByRole("button", { name: "Getting Started" });
-    expect(screen.getByRole("button", { name: "Install" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Collapse Getting Started" }));
-
-    expect(screen.queryByRole("button", { name: "Install" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Verify" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Page or location")).toHaveValue("1");
-
-    fireEvent.click(screen.getByRole("button", { name: "Expand Getting Started" }));
-    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+    fireEvent.drop(screen.getByRole("main"), {
+      dataTransfer: {
+        files: [new File(["%PDF-1.7"], "local.pdf", { type: "application/pdf" })]
+      }
+    });
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
+      expect(embedPdfMocks.PDFViewer).toHaveBeenCalled();
+      expect(embedPdfMocks.scrollCapability.onPageChange).toHaveBeenCalled();
     });
+    fireEvent.keyDown(document, { key: "f", metaKey: true });
+
+    await waitFor(() => {
+      expect(embedPdfMocks.searchCapability.startSearch).toHaveBeenCalledWith("smartreader-test-document");
+    });
+    expect(screen.queryByLabelText("Find in document")).not.toBeInTheDocument();
   });
 
-  it("does not carry collapsed outline state into another document with reused outline ids", async () => {
-    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
-    tauriMocks.openPdfDocument
-      .mockResolvedValueOnce({
-        id: "/Users/mario/Books/start.pdf",
-        pageCount: 3,
-        outline: [
-          { id: "shared-parent", title: "First Parent", page: 1, level: 0 },
-          { id: "shared-child", title: "First Child", page: 2, level: 1 }
-        ]
-      })
-      .mockResolvedValueOnce({
-        id: "/Users/mario/Books/second.pdf",
-        pageCount: 3,
-        outline: [
-          { id: "shared-parent", title: "Second Parent", page: 1, level: 0 },
-          { id: "shared-child", title: "Second Child", page: 2, level: 1 }
-        ]
-      });
-
-    render(<App />);
-
-    await screen.findByRole("button", { name: "First Parent" });
-    fireEvent.click(screen.getByRole("button", { name: "Collapse First Parent" }));
-    expect(screen.queryByRole("button", { name: "First Child" })).not.toBeInTheDocument();
-
-    await act(async () => {
-      tauriMocks.emitDesktopOpen("/Users/mario/Books/second.pdf");
-    });
-
-    await screen.findByRole("button", { name: "Second Parent" });
-    expect(screen.getByRole("button", { name: "Second Child" })).toBeInTheDocument();
-  });
-
-  it("keeps orphaned jumped-level outline rows visible when collapsing the previous row", async () => {
-    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
-    tauriMocks.openPdfDocument.mockResolvedValueOnce({
-      id: "/Users/mario/Books/start.pdf",
-      pageCount: 4,
-      outline: [
-        { id: "outline-parent", title: "Parent", page: 1, level: 0 },
-        { id: "outline-child", title: "Child", page: 2, level: 1 },
-        { id: "outline-orphan", title: "Jumped Orphan", page: 3, level: 3 },
-        { id: "outline-next", title: "Next Root", page: 4, level: 0 }
-      ]
-    });
-
-    render(<App />);
-
-    await screen.findByRole("button", { name: "Parent" });
-    fireEvent.click(screen.getByRole("button", { name: "Collapse Parent" }));
-
-    expect(screen.queryByRole("button", { name: "Child" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Jumped Orphan" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Next Root" })).toBeInTheDocument();
-  });
-
-  it("windows large outlines instead of rendering every visible row at once", async () => {
+  it("does not mount SmartReader PDF outline rows when EmbedPDF owns large outlines", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/large-outline.pdf"]);
     tauriMocks.openPdfDocument.mockResolvedValueOnce({
       id: "/Users/mario/Books/large-outline.pdf",
@@ -740,48 +945,33 @@ describe("App desktop open delivery", () => {
 
     render(<App />);
 
-    await screen.findByRole("button", { name: "Large Section 0" });
-    expect(screen.queryByRole("button", { name: "Large Section 9999" })).not.toBeInTheDocument();
-    expect(document.querySelectorAll(".sidebar-row").length).toBeLessThan(200);
-
-    const sidebarContent = document.querySelector(".sidebar-content");
-    expect(sidebarContent).toBeInstanceOf(HTMLElement);
-    Object.defineProperty(sidebarContent, "clientHeight", {
-      configurable: true,
-      value: 360
+    await screen.findByLabelText("large-outline.pdf reader");
+    await waitFor(() => {
+      expect(embedPdfMocks.PDFViewer).toHaveBeenCalled();
+      expect(tauriMocks.openPdfDocument).toHaveBeenCalledWith("/Users/mario/Books/large-outline.pdf");
     });
-    Object.defineProperty(sidebarContent, "scrollTop", {
-      configurable: true,
-      writable: true,
-      value: 330000
-    });
-
-    fireEvent.scroll(sidebarContent as HTMLElement);
-
-    await screen.findByRole("button", { name: "Large Section 9700" });
+    expect(screen.queryByRole("navigation", { name: "Document navigation" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Large Section 0" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Large Section 9999" })).not.toBeInTheDocument();
   });
 
   it("debounces cache persistence during visible page progress updates", async () => {
-    const visiblePages = installVisiblePageObserver();
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
 
     render(<App />);
 
-    await screen.findByText("Intro");
-    await waitFor(() => {
-      expect(visiblePages.has(2)).toBe(true);
-    });
+    await waitForStartPdfReader();
+    await waitFor(() => expect(embedPdfMocks.scrollCapability.onPageChange).toHaveBeenCalled());
 
     vi.useFakeTimers();
     try {
       tauriMocks.saveSmartReaderCache.mockClear();
 
       act(() => {
-        visiblePages.show(2);
+        embedPdfMocks.emitPageChange(2);
       });
 
-      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
+      expect(screen.getByText("Page 2")).toBeInTheDocument();
       expect(tauriMocks.saveSmartReaderCache).not.toHaveBeenCalled();
 
       await act(async () => {
@@ -794,39 +984,29 @@ describe("App desktop open delivery", () => {
     }
   });
 
-  it("searches desktop PDF content through Rust", async () => {
+  it("does not render SmartReader PDF search results when EmbedPDF owns search", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
 
     render(<App />);
 
-    await screen.findByText("Intro");
-    fireEvent.click(screen.getByLabelText("Find"));
-    fireEvent.change(screen.getByLabelText("Find in document"), {
-      target: { value: "native" }
-    });
-    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
-
-    await waitFor(() => {
-      expect(tauriMocks.searchPdfDocument).toHaveBeenCalledWith("/Users/mario/Books/start.pdf", "native");
-    });
-    expect(await screen.findByText("Native PDF result")).toBeInTheDocument();
+    await waitForStartPdfReader();
+    expect(screen.queryByRole("tab", { name: "Search" })).not.toBeInTheDocument();
+    expect(document.querySelector(".search-result-row")).not.toBeInTheDocument();
   });
 
-  it("uses experimental PDFKit rendering for desktop PDFs and falls back to PDF.js when rasterization fails", async () => {
+  it("keeps native PDFKit annotation copy separate from the EmbedPDF renderer", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
-    tauriMocks.renderPdfPageImage.mockRejectedValueOnce(new Error("pdfkit failed"));
 
     render(<App />);
 
-    await screen.findByText("Intro");
+    await waitForStartPdfReader();
     fireEvent.click(screen.getByLabelText("More"));
-    fireEvent.click(screen.getByLabelText("Enable experimental PDFKit renderer"));
+    fireEvent.click(screen.getByLabelText("Enable native PDFKit annotation copy"));
 
     await waitFor(() => {
-      expect(tauriMocks.renderPdfPageImage).toHaveBeenCalledWith("/Users/mario/Books/start.pdf", 1, expect.any(Number));
+      expect(embedPdfMocks.PDFViewer).toHaveBeenCalled();
     });
-    expect(await screen.findByText("PDFKit unavailable; using PDF.js.")).toBeInTheDocument();
-    expect(pdfMocks.getDocument).toHaveBeenCalled();
+    expect(embedPdfMocks.PDFViewer.mock.calls.at(-1)?.[0].config.src).toBe("blob:smartreader-test");
   });
 
   it("hydrates the last desktop session on startup", async () => {
@@ -836,7 +1016,7 @@ describe("App desktop open delivery", () => {
     render(<App />);
 
     expect(await screen.findByText("spec.pdf")).toBeInTheDocument();
-    expect(screen.getByLabelText("Page or location")).toHaveValue("9");
+    expect(screen.getByText("Page 9")).toBeInTheDocument();
   });
 
   it("keeps each tab reading progress while switching open documents", async () => {
@@ -856,18 +1036,16 @@ describe("App desktop open delivery", () => {
 
     await screen.findByText("spec.pdf");
     expect(screen.getByText("Page 9")).toBeInTheDocument();
-    expect(screen.getByLabelText("Page or location")).toHaveValue("9");
 
     await act(async () => {
       screen.getByText("guide.pdf").click();
     });
     expect(screen.getByText("Page 33")).toBeInTheDocument();
-    expect(screen.getByLabelText("Page or location")).toHaveValue("33");
 
     await act(async () => {
       screen.getByText("spec.pdf").click();
     });
-    expect(screen.getByLabelText("Page or location")).toHaveValue("9");
+    expect(screen.getByText("Page 9")).toBeInTheDocument();
   });
 
   it("focuses an already-open recent document instead of opening a duplicate tab", async () => {
@@ -875,7 +1053,7 @@ describe("App desktop open delivery", () => {
 
     render(<App />);
 
-    await screen.findByText("Intro");
+    await waitForStartPdfReader();
     fireEvent.click(screen.getByText("start.pdf"));
 
     await waitFor(() => {
@@ -900,7 +1078,7 @@ describe("App desktop open delivery", () => {
       expect(screen.getByLabelText("start.pdf reader")).toBeInTheDocument();
     });
     expect(screen.getAllByText("start.pdf")).toHaveLength(1);
-    expect(screen.getByLabelText("Page or location")).toHaveValue("1");
+    expect(screen.getByText("Page 1")).toBeInTheDocument();
   });
 
   it("restores a closed desktop recent document at its saved location", async () => {
@@ -931,9 +1109,7 @@ describe("App desktop open delivery", () => {
 
     fireEvent.click(await screen.findByText("spec.pdf"));
 
-    await waitFor(() => {
-      expect(screen.getByLabelText("Page or location")).toHaveValue("9");
-    });
+    await screen.findByText("Page 9");
     expect(screen.getByLabelText("spec.pdf reader")).toBeInTheDocument();
   });
 
@@ -946,143 +1122,77 @@ describe("App desktop open delivery", () => {
 
     render(<App />);
 
-    await screen.findByText("Intro");
-    fireEvent.click(screen.getByText("Later chapter"));
+    await waitForStartPdfReader();
+    fireEvent.keyDown(document, { key: "ArrowRight" });
 
-    await waitFor(() => {
-      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
-    });
+    await screen.findByText("Page 2");
 
     fireEvent.click(screen.getByLabelText("Back"));
 
-    await waitFor(() => {
-      expect(screen.getByLabelText("Page or location")).toHaveValue("1");
-    });
+    await screen.findByText("Page 1");
 
     fireEvent.click(screen.getByLabelText("Forward"));
 
-    await waitFor(() => {
-      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
-    });
+    await screen.findByText("Page 2");
   });
 
-  it("finds, cycles, highlights, and clears desktop PDF search matches", async () => {
+  it("starts EmbedPDF search from the PDF find command without SmartReader result panes", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
-    tauriMocks.searchPdfDocument.mockResolvedValueOnce([
-      { id: "pdf-search-1-4", label: "Page 1", snippet: "First native result", page: 1 },
-      { id: "pdf-search-2-4", label: "Page 2", snippet: "Second native result", page: 2 }
-    ]);
 
     render(<App />);
 
-    await screen.findByText("Intro");
-    fireEvent.click(screen.getByLabelText("Find"));
-    fireEvent.change(screen.getByLabelText("Find in document"), {
-      target: { value: "native" }
-    });
-    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
-
-    expect(await screen.findByText("1 / 2")).toBeInTheDocument();
-    expect(document.querySelector('[data-page-number="1"]')).toHaveAttribute("data-search-match", "current");
-    expect(document.querySelector('[data-page-number="2"]')).toHaveAttribute("data-search-match", "match");
-
-    fireEvent.click(screen.getByLabelText("Next result"));
+    await waitForStartPdfReader();
+    fireEvent.keyDown(document, { key: "f", metaKey: true });
 
     await waitFor(() => {
-      expect(screen.getByText("2 / 2")).toBeInTheDocument();
+      expect(embedPdfMocks.searchCapability.startSearch).toHaveBeenCalledWith("smartreader-test-document");
     });
-    expect(document.querySelector('[data-page-number="2"]')).toHaveAttribute("data-search-match", "current");
-
-    fireEvent.change(screen.getByLabelText("Find in document"), {
-      target: { value: "" }
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("0 / 0")).toBeInTheDocument();
-    });
-    expect(document.querySelector('[data-page-number="1"]')).not.toHaveAttribute("data-search-match");
-    expect(document.querySelector('[data-page-number="2"]')).not.toHaveAttribute("data-search-match");
+    expect(screen.queryByLabelText("Find in document")).not.toBeInTheDocument();
+    expect(document.querySelector(".search-result-row")).not.toBeInTheDocument();
   });
 
-  it("selects the clicked search result and marks it active before jumping", async () => {
+  it("keeps PDF search result navigation delegated to EmbedPDF", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
-    tauriMocks.searchPdfDocument.mockResolvedValueOnce([
-      { id: "pdf-search-1-4", label: "Page 1", snippet: "First native result", page: 1 },
-      { id: "pdf-search-2-4", label: "Page 2", snippet: "Second native result", page: 2 }
-    ]);
 
     render(<App />);
 
-    await screen.findByText("Intro");
-    fireEvent.click(screen.getByLabelText("Find"));
-    fireEvent.change(screen.getByLabelText("Find in document"), {
-      target: { value: "native" }
-    });
-    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
-
-    const secondResult = await screen.findByRole("button", { name: /Page 2, result 2: Second native result/ });
-    fireEvent.click(secondResult);
-
-    await waitFor(() => {
-      expect(screen.getByText("2 / 2")).toBeInTheDocument();
-    });
-    expect(screen.getByLabelText("Page or location")).toHaveValue("2");
-    expect(secondResult).toHaveAttribute("aria-current", "true");
+    await waitForStartPdfReader();
+    expect(screen.queryByRole("button", { name: /Page 2, result/ })).not.toBeInTheDocument();
+    expect(embedPdfMocks.searchCapability.goToResult).not.toHaveBeenCalled();
   });
 
-  it("renders PDF text-content search overlays instead of only highlighting the page frame", async () => {
+  it("delegates PDF find next and previous shortcuts to EmbedPDF", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
-    tauriMocks.searchPdfDocument.mockResolvedValueOnce([
-      { id: "pdf-search-1-4", label: "Page 1", snippet: "Native PDF result", page: 1 }
-    ]);
 
     render(<App />);
 
-    await screen.findByText("Intro");
-    fireEvent.click(screen.getByLabelText("Find"));
-    fireEvent.change(screen.getByLabelText("Find in document"), {
-      target: { value: "native" }
-    });
-    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+    await waitForStartPdfReader();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "g", metaKey: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "g", metaKey: true, shiftKey: true }));
 
-    expect(await screen.findByText("1 / 1")).toBeInTheDocument();
-    await waitFor(() => {
-      expect(document.querySelector(".pdf-search-highlight")).toBeInTheDocument();
-    });
-
-    fireEvent.change(screen.getByLabelText("Find in document"), {
-      target: { value: "" }
-    });
-
-    await waitFor(() => {
-      expect(document.querySelector(".pdf-search-highlight")).not.toBeInTheDocument();
-    });
+    expect(embedPdfMocks.searchCapability.nextResult).toHaveBeenCalledWith("smartreader-test-document");
+    expect(embedPdfMocks.searchCapability.previousResult).toHaveBeenCalledWith("smartreader-test-document");
+    expect(screen.queryByText("No results")).not.toBeInTheDocument();
   });
 
-  it("renders PDF search overlays for phrase matches split across text items", async () => {
+  it("delegates PDF search highlighting to EmbedPDF instead of SmartReader page overlays", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
-    tauriMocks.searchPdfDocument.mockResolvedValueOnce([
-      { id: "pdf-search-1-4", label: "Page 1", snippet: "Native PDF result", page: 1 }
-    ]);
-    pdfMocks.setTextContentItems([
-      { str: "Native", transform: [1, 0, 0, 1, 72, 760], width: 44, height: 14 },
-      { str: "PDF", transform: [1, 0, 0, 1, 120, 760], width: 28, height: 14 },
-      { str: "result", transform: [1, 0, 0, 1, 152, 760], width: 42, height: 14 }
-    ]);
 
     render(<App />);
 
-    await screen.findByText("Intro");
-    fireEvent.click(screen.getByLabelText("Find"));
-    fireEvent.change(screen.getByLabelText("Find in document"), {
-      target: { value: "native pdf" }
-    });
-    fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
+    await waitForStartPdfReader();
+    expect(screen.getByTestId("embedpdf-viewer")).toBeInTheDocument();
+    expect(document.querySelector(".pdf-search-highlight")).not.toBeInTheDocument();
+  });
 
-    expect(await screen.findByText("1 / 1")).toBeInTheDocument();
-    await waitFor(() => {
-      expect(document.querySelectorAll(".pdf-search-highlight")).toHaveLength(2);
-    });
+  it("does not rebuild legacy text overlays for PDF search", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await waitForStartPdfReader();
+    expect(screen.queryByLabelText("Find in document")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-smartreader-pdf-text-layer]")).not.toBeInTheDocument();
   });
 
   it("marks the active bookmark row and toolbar state for the current PDF page", async () => {
@@ -1090,16 +1200,16 @@ describe("App desktop open delivery", () => {
 
     render(<App />);
 
-    await screen.findByText("Intro");
+    await waitForStartPdfReader();
     fireEvent.click(screen.getByLabelText("Bookmark"));
-    fireEvent.click(screen.getByRole("tab", { name: "Marks" }));
 
     const pageOneMark = await screen.findByRole("button", { name: "Page 1" });
     expect(pageOneMark).toHaveAttribute("aria-current", "true");
     expect(screen.getByLabelText("Bookmark")).toHaveAttribute("aria-pressed", "true");
 
-    fireEvent.click(screen.getByRole("tab", { name: "Contents" }));
-    fireEvent.click(screen.getByText("Later chapter"));
+    act(() => {
+      embedPdfMocks.emitPageChange(2);
+    });
 
     await waitFor(() => {
       expect(screen.getByLabelText("Bookmark")).toHaveAttribute("aria-pressed", "false");
@@ -1185,24 +1295,38 @@ describe("App desktop open delivery", () => {
     expect(screen.getByRole("button", { name: "Deep Anchor" }).closest(".sidebar-row")).toHaveClass("active");
   });
 
-  it("creates, exports, filters, globally hides, globally shows, confirms delete, and persists PDF annotations from the front end", async () => {
+  it("uses EmbedPDF native annotation UI instead of the front-end PDF annotation bar", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
 
     render(<App />);
 
-    await screen.findByText("Intro");
-    fireEvent.change(screen.getByLabelText("Annotation note"), {
-      target: { value: "Important result" }
+    await waitForStartPdfReader();
+    expect(screen.queryByLabelText("Annotation type")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add annotation" })).not.toBeInTheDocument();
+    expect(embedPdfMocks.PDFViewer.mock.calls.at(-1)?.[0].config.annotations).toMatchObject({
+      autoCommit: true,
+      annotationAuthor: "SmartReader"
     });
-    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Annotations" }));
+    expect(screen.queryByText("Important result")).not.toBeInTheDocument();
+  });
 
-    expect(await screen.findByText("Important result")).toBeInTheDocument();
-    expect(document.querySelector(".pdf-annotation-marker")).toBeInTheDocument();
-    expect(localStorage.getItem("smartreader.appSession.v1")).toContain("\"annotations\":[");
+  it("exports and imports native PDF annotations through the EmbedPDF annotation scope", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    embedPdfMocks.annotationScope.exportAnnotations.mockReturnValueOnce({
+      toPromise: vi.fn(async () => [{ annotation: { id: "native-annotation-1" } }])
+    });
 
-    fireEvent.click(screen.getByRole("button", { name: "Export annotations" }));
-    expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    render(<App />);
+
+    await waitForStartPdfReader();
+    await waitFor(() => {
+      expect(embedPdfMocks.annotationCapability.forDocument).toHaveBeenCalledWith("smartreader-test-document");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Export PDF annotations" }));
+
+    await waitFor(() => {
+      expect(embedPdfMocks.annotationScope.exportAnnotations).toHaveBeenCalled();
+    });
     const exportedBlob = vi.mocked(URL.createObjectURL).mock.calls.at(-1)?.[0] as Blob;
     const exportedText = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -1210,44 +1334,1258 @@ describe("App desktop open delivery", () => {
       reader.onerror = () => reject(reader.error);
       reader.readAsText(exportedBlob);
     });
-    expect(exportedText).toContain("# start.pdf annotations");
-    expect(exportedText).toContain("- Document: start.pdf");
-    expect(exportedText).toContain("- Location: 1 / 2");
-    expect(exportedText).toContain("- Type: Highlight");
-    expect(exportedText).toContain("- Tag: 重点");
-    expect(exportedText).toContain("- Color: #ffe28a");
-    expect(exportedText).toContain("- Thickness: 2");
-    expect(exportedText).toContain("- Note: Important result");
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:smartreader-test");
-
-    fireEvent.click(screen.getByRole("button", { name: "Hide all annotations" }));
-    expect(document.querySelector(".pdf-annotation-marker")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Show all annotations" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Show all annotations" }));
-    expect(document.querySelector(".pdf-annotation-marker")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Hide all annotations" })).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("Annotation tag filter"), {
-      target: { value: "重点" }
+    expect(exportedText).toContain("\"schemaVersion\": 1");
+    expect(exportedText).toContain("native-annotation-1");
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].nativePdfAnnotations?.annotations).toEqual([
+        { annotation: { id: "native-annotation-1" } }
+      ]);
     });
-    expect(screen.getByText("Important result")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Annotation tag filter"), {
-      target: { value: "疑问" }
+    const importPayload = {
+      annotations: [{ annotation: { id: "native-annotation-2" } }]
+    };
+    fireEvent.change(screen.getByLabelText("Import PDF annotations file"), {
+      target: {
+        files: [new File([JSON.stringify(importPayload)], "annotations.json", { type: "application/json" })]
+      }
     });
-    expect(screen.queryByText("Important result")).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Annotation tag filter"), {
-      target: { value: "all" }
+    await waitFor(() => {
+      expect(embedPdfMocks.annotationScope.importAnnotations).toHaveBeenCalledWith(importPayload.annotations);
     });
-    fireEvent.click(screen.getByRole("button", { name: "Hide annotation Important result" }));
-    expect(document.querySelector(".pdf-annotation-marker")).not.toBeInTheDocument();
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].nativePdfAnnotations?.annotations).toEqual(importPayload.annotations);
+    });
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete annotation Important result" }));
-    expect(screen.getByText("Important result")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm delete annotation Important result" }));
-    expect(screen.queryByText("Important result")).not.toBeInTheDocument();
+  it("restores and persists native PDF annotations through EmbedPDF", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("native-pdf-annotation-restore", 1);
+    const persistedAnnotations = [{ annotation: { id: "native-restored-1" } }];
+    snapshot.sessions[0].nativePdfAnnotations = {
+      schemaVersion: 1,
+      annotations: persistedAnnotations,
+      updatedAt: 1
+    };
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+    embedPdfMocks.annotationScope.exportAnnotations.mockReturnValue({
+      toPromise: vi.fn(async () => [{ annotation: { id: "native-created-1" } }])
+    });
+
+    render(<App />);
+
+    await waitForStartPdfReader("spec.pdf reader");
+    await waitFor(() => {
+      expect(embedPdfMocks.annotationScope.importAnnotations).toHaveBeenCalledWith(persistedAnnotations);
+    });
+
+    embedPdfMocks.emitAnnotationEvent();
+
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].nativePdfAnnotations?.annotations).toEqual([
+        { annotation: { id: "native-created-1" } }
+      ]);
+    });
+  });
+
+  it("reimports native PDF annotations when an imported cache updates a live PDF viewer", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    (tauriMocks.openCacheImportDialog as unknown as { mockResolvedValue: (value: string) => void }).mockResolvedValue(
+      "/Users/mario/Downloads/native-pdf-cache.json"
+    );
+    const importedAnnotations = [{ annotation: { id: "native-imported-live" } }];
+    const importedTab = createSnapshotSession("desktop-1", "/Users/mario/Books/start.pdf", 1);
+    importedTab.nativePdfAnnotations = {
+      schemaVersion: 1,
+      annotations: importedAnnotations,
+      updatedAt: 4
+    };
+    tauriMocks.setCacheImportResult({
+      schemaVersion: 1,
+      appVersion: "0.1.0",
+      savedAt: "2026-05-23T00:00:00.000Z",
+      settings: createSnapshot("desktop-1", 1).preferences,
+      recentFiles: [],
+      readingProgress: [],
+      session: {
+        activeTabId: "desktop-1",
+        sidebarOpen: true,
+        tabs: [importedTab]
+      },
+      adapterCache: { searchIndexes: [] }
+    });
+
+    render(<App />);
+
+    await waitForStartPdfReader();
+    await waitFor(() => {
+      expect(embedPdfMocks.annotationCapability.forDocument).toHaveBeenCalledWith("smartreader-test-document");
+    });
+    embedPdfMocks.annotationScope.importAnnotations.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Import" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Apply Imported Cache" }));
+
+    await waitFor(() => {
+      expect(embedPdfMocks.annotationScope.importAnnotations).toHaveBeenCalledWith(importedAnnotations);
+    });
+  });
+
+  it("does not add a SmartReader quick annotation menu over EmbedPDF text selections", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await waitForStartPdfReader();
+
+    expect(screen.queryByRole("button", { name: "Quick note annotation" })).not.toBeInTheDocument();
+    expect(embedPdfMocks.annotationScope.setActiveTool).not.toHaveBeenCalledWith(
+      "textComment",
+      expect.anything()
+    );
+    expect(screen.queryByText("Native PDF result")).not.toBeInTheDocument();
+  });
+
+  it("keeps SmartReader PDF quick annotation UI disabled after the outer mouseup event", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await waitForStartPdfReader();
+    const reader = screen.getByLabelText("start.pdf reader");
+    fireEvent.mouseUp(reader);
+
+    expect(screen.queryByRole("button", { name: "Quick note annotation" })).not.toBeInTheDocument();
+  });
+
+  it("enables selectable PDF text through the EmbedPDF selection plugin", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await waitForStartPdfReader();
+    expect(embedPdfMocks.PDFViewer.mock.calls.at(-1)?.[0].config.selection).toMatchObject({
+      menuHeight: 48,
+      marquee: { enabled: true }
+    });
+    expect(embedPdfMocks.selectionCapability.onSelectionChange).not.toHaveBeenCalled();
+    expect(embedPdfMocks.selectionCapability.onEndSelection).not.toHaveBeenCalled();
+  });
+
+  it("keeps PDF text selectable when the WebView lacks Promise.withResolvers", async () => {
+    const promiseConstructor = Promise as PromiseConstructor & {
+      withResolvers?: () => { promise: Promise<unknown>; resolve: (value?: unknown) => void; reject: (error?: unknown) => void };
+    };
+    const originalWithResolvers = promiseConstructor.withResolvers;
+    Object.defineProperty(Promise, "withResolvers", {
+      configurable: true,
+      writable: true,
+      value: undefined
+    });
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    try {
+      render(<App />);
+
+      await waitForStartPdfReader();
+      expect(embedPdfMocks.PDFViewer.mock.calls.at(-1)?.[0].config.selection).toMatchObject({
+        marquee: { enabled: true }
+      });
+      expect(screen.queryByText("This PDF page has no selectable text. Use Area annotation instead.")).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(Promise, "withResolvers", {
+        configurable: true,
+        writable: true,
+        value: originalWithResolvers
+      });
+    }
+  });
+
+  it.each(["note", "highlight", "underline", "strike"] as const)(
+    "sends PDFKit text selection rects for %s annotations",
+    async (annotationType) => {
+      tauriMocks.setPendingPaths([]);
+      const snapshot = createSnapshot("pdfkit-text-selection", 1);
+      snapshot.preferences.pdfKit.enabled = true;
+      localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+      render(<App />);
+
+      await selectEmbedPdfText({ text: ["Native PDF result"] });
+
+      if (annotationType === "note" || annotationType === "highlight" || annotationType === "underline") {
+        fireEvent.click(await screen.findByRole("button", { name: `Quick ${annotationType} annotation` }));
+      } else {
+        fireEvent.change(screen.getByLabelText("Annotation type"), {
+          target: { value: annotationType }
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
+      }
+
+      await waitFor(() => {
+        const request = tauriMocks.syncPdfKitAnnotations.mock.calls.at(-1)?.[0];
+        expect(request?.annotations[0]).toMatchObject({
+          operation: "upsert",
+          page: 1,
+          kind: annotationType,
+          rects: [
+            {
+              x: 80,
+              y: 756,
+              width: 180,
+              height: 24
+            }
+          ]
+        });
+      });
+
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].annotations[0].area).toMatchObject({
+        page: 1,
+        left: 80,
+        top: 120,
+        width: 180,
+        height: 24,
+        viewportHeight: 900,
+        viewportScale: 1
+      });
+      expect(stored.sessions[0].annotations[0].rects).toEqual([
+        expect.objectContaining({
+          left: 80,
+          top: 120,
+          width: 180,
+          height: 24
+        })
+      ]);
+    }
+  );
+
+  it("sends all PDFKit rects for a multi-rect text selection", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("pdfkit-multi-rect", 1);
+    snapshot.preferences.pdfKit.enabled = true;
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    await selectEmbedPdfText({
+      text: ["Native PDF result"],
+      selection: [
+        {
+          pageIndex: 0,
+          rect: { origin: { x: 80, y: 120 }, size: { width: 180, height: 54 } },
+          segmentRects: [
+            { origin: { x: 80, y: 120 }, size: { width: 180, height: 24 } },
+            { origin: { x: 80, y: 150 }, size: { width: 140, height: 24 } }
+          ]
+        }
+      ]
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Quick highlight annotation" }));
+
+    await waitFor(() => {
+      const request = tauriMocks.syncPdfKitAnnotations.mock.calls.at(-1)?.[0];
+      expect(request?.annotations[0]).toMatchObject({
+        kind: "highlight",
+        rects: [
+          { x: 80, y: 756, width: 180, height: 24 },
+          { x: 80, y: 726, width: 140, height: 24 }
+        ]
+      });
+    });
+  });
+
+  it("does not offer PDF text annotation for a selection spanning two pages", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("pdfkit-cross-page-selection", 1);
+    snapshot.preferences.pdfKit.enabled = true;
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    await selectEmbedPdfText({
+      text: ["Native PDF result", "Native PDF result"],
+      selection: [
+        {
+          pageIndex: 0,
+          rect: { origin: { x: 80, y: 120 }, size: { width: 180, height: 24 } },
+          segmentRects: [
+            { origin: { x: 80, y: 120 }, size: { width: 180, height: 24 } }
+          ]
+        },
+        {
+          pageIndex: 1,
+          rect: { origin: { x: 80, y: 120 }, size: { width: 180, height: 24 } },
+          segmentRects: [
+            { origin: { x: 80, y: 120 }, size: { width: 180, height: 24 } }
+          ]
+        }
+      ]
+    });
+
+    expect(screen.queryByRole("toolbar", { name: "Selection annotation quick menu" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Quick highlight annotation" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the default PDF selection quick menu disabled when the next selection is empty", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await waitForStartPdfReader();
+    expect(screen.queryByRole("toolbar", { name: "Selection annotation quick menu" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      embedPdfMocks.emitSelectionChange(null);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("toolbar", { name: "Selection annotation quick menu" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("does not create the PDF selection quick menu for a collapsed text range", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await waitForStartPdfReader();
+    embedPdfMocks.setFormattedSelection([]);
+
+    await act(async () => {
+      embedPdfMocks.emitSelectionChange();
+      embedPdfMocks.emitEndSelection();
+    });
+
+    expect(screen.queryByRole("toolbar", { name: "Selection annotation quick menu" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the selected annotation while editing name, note, type, and note font settings", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("pdf-annotations", 1);
+    snapshot.sessions[0].sidebarMode = "annotations";
+    snapshot.sessions[0].annotations = [
+      {
+        id: "annotation-1",
+        type: "area",
+        tag: "重点",
+        color: "#ffe28a",
+        thickness: 2,
+        location: { kind: "page", page: 1 },
+        area: {
+          page: 1,
+          left: 80,
+          top: 120,
+          width: 180,
+          height: 24,
+          viewportWidth: 700,
+          viewportHeight: 900,
+          viewportScale: 1
+        },
+        note: "Original note",
+        hidden: false,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ];
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    fireEvent.click((await screen.findByText("Original note")).closest("button")!);
+    fireEvent.change(await screen.findByLabelText("Annotation name"), {
+      target: { value: "   " }
+    });
+    fireEvent.blur(screen.getByLabelText("Annotation name"));
+    expect(screen.getByLabelText("Annotation name")).toHaveValue("Original note");
+
+    fireEvent.change(screen.getByLabelText("Annotation name"), {
+      target: { value: "  Renamed annotation  " }
+    });
+    fireEvent.blur(screen.getByLabelText("Annotation name"));
+    fireEvent.change(screen.getByLabelText("Selected annotation note"), {
+      target: { value: "Edited note" }
+    });
+    fireEvent.change(screen.getByLabelText("Selected annotation type"), {
+      target: { value: "wavy" }
+    });
+    fireEvent.change(screen.getByLabelText("Selected annotation note font size"), {
+      target: { value: "18" }
+    });
+
+    expect(screen.getByLabelText("Annotation name")).toHaveValue("Renamed annotation");
+    expect(screen.getByLabelText("Selected annotation note")).toHaveValue("Edited note");
+    expect(screen.getByText("Renamed annotation").closest(".annotation-row")).toHaveClass("active");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel annotation selection" }));
+    expect(screen.queryByLabelText("Selected annotation note")).not.toBeInTheDocument();
+
+    const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+    expect(stored.sessions[0].annotations[0]).toMatchObject({
+      name: "Renamed annotation",
+      note: "Edited note",
+      type: "wavy",
+      noteFontSize: 18
+    });
+  });
+
+  it("renames marks and resizes the desktop sidebar with keyboard and double-click reset", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("marks-rename", 1);
+    snapshot.sessions[0].sidebarMode = "bookmarks";
+    snapshot.sessions[0].bookmarks = [
+      {
+        id: "bookmark-1",
+        title: "Page 1",
+        location: { kind: "page" as const, page: 1 },
+        createdAt: 1
+      }
+    ];
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    const renameInput = await screen.findByLabelText("Rename mark Page 1");
+    fireEvent.change(renameInput, { target: { value: "  Important mark  " } });
+    fireEvent.blur(renameInput);
+    expect(await screen.findByLabelText("Rename mark Important mark")).toHaveValue("Important mark");
+
+    const resizeHandle = screen.getByRole("separator", { name: "Resize sidebar" });
+    fireEvent.keyDown(resizeHandle, { key: "ArrowRight" });
+    let workspace = document.querySelector<HTMLElement>(".reader-workspace");
+    expect(workspace?.style.getPropertyValue("--sidebar-width")).toBe("270px");
+    expect(workspace?.style.gridTemplateColumns).toBe("");
+    expect(workspace?.children).toHaveLength(3);
+    expect(workspace?.children[0]).toHaveClass("reader-sidebar");
+    expect(workspace?.children[1]).toHaveClass("sidebar-resize-handle");
+    expect(workspace?.children[2]).toHaveClass("reader-viewport");
+    fireEvent.doubleClick(resizeHandle);
+    expect(document.querySelector<HTMLElement>(".reader-workspace")?.style.getPropertyValue("--sidebar-width")).toBe("260px");
+    expect(document.querySelector<HTMLElement>(".reader-workspace")?.style.gridTemplateColumns).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle sidebar" }));
+    workspace = document.querySelector<HTMLElement>(".reader-workspace");
+    expect(workspace).not.toHaveClass("with-sidebar");
+    expect(workspace?.style.gridTemplateColumns).toBe("");
+    expect(workspace?.style.getPropertyValue("--sidebar-width")).toBe("");
+    expect(workspace?.children).toHaveLength(1);
+  });
+
+  it("keeps PDF annotation viewport metadata when sanitizing imported cache data", () => {
+    const snapshot = createSnapshot("cache-area", 1);
+    snapshot.sessions[0].annotations = [
+      {
+        id: "annotation-area",
+        type: "area",
+        tag: "重点",
+        color: "#ffe28a",
+        thickness: 2,
+        location: { kind: "page", page: 1 },
+        area: {
+          page: 1,
+          left: 24,
+          top: 24,
+          width: 180,
+          height: 48,
+          viewportHeight: 900,
+          viewportScale: 1.25
+        },
+        createdAt: 1,
+        updatedAt: 1
+      },
+      {
+        id: "annotation-invalid-area",
+        type: "area",
+        tag: "重点",
+        color: "#ffe28a",
+        thickness: 2,
+        location: { kind: "page", page: 1 },
+        area: {
+          page: 1,
+          left: 24,
+          top: 24,
+          width: 180,
+          height: 48,
+          viewportHeight: -1,
+          viewportScale: Number.POSITIVE_INFINITY
+        },
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ];
+
+    const cache = validateSmartReaderCacheEnvelope({
+      schemaVersion: 1,
+      savedAt: "2026-05-26T00:00:00.000Z",
+      settings: snapshot.preferences,
+      recentFiles: [],
+      readingProgress: [],
+      session: {
+        activeTabId: snapshot.activeTabId,
+        sidebarOpen: snapshot.sidebarOpen,
+        tabs: snapshot.sessions
+      },
+      adapterCache: { searchIndexes: [] }
+    });
+
+    expect(cache?.session.tabs[0].annotations[0].area).toMatchObject({
+      viewportHeight: 900,
+      viewportScale: 1.25
+    });
+    expect(cache?.session.tabs[0].annotations[1].area).not.toHaveProperty("viewportHeight");
+    expect(cache?.session.tabs[0].annotations[1].area).not.toHaveProperty("viewportScale");
+  });
+
+  it("does not activate SmartReader square annotation tools from default PDF selection context", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await waitForStartPdfReader();
+
+    expect(embedPdfMocks.annotationScope.setActiveTool).not.toHaveBeenCalledWith("square", expect.anything());
+    expect(screen.queryByRole("button", { name: "Add annotation" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Area annotation")).not.toBeInTheDocument();
+  });
+
+  it("persists desktop PDFKit area annotations through the sync bridge", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("pdfkit-annotations", 1);
+    snapshot.preferences.pdfKit.enabled = true;
+    snapshot.sessions[0].zoom = 1.1;
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    await addEmbedPdfAreaAnnotation();
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledWith({
+        path: "/Users/mario/Books/spec.pdf",
+        managedCopyPath: undefined,
+        writeMode: "copy",
+        annotations: [
+          expect.objectContaining({
+            operation: "upsert",
+            page: 1,
+            kind: "area",
+            color: "#ffe28a",
+            thickness: 2,
+            rects: [
+              {
+                x: 80,
+                y: 756,
+                width: 180,
+                height: 24
+              }
+            ]
+          })
+        ]
+      });
+    });
+
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].annotations[0].nativePdfKit).toMatchObject({
+        status: "upserted",
+        nativeId: expect.stringMatching(/^smartreader:/)
+      });
+      expect(stored.sessions[0].annotations[0].nativePdfKit).not.toHaveProperty("managedCopyPath");
+    });
+
+    await addEmbedPdfAreaAnnotation();
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(2);
+      expect(tauriMocks.syncPdfKitAnnotations.mock.calls[1]?.[0]).toMatchObject({
+        path: "/Users/mario/Books/spec.pdf",
+        managedCopyPath: "/tmp/smartreader-pdfkit-managed.pdf",
+        writeMode: "copy"
+      });
+    });
+  });
+
+  it("marks toolbar PDFKit annotations without viewport geometry unsupported", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("pdfkit-missing-geometry", 1);
+    snapshot.preferences.pdfKit.enabled = true;
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    await waitForStartPdfReader("spec.pdf reader");
+    fireEvent.change(screen.getByLabelText("Annotation type"), {
+      target: { value: "area" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Annotations" }));
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).not.toHaveBeenCalled();
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].annotations[0].nativePdfKit).toMatchObject({
+        supported: false,
+        status: "unsupported-native-geometry",
+        reason: "unsupported-native-geometry"
+      });
+    });
+    expect(screen.getByText("Native PDFKit: unsupported-native-geometry")).toBeInTheDocument();
+  });
+
+  it("serializes quick PDFKit annotation syncs per document and reuses the returned managed copy", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("pdfkit-serialized", 1);
+    snapshot.preferences.pdfKit.enabled = true;
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+    let resolveFirstSync: (() => void) | undefined;
+
+    tauriMocks.syncPdfKitAnnotations.mockImplementationOnce((request) =>
+      new Promise((resolve) => {
+        resolveFirstSync = () => {
+          resolve({
+            supported: true,
+            status: "synced",
+            sourcePath: request.path,
+            managedCopyPath: "/tmp/smartreader-pdfkit-managed-first.pdf",
+            annotations: request.annotations.map((annotation) => ({
+              id: annotation.id,
+              status: "upserted",
+              page: annotation.page,
+              kind: annotation.kind,
+              nativeId: `smartreader:${annotation.id}`,
+              reason: undefined
+            }))
+          });
+        };
+      })
+    );
+
+    render(<App />);
+
+    await addEmbedPdfAreaAnnotation();
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(1);
+    });
+
+    await addEmbedPdfAreaAnnotation();
+    expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveFirstSync?.();
+    });
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(2);
+      expect(tauriMocks.syncPdfKitAnnotations.mock.calls[1]?.[0]).toMatchObject({
+        path: "/Users/mario/Books/spec.pdf",
+        managedCopyPath: "/tmp/smartreader-pdfkit-managed-first.pdf",
+        writeMode: "copy",
+        annotations: [
+          expect.objectContaining({
+            operation: "upsert",
+            kind: "area"
+          })
+        ]
+      });
+    });
+  });
+
+  it("syncs PDFKit annotation edits and deletes without duplicate request items", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("pdfkit-edit", 1);
+    snapshot.preferences.pdfKit.enabled = true;
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    await addEmbedPdfAreaAnnotation();
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.change(screen.getByLabelText("Selected annotation color"), {
+      target: { value: "#9ed7ff" }
+    });
+    fireEvent.change(screen.getByLabelText("Selected annotation thickness"), {
+      target: { value: "4" }
+    });
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(3);
+    });
+
+    const editRequest = tauriMocks.syncPdfKitAnnotations.mock.calls.at(-1)?.[0];
+    if (!editRequest) {
+      throw new Error("Missing PDFKit edit sync request");
+    }
+    expect(editRequest.annotations).toHaveLength(1);
+    expect(editRequest.annotations[0]).toMatchObject({
+      operation: "upsert",
+      kind: "area",
+      color: "#9ed7ff",
+      thickness: 4
+    });
+    expect(editRequest.managedCopyPath).toBe("/tmp/smartreader-pdfkit-managed.pdf");
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete selected annotation" }));
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(4);
+    });
+
+    const deleteRequest = tauriMocks.syncPdfKitAnnotations.mock.calls.at(-1)?.[0];
+    if (!deleteRequest) {
+      throw new Error("Missing PDFKit delete sync request");
+    }
+    expect(deleteRequest.annotations).toEqual([
+      expect.objectContaining({
+        operation: "delete",
+        kind: "area"
+      })
+    ]);
+  });
+
+  it("syncs hidden PDFKit annotations as native deletes and restores them as upserts", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("pdfkit-hidden", 1);
+    snapshot.preferences.pdfKit.enabled = true;
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    await addEmbedPdfAreaAnnotation();
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByLabelText("Visible"));
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(2);
+    });
+    expect(tauriMocks.syncPdfKitAnnotations.mock.calls.at(-1)?.[0].annotations).toEqual([
+      expect.objectContaining({
+        operation: "delete",
+        kind: "area"
+      })
+    ]);
+
+    fireEvent.click(screen.getByLabelText("Visible"));
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(3);
+    });
+    expect(tauriMocks.syncPdfKitAnnotations.mock.calls.at(-1)?.[0].annotations).toEqual([
+      expect.objectContaining({
+        operation: "upsert",
+        kind: "area"
+      })
+    ]);
+  });
+
+  it.each(["wavy", "red-text"] as const)(
+    "deletes stale native PDFKit annotation before marking %s unsupported",
+    async (unsupportedType) => {
+      tauriMocks.setPendingPaths([]);
+      const snapshot = createSnapshot("pdfkit-unsupported", 1);
+      snapshot.preferences.pdfKit.enabled = true;
+      localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+      render(<App />);
+
+      await addEmbedPdfAreaAnnotation();
+
+      await waitFor(() => {
+        expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(1);
+      });
+
+      fireEvent.change(screen.getByLabelText("Selected annotation type"), {
+        target: { value: unsupportedType }
+      });
+
+      await waitFor(() => {
+        expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(2);
+        expect(tauriMocks.syncPdfKitAnnotations.mock.calls[1]?.[0]).toMatchObject({
+          path: "/Users/mario/Books/spec.pdf",
+          managedCopyPath: "/tmp/smartreader-pdfkit-managed.pdf",
+          writeMode: "copy",
+          annotations: [
+            expect.objectContaining({
+              operation: "delete",
+              kind: "area"
+            })
+          ]
+        });
+        const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+        expect(stored.sessions[0].annotations[0].nativePdfKit).toMatchObject({
+          supported: false,
+          status: "unsupported-native-mapping",
+          reason: "unsupported-native-mapping"
+        });
+        expect(stored.sessions[0].annotations[0].nativePdfKit).not.toHaveProperty("nativeId");
+        expect(stored.sessions[0].annotations[0].nativePdfKit).not.toHaveProperty("managedCopyPath");
+      });
+      expect(screen.getByText("Native PDFKit: unsupported-native-mapping")).toBeInTheDocument();
+    }
+  );
+
+  it.each(["wavy", "red-text"] as const)(
+    "keeps PDF text selection annotations unsupported for %s without native sync",
+    async (unsupportedType) => {
+      tauriMocks.setPendingPaths([]);
+      const snapshot = createSnapshot("pdfkit-text-unsupported", 1);
+      snapshot.preferences.pdfKit.enabled = true;
+      localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+      render(<App />);
+
+      await selectEmbedPdfText({ text: ["Native PDF result"] });
+      fireEvent.change(screen.getByLabelText("Annotation type"), {
+        target: { value: unsupportedType }
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
+
+      await waitFor(() => {
+        expect(tauriMocks.syncPdfKitAnnotations).not.toHaveBeenCalled();
+        const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+        expect(stored.sessions[0].annotations[0].nativePdfKit).toMatchObject({
+          supported: false,
+          status: "unsupported-native-mapping",
+          reason: "unsupported-native-mapping"
+        });
+      });
+    }
+  );
+
+  it("marks failed PDFKit syncs dirty and retries them after reopen with native-managed copy recompute", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("pdfkit-retry", 1);
+    snapshot.preferences.pdfKit.enabled = true;
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    const view = render(<App />);
+
+    await addEmbedPdfAreaAnnotation();
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].annotations[0].nativePdfKit).not.toHaveProperty("managedCopyPath");
+    });
+
+    tauriMocks.syncPdfKitAnnotations.mockRejectedValueOnce(new Error("native write failed"));
+    fireEvent.change(screen.getByLabelText("Selected annotation color"), {
+      target: { value: "#9ed7ff" }
+    });
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(2);
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].annotations[0].nativePdfKit).toMatchObject({
+        status: "sync-failed",
+        dirty: true,
+        pendingOperation: "upsert",
+        lastSyncError: "native write failed"
+      });
+      expect(stored.sessions[0].annotations[0].nativePdfKit).not.toHaveProperty("managedCopyPath");
+    });
+
+    view.unmount();
+    tauriMocks.syncPdfKitAnnotations.mockClear();
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(1);
+      expect(tauriMocks.syncPdfKitAnnotations.mock.calls[0]?.[0].managedCopyPath).toBeUndefined();
+    });
+
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].annotations[0].nativePdfKit).toMatchObject({
+        status: "upserted"
+      });
+      expect(stored.sessions[0].annotations[0].nativePdfKit).not.toHaveProperty("managedCopyPath");
+      expect(stored.sessions[0].annotations[0].nativePdfKit).not.toHaveProperty("dirty");
+      expect(stored.sessions[0].annotations[0].nativePdfKit).not.toHaveProperty("pendingOperation");
+      expect(stored.sessions[0].annotations[0].nativePdfKit).not.toHaveProperty("lastSyncError");
+    });
+  });
+
+  it("persists failed PDFKit deletes for retry after the live annotation is removed", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("pdfkit-delete-retry", 1);
+    snapshot.preferences.pdfKit.enabled = true;
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    const view = render(<App />);
+
+    await addEmbedPdfAreaAnnotation();
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].annotations[0].nativePdfKit).not.toHaveProperty("managedCopyPath");
+    });
+
+    tauriMocks.syncPdfKitAnnotations.mockRejectedValueOnce(new Error("native delete failed"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete selected annotation" }));
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(2);
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].annotations).toHaveLength(0);
+      expect(stored.sessions[0].pendingDeletedAnnotations).toHaveLength(1);
+      expect(stored.sessions[0].pendingDeletedAnnotations?.[0].nativePdfKit).toMatchObject({
+        status: "sync-failed",
+        dirty: true,
+        pendingOperation: "delete",
+        lastSyncError: "native delete failed"
+      });
+      expect(stored.sessions[0].pendingDeletedAnnotations?.[0].nativePdfKit).not.toHaveProperty("managedCopyPath");
+    });
+    expect(screen.queryByText("Area annotation")).not.toBeInTheDocument();
+
+    view.unmount();
+    tauriMocks.syncPdfKitAnnotations.mockClear();
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(tauriMocks.syncPdfKitAnnotations).toHaveBeenCalledTimes(1);
+      const retryRequest = tauriMocks.syncPdfKitAnnotations.mock.calls[0]?.[0];
+      expect(retryRequest?.managedCopyPath).toBeUndefined();
+      expect(retryRequest?.annotations).toEqual([
+        expect.objectContaining({
+          operation: "delete",
+          kind: "area"
+        })
+      ]);
+    });
+
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].annotations).toHaveLength(0);
+      expect(stored.sessions[0].pendingDeletedAnnotations ?? []).toHaveLength(0);
+    });
+  });
+
+  it("stores a desktop EPUB native anchor for text annotations", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
+
+    render(<App />);
+
+    const chapterText = await screen.findByText("Native chapter body");
+    const selectionNode = chapterText.firstChild ?? chapterText;
+    const getSelectionSpy = vi.spyOn(window, "getSelection").mockReturnValue({
+      anchorNode: selectionNode,
+      anchorOffset: 0,
+      rangeCount: 1,
+      getRangeAt: () => ({ collapsed: false }),
+      toString: () => "Native chapter body"
+    } as unknown as Selection);
+    await screen.findByDisplayValue("Chapter One");
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Add annotation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
+
+    await waitFor(() => {
+      expect(tauriMocks.createEpubAnchor).toHaveBeenCalledWith({
+        path: "/Users/mario/Books/story.epub",
+        chapterHref: "OPS/chapter-1.xhtml",
+        selectedText: "Native chapter body",
+        cfiHint: expect.stringMatching(/^epubcfi\(/)
+      });
+    });
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].annotations[0].location).toMatchObject({
+        kind: "epub",
+        cfi: expect.stringMatching(/^epubcfi\(/),
+        anchor: expect.objectContaining({
+          chapterHref: "OPS/chapter-1.xhtml",
+          selectedText: "Native chapter body",
+          anchorHash: "fnv1a64:anchor"
+        })
+      });
+    });
+    getSelectionSpy.mockRestore();
+  });
+
+  it("creates an EPUB native anchor for the selected duplicate text occurrence", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
+    tauriMocks.readEpubChapter.mockResolvedValueOnce({
+      id: "chapter-1",
+      href: "OPS/chapter-1.xhtml",
+      label: "Chapter One",
+      index: 0,
+      sanitizedHtml: "<p>repeat alpha repeat</p>",
+      text: "repeat alpha repeat",
+      resources: [] as EpubResourceMetadata[]
+    });
+    tauriMocks.createEpubAnchor.mockResolvedValueOnce({
+      chapterHref: "OPS/chapter-1.xhtml",
+      selectedText: "repeat",
+      occurrenceIndex: 1,
+      startOffset: 13,
+      endOffset: 19,
+      prefix: "repeat alpha ",
+      suffix: "",
+      textHash: "fnv1a64:text",
+      anchorHash: "fnv1a64:duplicate",
+      cfiHint: "epubcfi(/duplicate)"
+    });
+
+    render(<App />);
+
+    await screen.findByText("repeat alpha repeat");
+    const chapterText = document.querySelector(".epub-content p")!;
+    const selectionNode = chapterText.firstChild ?? chapterText;
+    const range = document.createRange();
+    range.setStart(selectionNode, 13);
+    range.setEnd(selectionNode, 19);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    const getSelectionSpy = vi.spyOn(window, "getSelection").mockReturnValue({
+      anchorNode: selectionNode,
+      anchorOffset: 13,
+      rangeCount: 1,
+      getRangeAt: () => range,
+      toString: () => "repeat"
+    } as unknown as Selection);
+    await screen.findByDisplayValue("Chapter One");
+
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Add annotation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
+
+    await waitFor(() => {
+      expect(tauriMocks.createEpubAnchor).toHaveBeenCalledWith({
+        path: "/Users/mario/Books/story.epub",
+        chapterHref: "OPS/chapter-1.xhtml",
+        selectedText: "repeat",
+        occurrenceIndex: 1,
+        cfiHint: expect.stringMatching(/^epubcfi\(/)
+      });
+    });
+    await waitFor(() => {
+      const annotation = document.querySelector(".reader-annotation");
+      expect(annotation?.textContent).toBe("repeat");
+      expect(annotation?.previousSibling?.textContent).toBe("repeat alpha ");
+    });
+    getSelectionSpy.mockRestore();
+  });
+
+  it("persists visible EPUB fallback metadata when native anchor creation fails", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
+    tauriMocks.createEpubAnchor.mockRejectedValueOnce(new Error("anchor create unavailable"));
+
+    render(<App />);
+
+    const chapterText = await screen.findByText("Native chapter body");
+    const selectionNode = chapterText.firstChild ?? chapterText;
+    const range = document.createRange();
+    range.selectNodeContents(selectionNode);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    const getSelectionSpy = vi.spyOn(window, "getSelection").mockReturnValue({
+      anchorNode: selectionNode,
+      anchorOffset: 0,
+      rangeCount: 1,
+      getRangeAt: () => range,
+      toString: () => "Native chapter body"
+    } as unknown as Selection);
+    await screen.findByDisplayValue("Chapter One");
+
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Add annotation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
+
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].annotations[0].nativeEpub).toMatchObject({
+        supported: false,
+        status: "fallback-text-match",
+        reason: "anchor-create-failed",
+        lastError: "anchor create unavailable"
+      });
+      const location = stored.sessions[0].annotations[0].location;
+      expect(location.kind === "epub" ? location.anchor : undefined).toBeUndefined();
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Annotations" }));
+    expect(await screen.findByText("Native EPUB: fallback-text-match")).toBeInTheDocument();
+    getSelectionSpy.mockRestore();
+  });
+
+  it("persists visible EPUB fallback metadata when native anchor resolve and rebind fail", async () => {
+    tauriMocks.setPendingPaths([]);
+    tauriMocks.resolveEpubAnchor.mockRejectedValueOnce(new Error("resolve failed"));
+    tauriMocks.rebindEpubAnchor.mockRejectedValueOnce(new Error("rebind failed"));
+    tauriMocks.readEpubChapter.mockResolvedValueOnce({
+      id: "chapter-1",
+      href: "OPS/chapter-1.xhtml",
+      label: "Chapter One",
+      index: 0,
+      sanitizedHtml: "<p>repeat alpha repeat</p>",
+      text: "repeat alpha repeat",
+      resources: [] as EpubResourceMetadata[]
+    });
+    const snapshot = createSnapshot("epub-anchor-fallback", 1);
+    snapshot.sessions[0] = {
+      ...snapshot.sessions[0],
+      title: "story.epub",
+      filePath: "/Users/mario/Books/story.epub",
+      fileSource: { kind: "desktop-path", path: "/Users/mario/Books/story.epub" },
+      format: "epub",
+      sidebarMode: "annotations",
+      location: {
+        kind: "epub",
+        chapterHref: "OPS/chapter-1.xhtml",
+        chapterLabel: "Chapter One",
+        progress: 0
+      },
+      lastLocation: {
+        kind: "epub",
+        chapterHref: "OPS/chapter-1.xhtml",
+        chapterLabel: "Chapter One",
+        progress: 0
+      },
+      annotations: [
+        {
+          id: "annotation-repeat",
+          type: "highlight",
+          tag: "重点",
+          color: "#ffe28a",
+          thickness: 2,
+          selectedText: "repeat",
+          location: {
+            kind: "epub",
+            chapterHref: "OPS/chapter-1.xhtml",
+            chapterLabel: "Chapter One",
+            progress: 0,
+            anchor: {
+              chapterHref: "OPS/chapter-1.xhtml",
+              selectedText: "repeat",
+              occurrenceIndex: 1,
+              startOffset: 13,
+              endOffset: 19,
+              prefix: "repeat alpha ",
+              suffix: "",
+              textHash: "fnv1a64:text",
+              anchorHash: "fnv1a64:anchor"
+            }
+          },
+          createdAt: 1,
+          updatedAt: 2
+        }
+      ]
+    };
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("smartreader.appSession.v1") ?? "{}") as AppSessionSnapshot;
+      expect(stored.sessions[0].annotations[0].nativeEpub).toMatchObject({
+        supported: false,
+        status: "fallback-text-match",
+        reason: "anchor-rebind-failed",
+        lastError: "rebind failed"
+      });
+    });
+    expect(await screen.findByText("Native EPUB: fallback-text-match")).toBeInTheDocument();
+  });
+
+  it("uses stored EPUB native anchors instead of the first duplicate selectedText match", async () => {
+    tauriMocks.setPendingPaths([]);
+    tauriMocks.readEpubChapter.mockResolvedValueOnce({
+      id: "chapter-1",
+      href: "OPS/chapter-1.xhtml",
+      label: "Chapter One",
+      index: 0,
+      sanitizedHtml: "<p>repeat alpha repeat</p>",
+      text: "repeat alpha repeat",
+      resources: [] as EpubResourceMetadata[]
+    });
+    const snapshot = createSnapshot("epub-anchor-duplicate", 1);
+    snapshot.sessions[0] = {
+      ...snapshot.sessions[0],
+      title: "story.epub",
+      filePath: "/Users/mario/Books/story.epub",
+      fileSource: { kind: "desktop-path", path: "/Users/mario/Books/story.epub" },
+      format: "epub",
+      location: {
+        kind: "epub",
+        chapterHref: "OPS/chapter-1.xhtml",
+        chapterLabel: "Chapter One",
+        progress: 0
+      },
+      lastLocation: {
+        kind: "epub",
+        chapterHref: "OPS/chapter-1.xhtml",
+        chapterLabel: "Chapter One",
+        progress: 0
+      },
+      annotations: [
+        {
+          id: "annotation-repeat",
+          type: "highlight",
+          tag: "重点",
+          color: "#ffe28a",
+          thickness: 2,
+          selectedText: "repeat",
+          location: {
+            kind: "epub",
+            chapterHref: "OPS/chapter-1.xhtml",
+            chapterLabel: "Chapter One",
+            progress: 0,
+            anchor: {
+              chapterHref: "OPS/chapter-1.xhtml",
+              selectedText: "repeat",
+              occurrenceIndex: 1,
+              startOffset: 13,
+              endOffset: 19,
+              prefix: "repeat alpha ",
+              suffix: "",
+              textHash: "fnv1a64:text",
+              anchorHash: "fnv1a64:anchor"
+            }
+          },
+          createdAt: 1,
+          updatedAt: 2
+        }
+      ]
+    };
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    await screen.findByText("repeat alpha");
+    const annotation = document.querySelector(".reader-annotation");
+    expect(annotation?.textContent).toBe("repeat");
+    expect(annotation?.previousSibling?.textContent).toBe("repeat alpha ");
+    expect(tauriMocks.resolveEpubAnchor).toHaveBeenCalledWith(
+      "/Users/mario/Books/story.epub",
+      expect.objectContaining({
+        occurrenceIndex: 1,
+        startOffset: 13
+      })
+    );
   });
 
   it("escapes Markdown-sensitive annotation export content", async () => {
@@ -1301,12 +2639,15 @@ describe("App desktop open delivery", () => {
   });
 
   it("creates unique annotation ids for annotations added in the same millisecond", async () => {
-    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("pdfkit-unique-annotations", 1);
+    snapshot.preferences.pdfKit.enabled = true;
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
     vi.spyOn(Date, "now").mockReturnValue(10);
 
     render(<App />);
 
-    await screen.findByText("Intro");
+    await waitForStartPdfReader("spec.pdf reader");
     fireEvent.change(screen.getByLabelText("Annotation note"), {
       target: { value: "First note" }
     });
@@ -1333,6 +2674,15 @@ describe("App desktop open delivery", () => {
         color: "#b7f7d4",
         thickness: 3,
         location: { kind: "page" as const, page: 2 },
+        area: {
+          page: 2,
+          left: 80,
+          top: 120,
+          width: 180,
+          height: 24,
+          viewportHeight: 900,
+          viewportScale: 1
+        },
         note: "Recovered note",
         selectedText: "Recovered selection",
         hidden: false,
@@ -1345,7 +2695,6 @@ describe("App desktop open delivery", () => {
     render(<App />);
 
     expect(await screen.findByText("Recovered note")).toBeInTheDocument();
-    expect(document.querySelector('[data-page-number="2"] .pdf-annotation-marker.note')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Export annotations" }));
     const exportedBlob = vi.mocked(URL.createObjectURL).mock.calls.at(-1)?.[0] as Blob;
@@ -1360,13 +2709,11 @@ describe("App desktop open delivery", () => {
     expect(exportedText).toContain("- Note: Recovered note");
 
     fireEvent.click(screen.getByRole("button", { name: "Hide all annotations" }));
-    expect(document.querySelector(".pdf-annotation-marker")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show all annotations" }));
-    expect(document.querySelector('[data-page-number="2"] .pdf-annotation-marker.note')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Recovered note").closest("button")!);
     await waitFor(() => {
-      expect(screen.getByLabelText("Page or location")).toHaveValue("2");
+      expect(screen.getByText("Page 2")).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Delete annotation Recovered note" }));
@@ -1420,12 +2767,12 @@ describe("App desktop open delivery", () => {
   });
 
   it("shows no-result search feedback without moving the current location", async () => {
-    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
-    tauriMocks.searchPdfDocument.mockResolvedValueOnce([]);
+    tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
+    tauriMocks.searchEpubDocument.mockResolvedValueOnce([]);
 
     render(<App />);
 
-    await screen.findByText("Intro");
+    await screen.findByText("Native chapter body");
     fireEvent.click(screen.getByLabelText("Find"));
     fireEvent.change(screen.getByLabelText("Find in document"), {
       target: { value: "missing" }
@@ -1433,50 +2780,29 @@ describe("App desktop open delivery", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
 
     expect(await screen.findByText("No results")).toBeInTheDocument();
-    expect(screen.getByLabelText("Page or location")).toHaveValue("1");
+    expect(tauriMocks.searchEpubDocument).toHaveBeenCalledWith("/Users/mario/Books/story.epub", "missing");
+    expect(screen.getByDisplayValue("Chapter One")).toBeInTheDocument();
   });
 
-  it("loads PDF thumbnails progressively and keeps per-page failures local", async () => {
+  it("does not render the legacy SmartReader PDF thumbnail sidebar", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
     tauriMocks.openPdfDocument.mockResolvedValueOnce({
       id: "/Users/mario/Books/start.pdf",
       pageCount: 40,
       outline: []
     });
-    tauriMocks.renderPdfPageImage.mockImplementation(async (_path: string, page: number) => {
-      if (page === 2) {
-        throw new Error("thumbnail failed");
-      }
-
-      return {
-        page,
-        width: 64,
-        height: 90,
-        scale: 0.18,
-        dataUrl: `data:image/png;base64,page-${page}`,
-        renderer: "pdfkit" as const
-      };
-    });
 
     render(<App />);
 
-    await screen.findByLabelText("start.pdf reader");
-    fireEvent.click(screen.getByRole("tab", { name: "Thumbnails" }));
-
     await waitFor(() => {
-      expect(screen.getByAltText("Thumbnail page 1")).toBeInTheDocument();
+      expect(embedPdfMocks.PDFViewer).toHaveBeenCalled();
     });
-    expect(await screen.findByText("Preview failed")).toBeInTheDocument();
-    expect(tauriMocks.renderPdfPageImage.mock.calls.length).toBeLessThan(12);
-
-    fireEvent.click(screen.getByRole("button", { name: "Page 3" }));
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("Page or location")).toHaveValue("3");
-    });
+    expect(screen.getByLabelText("start.pdf reader")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Thumbnails" })).not.toBeInTheDocument();
+    expect(document.querySelector(".thumbnail-row")).not.toBeInTheDocument();
   });
 
-  it("windows large PDF thumbnail lists and only requests rendered thumbnails", async () => {
+  it("keeps large PDF thumbnail navigation inside EmbedPDF", async () => {
     tauriMocks.setPendingPaths(["/Users/mario/Books/large-thumbnails.pdf"]);
     tauriMocks.openPdfDocument.mockResolvedValueOnce({
       id: "/Users/mario/Books/large-thumbnails.pdf",
@@ -1487,46 +2813,31 @@ describe("App desktop open delivery", () => {
     render(<App />);
 
     await screen.findByLabelText("large-thumbnails.pdf reader");
-    fireEvent.click(screen.getByRole("tab", { name: "Thumbnails" }));
-
-    await screen.findByRole("button", { name: "Page 1" });
+    await waitFor(() => {
+      expect(embedPdfMocks.PDFViewer).toHaveBeenCalled();
+      expect(tauriMocks.openPdfDocument).toHaveBeenCalledWith("/Users/mario/Books/large-thumbnails.pdf");
+    });
+    expect(screen.queryByRole("navigation", { name: "Document navigation" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Page 9700" })).not.toBeInTheDocument();
-    expect(document.querySelectorAll(".thumbnail-row").length).toBeLessThan(200);
-    expect(tauriMocks.renderPdfPageImage.mock.calls.length).toBeLessThan(50);
-
-    const sidebarContent = document.querySelector(".sidebar-content");
-    expect(sidebarContent).toBeInstanceOf(HTMLElement);
-    Object.defineProperty(sidebarContent, "clientHeight", {
-      configurable: true,
-      value: 420
-    });
-    Object.defineProperty(sidebarContent, "scrollTop", {
-      configurable: true,
-      writable: true,
-      value: 737124
-    });
-
-    fireEvent.scroll(sidebarContent as HTMLElement);
-
-    await screen.findByRole("button", { name: "Page 9700" });
-    expect(document.querySelectorAll(".thumbnail-row").length).toBeLessThan(200);
-    expect(tauriMocks.renderPdfPageImage.mock.calls.length).toBeLessThan(100);
+    expect(document.querySelector(".thumbnail-row")).not.toBeInTheDocument();
   });
 
   it("windows large search result sidebars without limiting search results", async () => {
-    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
-    tauriMocks.searchPdfDocument.mockResolvedValueOnce(
+    tauriMocks.setPendingPaths(["/Users/mario/Books/story.epub"]);
+    tauriMocks.searchEpubDocument.mockResolvedValueOnce(
       Array.from({ length: 10000 }, (_, index) => ({
-        id: `pdf-search-${index}`,
-        label: `Result ${index}`,
+        id: `search-result-${index}`,
+        label: "Chapter One",
         snippet: `Snippet ${index}`,
-        page: (index % 2) + 1
+        href: "OPS/chapter-1.xhtml",
+        index: 0,
+        progress: 0
       }))
     );
 
     render(<App />);
 
-    await screen.findByText("Intro");
+    await screen.findByText("Native chapter body");
     fireEvent.click(screen.getByLabelText("Find"));
     fireEvent.change(screen.getByLabelText("Find in document"), {
       target: { value: "needle" }
@@ -1534,7 +2845,7 @@ describe("App desktop open delivery", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Find" }).at(-1)!);
 
     await screen.findByText("1 / 10000");
-    expect(screen.queryByRole("button", { name: /Result 9700, result 9701/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Chapter One, result 9701: Snippet 9700/ })).not.toBeInTheDocument();
     expect(document.querySelectorAll(".search-result-row").length).toBeLessThan(200);
 
     const sidebarContent = document.querySelector(".sidebar-content");
@@ -1551,8 +2862,8 @@ describe("App desktop open delivery", () => {
 
     fireEvent.scroll(sidebarContent as HTMLElement);
 
-    await screen.findByRole("button", { name: /Result 9700, result 9701/ });
-    expect(screen.queryByRole("button", { name: /Result 0, result 1/ })).not.toBeInTheDocument();
+    await screen.findByRole("button", { name: /Chapter One, result 9701: Snippet 9700/ });
+    expect(screen.queryByRole("button", { name: /Chapter One, result 1: Snippet 0/ })).not.toBeInTheDocument();
   });
 
   it("restores and saves EPUB chapter scroll location", async () => {
@@ -1825,23 +3136,26 @@ describe("App desktop open delivery", () => {
     expect(document.querySelector(".epub-content")?.innerHTML).toContain("first needle then second <mark");
   });
 
-  it("does not reset a manual PDF fit mode when EPUB preferences change", async () => {
-    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+  it("does not reset a persisted PDF fit preference when EPUB preferences change", async () => {
+    tauriMocks.setPendingPaths([]);
+    const snapshot = createSnapshot("manual-fit", 1);
+    snapshot.sessions[0].fitMode = "fit-width";
+    snapshot.preferences.defaultPdfFitMode = "fit-width";
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
 
     render(<App />);
 
-    await screen.findByText("Intro");
-    fireEvent.change(screen.getByLabelText("Fit mode"), {
-      target: { value: "fit-width" }
-    });
-    expect(screen.getByLabelText("Fit mode")).toHaveValue("fit-width");
+    await waitForStartPdfReader("spec.pdf reader");
+    expect(embedPdfMocks.PDFViewer.mock.calls.at(-1)?.[0].config.zoom.defaultZoomLevel).toBe("fit-width");
 
     fireEvent.click(screen.getByLabelText("More"));
     fireEvent.change(await screen.findByLabelText("EPUB font size"), {
       target: { value: "22" }
     });
 
-    expect(screen.getByLabelText("Fit mode")).toHaveValue("fit-width");
+    await waitFor(() => {
+      expect(embedPdfMocks.PDFViewer.mock.calls.at(-1)?.[0].config.zoom.defaultZoomLevel).toBe("fit-width");
+    });
   });
 
   it("loads desktop EPUB metadata and the active chapter through Tauri without full-book byte parsing", async () => {
@@ -2202,76 +3516,51 @@ function createSearchWorkerMock(options: { failInit?: boolean } = {}) {
   };
 }
 
-function installVisiblePageObserver() {
-  const callbacks = new Map<number, IntersectionObserverCallback>();
-
-  class VisiblePageObserver implements IntersectionObserver {
-    readonly root: Element | Document | null = null;
-    readonly rootMargin = "0px";
-    readonly thresholds = [0.45];
-
-    constructor(private readonly callback: IntersectionObserverCallback) {}
-
-    disconnect() {}
-
-    observe(element: Element) {
-      const pageNumber = Number((element as HTMLElement).dataset.pageNumber);
-      if (Number.isFinite(pageNumber)) {
-        callbacks.set(pageNumber, this.callback);
-      }
-    }
-
-    takeRecords(): IntersectionObserverEntry[] {
-      return [];
-    }
-
-    unobserve() {}
+async function selectEmbedPdfText(options: {
+  text?: string[];
+  selection?: Parameters<typeof embedPdfMocks.setFormattedSelection>[0];
+} = {}) {
+  if (options.text) {
+    embedPdfMocks.setSelectedText(options.text);
+  }
+  if (options.selection) {
+    embedPdfMocks.setFormattedSelection(options.selection);
   }
 
-  Object.defineProperty(window, "IntersectionObserver", {
-    configurable: true,
-    writable: true,
-    value: VisiblePageObserver
+  const viewer = await screen.findByTestId("embedpdf-viewer");
+  await waitFor(() => {
+    expect(embedPdfMocks.selectionCapability.onEndSelection).toHaveBeenCalled();
   });
+  fireEvent.pointerUp(viewer, { clientX: 180, clientY: 210 });
 
-  return {
-    has(pageNumber: number) {
-      return callbacks.has(pageNumber);
-    },
-    show(pageNumber: number) {
-      const callback = callbacks.get(pageNumber);
-      if (!callback) {
-        throw new Error(`No observer registered for page ${pageNumber}`);
-      }
-
-      callback([
-        {
-          isIntersecting: true,
-          intersectionRatio: 0.5
-        } as IntersectionObserverEntry
-      ], {} as IntersectionObserver);
-    }
-  };
+  await act(async () => {
+    embedPdfMocks.emitSelectionChange();
+    embedPdfMocks.emitEndSelection();
+  });
 }
 
-function createControlledRenderTask() {
-  let resolvePromise: () => void = () => undefined;
-  let rejectPromise: (error: unknown) => void = () => undefined;
-  const promise = new Promise<void>((resolve, reject) => {
-    resolvePromise = resolve;
-    rejectPromise = reject;
+async function waitForStartPdfReader(label = "start.pdf reader") {
+  await screen.findByLabelText(label);
+  await waitFor(() => {
+    expect(embedPdfMocks.PDFViewer).toHaveBeenCalled();
   });
-  const cancel = vi.fn();
+  await act(async () => undefined);
+}
 
-  return {
-    task: {
-      promise,
-      cancel
-    },
-    cancel,
-    resolve: resolvePromise,
-    reject: rejectPromise
-  };
+function submitPageLocation(page: number) {
+  const locationInput = screen.getByLabelText("Page or location");
+  fireEvent.change(locationInput, {
+    target: { value: String(page) }
+  });
+  fireEvent.submit(locationInput.closest("form")!);
+}
+
+async function addEmbedPdfAreaAnnotation() {
+  await selectEmbedPdfText();
+  fireEvent.change(screen.getByLabelText("Annotation type"), {
+    target: { value: "area" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
 }
 
 function createSnapshotSession(id: string, path: string, page: number): AppSessionSnapshot["sessions"][number] {

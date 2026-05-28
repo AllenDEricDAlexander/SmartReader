@@ -62,32 +62,101 @@ export interface DesktopPdfDocument {
   outline: DesktopPdfOutlineItem[];
 }
 
-export interface DesktopPdfSearchResult {
-  id: string;
-  label: string;
-  snippet: string;
-  page: number;
-}
+export type DesktopPdfKitAnnotationWriteMode = "copy";
+export type DesktopPdfKitSyncAnnotationKind =
+  | "area"
+  | "note"
+  | "highlight"
+  | "underline"
+  | "strike"
+  | "wavy"
+  | "redText";
+export type DesktopPdfKitAnnotationOperation = "upsert" | "delete";
 
-export interface DesktopPdfPageImage {
-  page: number;
+export interface DesktopPdfKitAnnotationRect {
+  x: number;
+  y: number;
   width: number;
   height: number;
-  scale: number;
-  dataUrl: string;
-  renderer: "pdfkit";
 }
 
-interface DesktopPdfKitRasterResult {
+export interface DesktopPdfKitAnnotationCapability {
+  kind: DesktopPdfKitSyncAnnotationKind;
+  supported: boolean;
+  multiRect: boolean;
+  reason?: string;
+}
+
+export interface DesktopPdfKitAnnotationCapabilities {
   supported: boolean;
   status: string;
+  writeModes: DesktopPdfKitAnnotationWriteMode[];
+  annotations: DesktopPdfKitAnnotationCapability[];
+}
+
+export interface DesktopPdfKitAnnotationSyncItem {
+  id: string;
+  operation: DesktopPdfKitAnnotationOperation;
   page: number;
-  width: number;
-  height: number;
-  scale: number;
-  mimeType?: string;
-  byteCount: number;
-  bytes?: number[] | Uint8Array;
+  kind: DesktopPdfKitSyncAnnotationKind;
+  color: string;
+  thickness?: number;
+  note?: string;
+  rects: DesktopPdfKitAnnotationRect[];
+}
+
+export interface DesktopPdfKitAnnotationSyncRequest {
+  path: string;
+  managedCopyPath?: string;
+  writeMode: DesktopPdfKitAnnotationWriteMode;
+  annotations: DesktopPdfKitAnnotationSyncItem[];
+}
+
+export interface DesktopPdfKitAnnotationSyncResultItem {
+  id: string;
+  status: string;
+  page: number;
+  kind: DesktopPdfKitSyncAnnotationKind;
+  nativeId: string;
+  reason?: string;
+}
+
+export interface DesktopPdfKitAnnotationSyncResult {
+  supported: boolean;
+  status: string;
+  sourcePath: string;
+  managedCopyPath: string;
+  annotations: DesktopPdfKitAnnotationSyncResultItem[];
+}
+
+export interface DesktopEpubTextAnchor {
+  chapterHref: string;
+  selectedText: string;
+  occurrenceIndex: number;
+  startOffset: number;
+  endOffset: number;
+  prefix: string;
+  suffix: string;
+  textHash: string;
+  anchorHash: string;
+  cfiHint?: string;
+}
+
+export interface DesktopEpubAnchorCreateRequest {
+  path: string;
+  chapterHref: string;
+  selectedText: string;
+  occurrenceIndex?: number;
+  cfiHint?: string;
+}
+
+export interface DesktopEpubAnchorResolveResult {
+  status: "resolved" | "rebound";
+  anchor: DesktopEpubTextAnchor;
+  selectedText: string;
+  occurrenceIndex: number;
+  startOffset: number;
+  endOffset: number;
 }
 
 export interface DesktopCacheInfo {
@@ -183,10 +252,16 @@ export async function openCacheExportDialog(): Promise<string | undefined> {
 }
 
 export async function readDesktopFile(path: string): Promise<Uint8Array> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  const data = await invoke<number[] | ArrayBuffer>("read_document", { path });
+  const { readFile } = await import("@tauri-apps/plugin-fs");
 
-  return data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data);
+  try {
+    return await readFile(path);
+  } catch {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const bytes = await invoke<number[] | Uint8Array>("read_document", { path });
+
+    return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  }
 }
 
 export async function createDesktopSession(path: string): Promise<DocumentSession> {
@@ -208,51 +283,24 @@ export async function openPdfDocument(path: string): Promise<DesktopPdfDocument>
   return invoke<DesktopPdfDocument>("open_pdf_document", { path });
 }
 
-export async function searchPdfDocument(
-  path: string,
-  query: string
-): Promise<DesktopPdfSearchResult[]> {
+export async function getPdfKitAnnotationCapabilities(): Promise<DesktopPdfKitAnnotationCapabilities> {
   const { invoke } = await import("@tauri-apps/api/core");
 
-  return invoke<DesktopPdfSearchResult[]>("search_pdf_document", { path, query });
+  return invoke<DesktopPdfKitAnnotationCapabilities>("get_pdfkit_annotation_capabilities");
 }
 
-export async function renderPdfPageImage(
-  path: string,
-  page: number,
-  scale: number
-): Promise<DesktopPdfPageImage> {
+export async function syncPdfKitAnnotations(
+  request: DesktopPdfKitAnnotationSyncRequest
+): Promise<DesktopPdfKitAnnotationSyncResult> {
   const { invoke } = await import("@tauri-apps/api/core");
-  const image = await invoke<DesktopPdfKitRasterResult>("render_pdf_page_pdfkit", {
+  const { path, managedCopyPath, writeMode, annotations } = request;
+
+  return invoke<DesktopPdfKitAnnotationSyncResult>("sync_pdfkit_annotations", {
     path,
-    page,
-    scale,
-    output: "bytes"
+    managedCopyPath,
+    writeMode,
+    annotations
   });
-
-  if (!image.supported || !image.bytes) {
-    throw new Error(image.status || "PDFKit is unavailable.");
-  }
-
-  return {
-    page: image.page,
-    width: image.width,
-    height: image.height,
-    scale: image.scale,
-    dataUrl: `data:${image.mimeType ?? "image/png"};base64,${bytesToBase64(image.bytes)}`,
-    renderer: "pdfkit"
-  };
-}
-
-function bytesToBase64(bytes: number[] | Uint8Array): string {
-  const values = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  let binary = "";
-
-  for (let index = 0; index < values.length; index += 0x8000) {
-    binary += String.fromCharCode(...values.subarray(index, index + 0x8000));
-  }
-
-  return btoa(binary);
 }
 
 export async function openEpubDocument(path: string): Promise<DesktopEpubDocument> {
@@ -274,6 +322,32 @@ export async function searchEpubDocument(
   const { invoke } = await import("@tauri-apps/api/core");
 
   return invoke<DesktopEpubSearchResult[]>("search_epub_document", { path, query });
+}
+
+export async function createEpubAnchor(
+  request: DesktopEpubAnchorCreateRequest
+): Promise<DesktopEpubTextAnchor> {
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  return invoke<DesktopEpubTextAnchor>("create_epub_anchor", { ...request });
+}
+
+export async function resolveEpubAnchor(
+  path: string,
+  anchor: DesktopEpubTextAnchor
+): Promise<DesktopEpubAnchorResolveResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  return invoke<DesktopEpubAnchorResolveResult>("resolve_epub_anchor", { path, anchor });
+}
+
+export async function rebindEpubAnchor(
+  path: string,
+  anchor: DesktopEpubTextAnchor
+): Promise<DesktopEpubAnchorResolveResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  return invoke<DesktopEpubAnchorResolveResult>("rebind_epub_anchor", { path, anchor });
 }
 
 export async function getSmartReaderCacheInfo(): Promise<DesktopCacheInfo> {

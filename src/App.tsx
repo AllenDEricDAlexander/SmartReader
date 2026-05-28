@@ -1,7 +1,18 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, JSX } from "react";
+import type { CSSProperties, JSX, MouseEvent as ReactMouseEvent } from "react";
 import JSZip from "jszip";
-import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
+import {
+  AnnotationPlugin,
+  DocumentManagerPlugin,
+  PDFViewer,
+  ScrollPlugin,
+  ScrollStrategy,
+  SelectionPlugin,
+  SearchPlugin,
+  ZoomPlugin,
+  ZoomMode
+} from "@embedpdf/react-pdf-viewer";
+import type { PDFViewerConfig, PluginRegistry, ZoomLevel } from "@embedpdf/react-pdf-viewer";
 import {
   createEmptySession,
   createSessionFromRecentFile,
@@ -43,7 +54,13 @@ import {
   saveAppSessionSnapshot
 } from "./state/sessionPersistence";
 import { sanitizeEpubHtml } from "./reader/epubSanitizer";
-import { outlineFromPdf } from "./reader/pdfOutline";
+import {
+  annotationColors,
+  annotationTitle as readerAnnotationTitle,
+  annotationTypeLabel,
+  safeAnnotationColor,
+  safeAnnotationThickness
+} from "./reader/annotations";
 import {
   epubHrefFragment,
   isSameEpubChapterHref,
@@ -51,6 +68,14 @@ import {
   visibleOutlineRows
 } from "./reader/outlineRows";
 import type { OutlineRow } from "./reader/outlineRows";
+import { annotationsToMarkdown, downloadSafeName } from "./reader/annotationExport";
+import { nativePdfKitUnsupportedReason } from "./reader/pdfAnnotationGeometry";
+import {
+  createEpubLocationCfi,
+  createEpubSelectionCfi,
+  renderEpubHtml
+} from "./reader/epubAnnotations";
+import { visibleRowRange } from "./reader/virtualRows";
 import {
   exportSmartReaderCacheFile,
   createDesktopSession,
@@ -66,9 +91,7 @@ import {
   openPendingDesktopFiles,
   readEpubChapter,
   readFileSource,
-  renderPdfPageImage,
   searchEpubDocument,
-  searchPdfDocument,
   saveSmartReaderCache,
   setSmartReaderCacheLocation,
   setupTauriMenu
@@ -77,18 +100,26 @@ import type { DesktopEpubDocument, DesktopPdfDocument } from "./platform/tauriBr
 import { createAccessErrorSession, isTauriRuntime } from "./platform/fileSources";
 import { PreferencesDialog as PreferencesPanel } from "./components/PreferencesDialog";
 import type { CacheInfo, CacheStatus, ShortcutConflict, ShortcutPreference } from "./components/PreferencesDialog";
+import { AnnotationBar } from "./components/AnnotationBar";
+import type { AnnotationDraft } from "./components/AnnotationBar";
+import { AnnotationQuickMenu } from "./components/AnnotationQuickMenu";
+import type { AnnotationSelectionContext } from "./components/AnnotationQuickMenu";
+import { AnnotationSidebar } from "./components/AnnotationSidebar";
+import { PdfAnnotationActions } from "./components/PdfAnnotationActions";
 import {
   defaultReaderShortcutBindings,
   findShortcutConflicts,
   shouldHandleReaderShortcut,
   useReaderShortcuts
 } from "./hooks/useReaderShortcuts";
+import { useEpubAnchorSync } from "./hooks/useEpubAnchorSync";
+import { usePdfKitAnnotationSync } from "./hooks/usePdfKitAnnotationSync";
 import {
   createSmartReaderCacheEnvelope,
   validateSmartReaderCacheEnvelope,
   writeSmartReaderCache as writeLocalSmartReaderCache
 } from "./state/smartReaderCache";
-import { searchEpubChapters, searchPdfDocumentText } from "./lib/fallbackSearch";
+import { searchEpubChapters } from "./lib/fallbackSearch";
 import {
   createFallbackSearchAdapter,
   createSearchWorkerRuntime,
@@ -103,10 +134,10 @@ import type {
   OutlineItem,
   Preferences,
   ReaderAnnotation,
-  AnnotationTag,
   AnnotationType,
   ReaderError,
   ReaderLocation,
+  NativePdfAnnotationSnapshot,
   RecentFile,
   SearchResult,
   SidebarMode,
@@ -132,21 +163,13 @@ const defaultPreferences: Preferences = {
 const OUTLINE_ROW_HEIGHT = 34;
 const OUTLINE_OVERSCAN_ROWS = 8;
 const OUTLINE_FALLBACK_VIEWPORT_HEIGHT = 420;
-const THUMBNAIL_ROW_HEIGHT = 76;
-const THUMBNAIL_OVERSCAN_ROWS = 2;
-const THUMBNAIL_FALLBACK_VIEWPORT_HEIGHT = 420;
-const THUMBNAIL_SCALE = 0.18;
 const SEARCH_RESULT_ROW_HEIGHT = 58;
 const SEARCH_RESULT_OVERSCAN_ROWS = 8;
 const SEARCH_RESULT_FALLBACK_VIEWPORT_HEIGHT = 420;
-const ANNOTATION_ROW_HEIGHT = 82;
-const ANNOTATION_OVERSCAN_ROWS = 6;
-const ANNOTATION_FALLBACK_VIEWPORT_HEIGHT = 420;
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 420;
+const SIDEBAR_DEFAULT_WIDTH = 260;
 const EPUB_SCROLL_SAVE_DELAY_MS = 250;
-const annotationTypes: AnnotationType[] = ["highlight", "underline", "strike", "note"];
-const annotationTags: AnnotationTag[] = ["重点", "疑问", "引用备注", "创新点", "实验数据", "缺陷", "个人思考"];
-const annotationColors = ["#ffe28a", "#9ed7ff", "#b9e88f", "#f4a7a7", "#d7b6ff"];
-const annotationThicknesses = [1, 2, 3, 4];
 
 const outlineWindowStyle: CSSProperties = {
   position: "relative"
@@ -177,46 +200,12 @@ const outlineTitleStyle: CSSProperties = {
 
 const CACHE_SAVE_DEBOUNCE_MS = 300;
 
-interface PdfRenderTask {
-  promise: Promise<unknown>;
-  cancel: () => void;
-}
-
-interface PdfSearchHighlight {
-  id: string;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-interface PdfTextContentRange {
-  item: {
-    str: string;
-    transform: number[];
-    width?: number;
-    height?: number;
-  };
-  index: number;
-  start: number;
-  end: number;
-}
-
-interface AnnotationDraft {
-  type: AnnotationType;
-  tag: AnnotationTag;
-  color: string;
-  thickness: number;
-  note: string;
-}
-
-// PDF.js text content is stable per page; keep zoom-only overlay updates to geometry work.
-const pdfTextContentCache = new WeakMap<PDFDocumentProxy, Map<number, Promise<unknown[]>>>();
-
 export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const locationInputRef = useRef<HTMLInputElement>(null);
   const searchAdapterRef = useRef<(query: string) => Promise<SearchResult[]>>(async () => []);
+  const pdfSearchBridgeRef = useRef<PdfSearchBridge | undefined>(undefined);
+  const pdfNativeAnnotationBridgeRef = useRef<PdfNativeAnnotationBridge | undefined>(undefined);
   const openDesktopPathRef = useRef<(path: string) => Promise<void>>(async () => undefined);
   const [initialAppState] = useState(() =>
     restoreAppSessionSnapshot(loadAppSessionSnapshot(), defaultPreferences)
@@ -234,6 +223,9 @@ export function App() {
     thickness: 2,
     note: ""
   });
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState("");
+  const [selectionContext, setSelectionContext] = useState<AnnotationSelectionContext | undefined>();
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [hud, setHud] = useState("");
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferences, setPreferences] = useState(initialAppState.preferences);
@@ -278,6 +270,17 @@ export function App() {
   const activeHasBookmark = Boolean(
     activeSession?.bookmarks.some((bookmark) => isSameReaderLocation(bookmark.location, activeSession.location))
   );
+  const showSmartReaderSidebar = shouldShowSmartReaderSidebar(activeSession, sidebarOpen);
+
+  useEffect(() => {
+    if (!activeSession || !selectedAnnotationId) {
+      return;
+    }
+
+    if (!activeSession.annotations.some((annotation) => annotation.id === selectedAnnotationId)) {
+      setSelectedAnnotationId("");
+    }
+  }, [activeSession?.annotations, activeSession?.id, selectedAnnotationId]);
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -303,6 +306,20 @@ export function App() {
     );
   }, [activeTabId]);
 
+  const toggleSmartReaderSidebar = useCallback(() => {
+    if (
+      activeSession?.status === "ready" &&
+      activeSession.format === "pdf" &&
+      !showSmartReaderSidebar
+    ) {
+      updateActiveSession((session) => updateSessionSidebarMode(session, "bookmarks"));
+      setSidebarOpen(true);
+      return;
+    }
+
+    setSidebarOpen((value) => !value);
+  }, [activeSession, showSmartReaderSidebar, updateActiveSession]);
+
   const showHud = useCallback((message: string) => {
     if (hudTimerRef.current) {
       window.clearTimeout(hudTimerRef.current);
@@ -310,6 +327,28 @@ export function App() {
     setHud(message);
     hudTimerRef.current = window.setTimeout(() => setHud(""), 1200);
   }, []);
+
+  const openFind = useCallback(() => {
+    if (activeSession?.status === "ready" && activeSession.format === "pdf") {
+      if (!pdfSearchBridgeRef.current?.openSearch()) {
+        showHud("PDF search is not ready");
+      }
+      return;
+    }
+
+    setFindOpen(true);
+  }, [activeSession, showHud]);
+
+  const persistNativeEpubAnchor = useEpubAnchorSync({
+    activeSession,
+    setSessions
+  });
+  const persistNativePdfKitAnnotation = usePdfKitAnnotationSync({
+    enabled: preferences.pdfKit.enabled,
+    sessions,
+    setSessions,
+    showHud
+  });
 
   const refreshCacheInfo = useCallback(async () => {
     if (!isDesktop) {
@@ -757,10 +796,11 @@ export function App() {
       );
 
       if (existing) {
-        return {
+        const nextSession = {
           ...session,
           bookmarks: session.bookmarks.filter((bookmark) => bookmark.id !== existing.id)
         };
+        return session.format === "pdf" ? { ...nextSession, sidebarMode: "bookmarks" } : nextSession;
       }
 
       const bookmark: Bookmark = {
@@ -770,33 +810,82 @@ export function App() {
         createdAt: Date.now()
       };
 
-      return { ...session, bookmarks: [bookmark, ...session.bookmarks] };
+      const nextSession = { ...session, bookmarks: [bookmark, ...session.bookmarks] };
+      return session.format === "pdf" ? { ...nextSession, sidebarMode: "bookmarks" } : nextSession;
     });
+    if (activeSession?.status === "ready" && activeSession.format === "pdf") {
+      setSidebarOpen(true);
+    }
     showHud("Bookmark updated");
-  }, [showHud, updateActiveSession]);
+  }, [activeSession, showHud, updateActiveSession]);
 
-  const addAnnotation = useCallback(() => {
+  const addAnnotation = useCallback((typeOverride?: AnnotationType, contextOverride?: AnnotationSelectionContext) => {
+    if (!activeSession || activeSession.status !== "ready" || activeSession.location.kind === "none") {
+      return;
+    }
+
+    const context = contextOverride ?? selectionContext;
+    const nextType = typeOverride ?? annotationDraft.type;
+    if (activeSession.format === "pdf" && !preferences.pdfKit.enabled) {
+      const nativeActivated = pdfNativeAnnotationBridgeRef.current?.activateTool(nextType, annotationDraft) ?? false;
+      if (nativeActivated) {
+        setSelectionContext(undefined);
+        setAnnotationDraft((current) => ({ ...current, note: "" }));
+        showHud(`${annotationTypeLabel(nextType)} tool ready`);
+        return;
+      }
+    }
+
+    const annotationId = createAnnotationId();
+    const now = Date.now();
+    const selectedText =
+      nextType === "area"
+        ? ""
+        : (context?.selectedText ?? window.getSelection?.()?.toString() ?? "")
+            .replace(/\u200b/g, "")
+            .trim()
+            .slice(0, 500);
+    const note = annotationDraft.note.trim();
+    const selection = window.getSelection?.();
+    const selectionNode = selection?.anchorNode;
+    const selectionElement = selectionNode instanceof Element ? selectionNode : selectionNode?.parentElement;
+    const location =
+      context?.location ??
+      (
+        activeSession.location.kind === "epub"
+          ? {
+              ...activeSession.location,
+              anchorOccurrenceIndex:
+                selectedText && selection && selection.rangeCount > 0
+                  ? epubSelectionOccurrenceIndex(selection, selectedText, selectionElement ?? undefined)
+                  : undefined,
+              cfi:
+                selectedText && selection && selection.rangeCount > 0
+                  ? createEpubSelectionCfi(selection, activeSession.location)
+                  : createEpubLocationCfi(activeSession.location)
+            }
+          : activeSession.location
+      );
+    const annotation: ReaderAnnotation = {
+      id: annotationId,
+      type: nextType,
+      tag: annotationDraft.tag,
+      color: annotationDraft.color,
+      thickness: annotationDraft.thickness,
+      location,
+      selectedText: selectedText || undefined,
+      area: annotationAreaForType(nextType, location, context),
+      rects: annotationRectsForType(nextType, context),
+      note: note || undefined,
+      hidden: false,
+      createdAt: now,
+      updatedAt: now
+    };
+
     updateActiveSession((session) => {
-      if (session.status !== "ready" || session.location.kind === "none") {
+      if (session.id !== activeSession.id || session.status !== "ready" || session.location.kind === "none") {
         return session;
       }
-
-      const now = Date.now();
-      const selectedText = window.getSelection?.()?.toString().trim().slice(0, 500);
-      const note = annotationDraft.note.trim();
-      const annotation: ReaderAnnotation = {
-        id: createAnnotationId(),
-        type: annotationDraft.type,
-        tag: annotationDraft.tag,
-        color: annotationDraft.color,
-        thickness: annotationDraft.thickness,
-        location: session.location,
-        selectedText: selectedText || undefined,
-        note: note || undefined,
-        hidden: false,
-        createdAt: now,
-        updatedAt: now
-      };
 
       return {
         ...session,
@@ -805,14 +894,205 @@ export function App() {
         updatedAt: now
       };
     });
+    persistNativeEpubAnchor(activeSession, annotation);
+    persistNativePdfKitAnnotation(activeSession, annotation);
+    setSelectedAnnotationId(annotationId);
     setSidebarOpen(true);
+    setSelectionContext(undefined);
     setAnnotationDraft((current) => ({ ...current, note: "" }));
-    showHud("Annotation added");
-  }, [annotationDraft, showHud, updateActiveSession]);
+    showHud(nextType === "area" ? "Area annotation added" : "Annotation added");
+  }, [activeSession, annotationDraft, persistNativeEpubAnchor, persistNativePdfKitAnnotation, preferences.pdfKit.enabled, selectionContext, showHud, updateActiveSession]);
+
+  const persistNativePdfAnnotations = useCallback((annotations: unknown[]) => {
+    const snapshot = nativePdfAnnotationSnapshot(annotations);
+
+    updateActiveSession((session) => {
+      if (session.format !== "pdf") {
+        return session;
+      }
+
+      return {
+        ...session,
+        nativePdfAnnotations: snapshot,
+        updatedAt: Date.now()
+      };
+    });
+  }, [updateActiveSession]);
+
+  const exportNativePdfAnnotations = useCallback(async () => {
+    if (activeSession?.format !== "pdf") {
+      return;
+    }
+
+    const bridge = pdfNativeAnnotationBridgeRef.current;
+    if (!bridge) {
+      showHud("PDF annotations not ready");
+      return;
+    }
+
+    try {
+      const envelope = await bridge.exportAnnotations();
+      if (envelope.annotations.length === 0) {
+        showHud("No PDF annotations to export");
+        return;
+      }
+
+      downloadTextFile(
+        JSON.stringify(envelope, null, 2),
+        `${downloadSafeName(activeSession.title)}-pdf-annotations.json`,
+        "application/json"
+      );
+      persistNativePdfAnnotations(envelope.annotations);
+      showHud("PDF annotations exported");
+    } catch {
+      showHud("PDF annotation export failed");
+    }
+  }, [activeSession, persistNativePdfAnnotations, showHud]);
+
+  const importNativePdfAnnotations = useCallback(async (content: string) => {
+    if (activeSession?.format !== "pdf") {
+      return;
+    }
+
+    const bridge = pdfNativeAnnotationBridgeRef.current;
+    if (!bridge) {
+      showHud("PDF annotations not ready");
+      return;
+    }
+
+    try {
+      const annotations = parseEmbedPdfAnnotationImport(content);
+      if (!annotations || annotations.length === 0) {
+        showHud("No PDF annotations to import");
+        return;
+      }
+
+      bridge.importAnnotations(annotations);
+      persistNativePdfAnnotations(annotations);
+      showHud("PDF annotations imported");
+    } catch {
+      showHud("PDF annotation import failed");
+    }
+  }, [activeSession, persistNativePdfAnnotations, showHud]);
+
+  const updateAnnotation = useCallback((annotationId: string, patch: Partial<ReaderAnnotation>) => {
+    const sourceAnnotation = activeSession?.annotations.find((annotation) => annotation.id === annotationId);
+    const now = Date.now();
+    const updatedNativeAnnotation = sourceAnnotation
+      ? {
+          ...sourceAnnotation,
+          ...patch,
+          updatedAt: now
+        }
+      : undefined;
+
+    updateActiveSession((session) => {
+      let changed = false;
+      const annotations = session.annotations.map((annotation) => {
+        if (annotation.id !== annotationId) {
+          return annotation;
+        }
+
+        changed = true;
+        return {
+          ...annotation,
+          ...patch,
+          updatedAt: now
+        };
+      });
+
+      return changed ? { ...session, annotations, updatedAt: now } : session;
+    });
+    if (activeSession && updatedNativeAnnotation) {
+      if (
+        patch.type &&
+        nativePdfKitUnsupportedReason(updatedNativeAnnotation) &&
+        sourceAnnotation?.nativePdfKit?.nativeId
+      ) {
+        persistNativePdfKitAnnotation(activeSession, sourceAnnotation, "delete");
+      }
+      persistNativePdfKitAnnotation(
+        activeSession,
+        updatedNativeAnnotation,
+        patch.hidden === true ? "delete" : "upsert"
+      );
+    }
+    setSelectedAnnotationId(annotationId);
+  }, [activeSession, persistNativePdfKitAnnotation, updateActiveSession]);
+
+  const renameBookmark = useCallback((bookmarkId: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    updateActiveSession((session) => {
+      let changed = false;
+      const bookmarks = session.bookmarks.map((bookmark) => {
+        if (bookmark.id !== bookmarkId || bookmark.title === trimmed) {
+          return bookmark;
+        }
+
+        changed = true;
+        return { ...bookmark, title: trimmed };
+      });
+
+      return changed ? { ...session, bookmarks, updatedAt: Date.now() } : session;
+    });
+  }, [updateActiveSession]);
+
+  const handleReaderSelection = useCallback((event: ReactMouseEvent<HTMLElement>) => {
+    if (!activeSession || activeSession.status !== "ready") {
+      setSelectionContext(undefined);
+      return;
+    }
+
+    const selection = window.getSelection?.();
+    const targetElement = event.target instanceof Element ? event.target : undefined;
+    const selectedText = (selection?.toString().replace(/\u200b/g, "").trim() || "").slice(0, 500);
+    let hasExpandedRange = false;
+    for (let index = 0; index < (selection?.rangeCount ?? 0); index += 1) {
+      if (!selection?.getRangeAt(index).collapsed) {
+        hasExpandedRange = true;
+        break;
+      }
+    }
+    if (!selection || selection.rangeCount === 0 || !hasExpandedRange || !selectedText) {
+      setSelectionContext(undefined);
+      return;
+    }
+
+    const node = selection.anchorNode;
+    const element = node instanceof Element ? node : node?.parentElement;
+    const selectionElement = element ?? targetElement;
+    if (!selectionElement?.closest(".epub-content") || activeSession.location.kind !== "epub") {
+      setSelectionContext(undefined);
+      return;
+    }
+
+    const occurrenceIndex = epubSelectionOccurrenceIndex(selection, selectedText, selectionElement);
+    const location: ReaderLocation = {
+      ...activeSession.location,
+      anchorOccurrenceIndex: occurrenceIndex,
+      cfi: createEpubSelectionCfi(selection, activeSession.location)
+    };
+
+    setSelectionContext({
+      selectedText,
+      location,
+      menuLeft: event.clientX,
+      menuTop: event.clientY
+    });
+  }, [activeSession]);
 
   const toggleAnnotationHidden = useCallback((annotationId: string) => {
+    const sourceAnnotation = activeSession?.annotations.find((annotation) => annotation.id === annotationId);
+    const now = Date.now();
+    const updatedNativeAnnotation = sourceAnnotation
+      ? { ...sourceAnnotation, hidden: !sourceAnnotation.hidden, updatedAt: now }
+      : undefined;
+
     updateActiveSession((session) => {
-      const now = Date.now();
       let changed = false;
       const annotations = session.annotations.map((annotation) => {
         if (annotation.id !== annotationId) {
@@ -825,7 +1105,14 @@ export function App() {
 
       return changed ? { ...session, annotations, updatedAt: now } : session;
     });
-  }, [updateActiveSession]);
+    if (activeSession && updatedNativeAnnotation) {
+      persistNativePdfKitAnnotation(
+        activeSession,
+        updatedNativeAnnotation,
+        updatedNativeAnnotation.hidden ? "delete" : "upsert"
+      );
+    }
+  }, [activeSession, persistNativePdfKitAnnotation, updateActiveSession]);
 
   const toggleAllAnnotationsHidden = useCallback(() => {
     if (!activeSession || activeSession.annotations.length === 0) {
@@ -849,10 +1136,21 @@ export function App() {
         updatedAt: now
       };
     });
+    activeSession.annotations.forEach((annotation) => {
+      if (annotation.hidden !== hidden) {
+        persistNativePdfKitAnnotation(
+          activeSession,
+          { ...annotation, hidden, updatedAt: now },
+          hidden ? "delete" : "upsert"
+        );
+      }
+    });
     showHud(hidden ? "Annotations hidden" : "Annotations shown");
-  }, [activeSession, showHud, updateActiveSession]);
+  }, [activeSession, persistNativePdfKitAnnotation, showHud, updateActiveSession]);
 
   const deleteAnnotation = useCallback((annotationId: string) => {
+    const sourceAnnotation = activeSession?.annotations.find((annotation) => annotation.id === annotationId);
+
     updateActiveSession((session) => {
       const annotations = session.annotations.filter((annotation) => annotation.id !== annotationId);
 
@@ -860,7 +1158,11 @@ export function App() {
         ? session
         : { ...session, annotations, updatedAt: Date.now() };
     });
-  }, [updateActiveSession]);
+    if (activeSession && sourceAnnotation) {
+      persistNativePdfKitAnnotation(activeSession, sourceAnnotation, "delete");
+    }
+    setSelectedAnnotationId((current) => (current === annotationId ? "" : current));
+  }, [activeSession, persistNativePdfKitAnnotation, updateActiveSession]);
 
   const exportAnnotations = useCallback((session: DocumentSession) => {
     if (session.annotations.length === 0) {
@@ -925,6 +1227,14 @@ export function App() {
         }
       });
   }, [preferences.wasm.enabled]);
+
+  const configurePdfNativeAnnotationBridge = useCallback((bridge?: PdfNativeAnnotationBridge) => {
+    pdfNativeAnnotationBridgeRef.current = bridge;
+  }, []);
+
+  const configurePdfSearchBridge = useCallback((bridge?: PdfSearchBridge) => {
+    pdfSearchBridgeRef.current = bridge;
+  }, []);
 
   const runSearch = useCallback(async (query: string) => {
     const trimmedQuery = query.trim();
@@ -1004,6 +1314,17 @@ export function App() {
   }, [activeNavigationHistory, activeSession, updateActiveSession]);
 
   const selectSearchResult = useCallback((direction: "next" | "previous") => {
+    if (activeSession?.status === "ready" && activeSession.format === "pdf") {
+      const handled = direction === "next"
+        ? pdfSearchBridgeRef.current?.nextResult()
+        : pdfSearchBridgeRef.current?.previousResult();
+
+      if (!handled) {
+        showHud("PDF search is not ready");
+      }
+      return;
+    }
+
     if (!activeSession || activeSession.searchResults.length === 0 || !activeSearchSelection) {
       showHud("No results");
       return;
@@ -1068,7 +1389,7 @@ export function App() {
           closeTab,
           createEmptyTab: createNewTab,
           toggleSidebar: () => setSidebarOpen((value) => !value),
-          openFind: () => setFindOpen(true),
+          openFind,
           findNext: () => selectSearchResult("next"),
           findPrevious: () => selectSearchResult("previous"),
           zoomIn: () => zoomBy(0.1),
@@ -1087,6 +1408,7 @@ export function App() {
       createNewTab,
       navigateHistoryBack,
       navigateHistoryForward,
+      openFind,
       openFilePicker,
       resetZoom,
       selectSearchResult,
@@ -1101,11 +1423,11 @@ export function App() {
       "reader.nextPage": () => movePdfPage(1),
       "reader.zoomIn": () => zoomBy(0.1),
       "reader.zoomOut": () => zoomBy(-0.1),
-      "reader.openFind": () => setFindOpen(true),
+      "reader.openFind": openFind,
       "reader.toggleBookmark": toggleBookmark,
       "reader.toggleSidebar": () => setSidebarOpen((value) => !value)
     }),
-    [movePdfPage, toggleBookmark, zoomBy]
+    [movePdfPage, openFind, toggleBookmark, zoomBy]
   );
   const readerShortcutBindings = useMemo(
     () => defaultReaderShortcutBindings(preferences.shortcuts),
@@ -1352,17 +1674,27 @@ export function App() {
 
       <CommandToolbar
         session={activeSession}
-        sidebarOpen={sidebarOpen}
+        sidebarOpen={showSmartReaderSidebar}
         locationInputRef={locationInputRef}
-        onToggleSidebar={() => setSidebarOpen((value) => !value)}
+        onToggleSidebar={toggleSmartReaderSidebar}
         onOpen={openFilePicker}
         onZoomOut={() => zoomBy(-0.1)}
         onZoomIn={() => zoomBy(0.1)}
         onResetZoom={resetZoom}
-        onOpenFind={() => setFindOpen(true)}
+        onOpenFind={openFind}
         onToggleBookmark={toggleBookmark}
         bookmarkActive={activeHasBookmark}
         onPreferences={() => setPreferencesOpen(true)}
+        onExportNativePdfAnnotations={
+          activeSession?.status === "ready" && activeSession.format === "pdf"
+            ? exportNativePdfAnnotations
+            : undefined
+        }
+        onImportNativePdfAnnotations={
+          activeSession?.status === "ready" && activeSession.format === "pdf"
+            ? importNativePdfAnnotations
+            : undefined
+        }
         onNavigateBack={navigateHistoryBack}
         onNavigateForward={navigateHistoryForward}
         canNavigateBack={canNavigateBack(activeNavigationHistory)}
@@ -1374,7 +1706,7 @@ export function App() {
         }}
       />
 
-      {findOpen ? (
+      {findOpen && activeSession?.format !== "pdf" ? (
         <FindBar
           query={findQuery}
           isSearching={isSearching}
@@ -1392,18 +1724,32 @@ export function App() {
         />
       ) : null}
 
-      <section className={`reader-workspace ${sidebarOpen ? "with-sidebar" : ""}`}>
-        {sidebarOpen ? (
+      <section
+        className={`reader-workspace ${showSmartReaderSidebar ? "with-sidebar" : ""}`}
+        style={showSmartReaderSidebar ? ({ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties) : undefined}
+      >
+        {showSmartReaderSidebar ? (
           <ReaderSidebar
             session={activeSession}
             onModeChange={(mode) => updateActiveSession((session) => updateSessionSidebarMode(session, mode))}
             onJump={jumpToLocation}
+            onRenameBookmark={renameBookmark}
             searchSelection={activeSearchSelection}
             onSelectSearchResult={selectSearchResultAtIndex}
+            selectedAnnotationId={selectedAnnotationId}
+            onSelectAnnotation={setSelectedAnnotationId}
+            onClearSelectedAnnotation={() => setSelectedAnnotationId("")}
+            onUpdateAnnotation={updateAnnotation}
             onToggleAnnotationHidden={toggleAnnotationHidden}
             onToggleAllAnnotationsHidden={toggleAllAnnotationsHidden}
             onExportAnnotations={exportAnnotations}
             onDeleteAnnotation={deleteAnnotation}
+          />
+        ) : null}
+        {showSmartReaderSidebar ? (
+          <SidebarResizeHandle
+            width={sidebarWidth}
+            onChange={setSidebarWidth}
           />
         ) : null}
 
@@ -1430,11 +1776,21 @@ export function App() {
           onOutlineChange={(outline) => updateActiveSession((session) => ({ ...session, outline }))}
           onPageCountChange={(pageCount) => updateActiveSession((session) => ({ ...session, pageCount }))}
           onSearchReady={configureSearchAdapter}
+          onPdfSearchReady={configurePdfSearchBridge}
+          onPdfNativeAnnotationReady={configurePdfNativeAnnotationBridge}
+          onPdfNativeAnnotationsChange={persistNativePdfAnnotations}
           searchQuery={findQuery}
           searchSelection={activeSearchSelection}
           annotationDraft={annotationDraft}
           onAnnotationDraftChange={setAnnotationDraft}
           onAddAnnotation={addAnnotation}
+          onExportNativePdfAnnotations={exportNativePdfAnnotations}
+          onImportNativePdfAnnotations={importNativePdfAnnotations}
+          onReaderSelection={handleReaderSelection}
+          onPdfSelectionContextChange={setSelectionContext}
+          selectionContext={selectionContext}
+          selectedAnnotationId={selectedAnnotationId}
+          onSelectAnnotation={setSelectedAnnotationId}
           onPinchZoom={handleReaderPinchZoom}
         />
       </section>
@@ -1559,6 +1915,8 @@ function CommandToolbar(props: {
   onToggleBookmark: () => void;
   bookmarkActive: boolean;
   onPreferences: () => void;
+  onExportNativePdfAnnotations?: () => void;
+  onImportNativePdfAnnotations?: (content: string) => void | Promise<void>;
   onNavigateBack: () => void;
   onNavigateForward: () => void;
   canNavigateBack: boolean;
@@ -1567,6 +1925,7 @@ function CommandToolbar(props: {
   onLocationSubmit: (location: ReaderLocation) => void;
 }) {
   const hasDocument = props.session?.status === "ready";
+  const isPdfDocument = hasDocument && props.session?.format === "pdf";
   const locationValue =
     props.session?.location.kind === "page" ? String(props.session.location.page) : locationLabel(props.session);
 
@@ -1594,60 +1953,66 @@ function CommandToolbar(props: {
         disabled={!hasDocument || !props.canNavigateForward}
         onClick={props.onNavigateForward}
       />
-      <form
-        className="location-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const value = props.locationInputRef.current?.value ?? "";
-          const page = Number(value);
-          if (Number.isFinite(page) && page > 0) {
-            props.onLocationSubmit({ kind: "page", page });
-          }
-        }}
-      >
-        <input
-          ref={props.locationInputRef}
-          aria-label="Page or location"
-          disabled={!hasDocument}
-          defaultValue={locationValue}
-          key={`${props.session?.id}-${locationValue}`}
-        />
-        {props.session?.pageCount ? <span>/ {props.session.pageCount}</span> : null}
-      </form>
-      <span className="toolbar-status" aria-live="polite">{readerStatusLabel(props.session)}</span>
-      <span className="toolbar-separator zoom-control" />
-      <ToolbarButton
-        className="zoom-control"
-        label="Zoom out"
-        icon="minus"
-        disabled={!hasDocument}
-        onClick={props.onZoomOut}
-      />
-      <button className="zoom-value zoom-control" type="button" disabled={!hasDocument} onClick={props.onResetZoom}>
-        {Math.round((props.session?.zoom ?? 1) * 100)}%
-      </button>
-      <ToolbarButton
-        className="zoom-control"
-        label="Zoom in"
-        icon="plus"
-        disabled={!hasDocument}
-        onClick={props.onZoomIn}
-      />
-      <select
-        className="fit-select"
-        aria-label="Fit mode"
-        disabled={!hasDocument || props.session?.format === "epub"}
-        value={props.session?.fitMode ?? "continuous"}
-        onChange={(event) => props.onFitMode(event.currentTarget.value as FitMode)}
-      >
-        <option value="continuous">Continuous</option>
-        <option value="single">Single</option>
-        <option value="fit-width">Fit Width</option>
-        <option value="fit-page">Fit Page</option>
-        <option value="actual-size">Actual Size</option>
-      </select>
+      {!isPdfDocument ? (
+        <>
+          <form
+            className="location-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const value = props.locationInputRef.current?.value ?? "";
+              const page = Number(value);
+              if (Number.isFinite(page) && page > 0) {
+                props.onLocationSubmit({ kind: "page", page });
+              }
+            }}
+          >
+            <input
+              ref={props.locationInputRef}
+              aria-label="Page or location"
+              disabled={!hasDocument}
+              defaultValue={locationValue}
+              key={`${props.session?.id}-${locationValue}`}
+            />
+            {props.session?.pageCount ? <span>/ {props.session.pageCount}</span> : null}
+          </form>
+          <span className="toolbar-status" aria-live="polite">{readerStatusLabel(props.session)}</span>
+          <span className="toolbar-separator zoom-control" />
+          <ToolbarButton
+            className="zoom-control"
+            label="Zoom out"
+            icon="minus"
+            disabled={!hasDocument}
+            onClick={props.onZoomOut}
+          />
+          <button className="zoom-value zoom-control" type="button" disabled={!hasDocument} onClick={props.onResetZoom}>
+            {Math.round((props.session?.zoom ?? 1) * 100)}%
+          </button>
+          <ToolbarButton
+            className="zoom-control"
+            label="Zoom in"
+            icon="plus"
+            disabled={!hasDocument}
+            onClick={props.onZoomIn}
+          />
+          <select
+            className="fit-select"
+            aria-label="Fit mode"
+            disabled={!hasDocument || props.session?.format === "epub"}
+            value={props.session?.fitMode ?? "continuous"}
+            onChange={(event) => props.onFitMode(event.currentTarget.value as FitMode)}
+          >
+            <option value="continuous">Continuous</option>
+            <option value="single">Single</option>
+            <option value="fit-width">Fit Width</option>
+            <option value="fit-page">Fit Page</option>
+            <option value="actual-size">Actual Size</option>
+          </select>
+        </>
+      ) : null}
       <span className="toolbar-spacer" />
-      <ToolbarButton label="Find" icon="search" disabled={!hasDocument} onClick={props.onOpenFind} />
+      {!isPdfDocument ? (
+        <ToolbarButton label="Find" icon="search" disabled={!hasDocument} onClick={props.onOpenFind} />
+      ) : null}
       <ToolbarButton
         label="Bookmark"
         icon="bookmark"
@@ -1655,6 +2020,12 @@ function CommandToolbar(props: {
         pressed={props.bookmarkActive}
         onClick={props.onToggleBookmark}
       />
+      {isPdfDocument && props.onExportNativePdfAnnotations && props.onImportNativePdfAnnotations ? (
+        <PdfAnnotationActions
+          onExport={props.onExportNativePdfAnnotations}
+          onImport={props.onImportNativePdfAnnotations}
+        />
+      ) : null}
       <ToolbarButton label="More" icon="more" onClick={props.onPreferences} />
     </header>
   );
@@ -1739,18 +2110,50 @@ function FindBar(props: {
   );
 }
 
+function shouldShowSmartReaderSidebar(session: DocumentSession | undefined, sidebarOpen: boolean): boolean {
+  if (!sidebarOpen) {
+    return false;
+  }
+
+  if (
+    session?.status === "ready" &&
+    session.format === "pdf" &&
+    !pdfSmartReaderSidebarModes(session).includes(session.sidebarMode)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function pdfSmartReaderSidebarModes(session: DocumentSession): SidebarMode[] {
+  return session.annotations.length > 0 || session.sidebarMode === "annotations"
+    ? ["bookmarks", "annotations"]
+    : ["bookmarks"];
+}
+
 function ReaderSidebar(props: {
   session?: DocumentSession;
   onModeChange: (mode: SidebarMode) => void;
   onJump: (location: ReaderLocation) => void;
+  onRenameBookmark: (id: string, title: string) => void;
   searchSelection?: SearchSelection;
   onSelectSearchResult: (index: number) => void;
+  selectedAnnotationId: string;
+  onSelectAnnotation: (id: string) => void;
+  onClearSelectedAnnotation: () => void;
+  onUpdateAnnotation: (id: string, patch: Partial<ReaderAnnotation>) => void;
   onToggleAnnotationHidden: (id: string) => void;
   onToggleAllAnnotationsHidden: () => void;
   onExportAnnotations: (session: DocumentSession) => void;
   onDeleteAnnotation: (id: string) => void;
 }) {
-  const mode = props.session?.sidebarMode ?? "contents";
+  const rawMode = props.session?.sidebarMode ?? "contents";
+  const modes = props.session?.status === "ready" && props.session.format === "pdf"
+    ? pdfSmartReaderSidebarModes(props.session)
+    : (["contents", "bookmarks", "search", "annotations"] as SidebarMode[]);
+  const normalizedMode = rawMode === "thumbnails" ? "contents" : rawMode;
+  const mode = modes.includes(normalizedMode) ? normalizedMode : modes[0];
   const contentRef = useRef<HTMLDivElement>(null);
   const [scrollState, setScrollState] = useState({ top: 0, height: 0 });
   const syncScrollState = useCallback(() => {
@@ -1780,7 +2183,7 @@ function ReaderSidebar(props: {
   return (
     <aside className="reader-sidebar" aria-label="Document navigation">
       <div className="sidebar-modes" role="tablist" aria-label="Sidebar modes">
-        {(["contents", "thumbnails", "bookmarks", "search", "annotations"] as SidebarMode[]).map((item) => (
+        {modes.map((item) => (
           <button
             key={item}
             type="button"
@@ -1798,8 +2201,13 @@ function ReaderSidebar(props: {
           session={props.session}
           mode={mode}
           onJump={props.onJump}
+          onRenameBookmark={props.onRenameBookmark}
           searchSelection={props.searchSelection}
           onSelectSearchResult={props.onSelectSearchResult}
+          selectedAnnotationId={props.selectedAnnotationId}
+          onSelectAnnotation={props.onSelectAnnotation}
+          onClearSelectedAnnotation={props.onClearSelectedAnnotation}
+          onUpdateAnnotation={props.onUpdateAnnotation}
           onToggleAnnotationHidden={props.onToggleAnnotationHidden}
           onToggleAllAnnotationsHidden={props.onToggleAllAnnotationsHidden}
           onExportAnnotations={props.onExportAnnotations}
@@ -1812,36 +2220,75 @@ function ReaderSidebar(props: {
   );
 }
 
-function visibleRowRange(
-  total: number,
-  rowHeight: number,
-  scrollTop: number,
-  viewportHeight: number,
-  overscanRows: number
-): { start: number; end: number } {
-  if (total <= 0) {
-    return { start: 0, end: 0 };
-  }
+function SidebarResizeHandle(props: {
+  width: number;
+  onChange: (width: number) => void;
+}) {
+  const dragStartRef = useRef<{ x: number; width: number } | undefined>(undefined);
+  const commitWidth = useCallback((width: number) => {
+    props.onChange(clampSidebarWidth(width));
+  }, [props]);
 
-  const windowSize = Math.ceil(viewportHeight / rowHeight) + overscanRows * 2;
-  const maxStart = Math.max(0, total - windowSize);
-  const start = Math.min(
-    Math.max(0, Math.floor(scrollTop / rowHeight) - overscanRows),
-    maxStart
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      const start = dragStartRef.current;
+      if (!start) {
+        return;
+      }
+
+      commitWidth(start.width + event.clientX - start.x);
+    };
+    const onPointerUp = () => {
+      dragStartRef.current = undefined;
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [commitWidth]);
+
+  return (
+    <div
+      className="sidebar-resize-handle"
+      role="separator"
+      aria-label="Resize sidebar"
+      aria-orientation="vertical"
+      aria-valuemin={SIDEBAR_MIN_WIDTH}
+      aria-valuemax={SIDEBAR_MAX_WIDTH}
+      aria-valuenow={props.width}
+      tabIndex={0}
+      onPointerDown={(event) => {
+        dragStartRef.current = { x: event.clientX, width: props.width };
+      }}
+      onDoubleClick={() => props.onChange(SIDEBAR_DEFAULT_WIDTH)}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          commitWidth(props.width - 10);
+        }
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          commitWidth(props.width + 10);
+        }
+      }}
+    />
   );
-
-  return {
-    start,
-    end: Math.min(total, start + windowSize)
-  };
 }
 
 function SidebarRows(props: {
   session?: DocumentSession;
   mode: SidebarMode;
   onJump: (location: ReaderLocation) => void;
+  onRenameBookmark: (id: string, title: string) => void;
   searchSelection?: SearchSelection;
   onSelectSearchResult: (index: number) => void;
+  selectedAnnotationId: string;
+  onSelectAnnotation: (id: string) => void;
+  onClearSelectedAnnotation: () => void;
+  onUpdateAnnotation: (id: string, patch: Partial<ReaderAnnotation>) => void;
   onToggleAnnotationHidden: (id: string) => void;
   onToggleAllAnnotationsHidden: () => void;
   onExportAnnotations: (session: DocumentSession) => void;
@@ -1851,16 +2298,9 @@ function SidebarRows(props: {
 }) {
   const session = props.session;
   const [collapsedOutlineIds, setCollapsedOutlineIds] = useState<Set<string>>(() => new Set());
-  const [annotationTypeFilter, setAnnotationTypeFilter] = useState<AnnotationType | "all">("all");
-  const [annotationTagFilter, setAnnotationTagFilter] = useState<AnnotationTag | "all">("all");
-  const [showHiddenAnnotations, setShowHiddenAnnotations] = useState(true);
-  const [confirmingDeleteId, setConfirmingDeleteId] = useState("");
-  const annotationWindowRef = useRef<HTMLDivElement>(null);
-  const [annotationWindowOffsetTop, setAnnotationWindowOffsetTop] = useState(0);
 
   useEffect(() => {
     setCollapsedOutlineIds(new Set());
-    setConfirmingDeleteId("");
   }, [session?.id]);
 
   useEffect(() => {
@@ -1874,22 +2314,6 @@ function SidebarRows(props: {
       return next.size === current.size ? current : next;
     });
   }, [session?.outline]);
-
-  useEffect(() => {
-    if (props.mode !== "annotations") {
-      return;
-    }
-
-    const offsetTop = annotationWindowRef.current?.offsetTop ?? 0;
-    setAnnotationWindowOffsetTop((current) => (current === offsetTop ? current : offsetTop));
-  }, [
-    annotationTagFilter,
-    annotationTypeFilter,
-    props.mode,
-    session?.annotations.length,
-    session?.id,
-    showHiddenAnnotations
-  ]);
 
   const outlineRows = useMemo(
     () => session?.status === "ready" ? visibleOutlineRows(session.outline, collapsedOutlineIds) : [],
@@ -1916,15 +2340,14 @@ function SidebarRows(props: {
       return <p className="empty-note">No outline in this document.</p>;
     }
 
-    const viewportHeight = props.viewportHeight || OUTLINE_FALLBACK_VIEWPORT_HEIGHT;
-    const windowSize = Math.ceil(viewportHeight / OUTLINE_ROW_HEIGHT) + OUTLINE_OVERSCAN_ROWS * 2;
-    const maxStart = Math.max(0, outlineRows.length - windowSize);
-    const startIndex = Math.min(
-      Math.max(0, Math.floor(props.scrollTop / OUTLINE_ROW_HEIGHT) - OUTLINE_OVERSCAN_ROWS),
-      maxStart
+    const range = visibleRowRange(
+      outlineRows.length,
+      OUTLINE_ROW_HEIGHT,
+      props.scrollTop,
+      props.viewportHeight || OUTLINE_FALLBACK_VIEWPORT_HEIGHT,
+      OUTLINE_OVERSCAN_ROWS
     );
-    const endIndex = Math.min(outlineRows.length, startIndex + windowSize);
-    const visibleRows = outlineRows.slice(startIndex, endIndex);
+    const visibleRows = outlineRows.slice(range.start, range.end);
 
     return (
       <div
@@ -1934,7 +2357,7 @@ function SidebarRows(props: {
         }}
       >
         {visibleRows.map((row, offset) => {
-          const index = startIndex + offset;
+          const index = range.start + offset;
 
           return (
             <OutlineSidebarRow
@@ -1953,18 +2376,7 @@ function SidebarRows(props: {
   }
 
   if (props.mode === "thumbnails") {
-    if (session.format !== "pdf") {
-      return <p className="empty-note">Thumbnails are available for PDFs.</p>;
-    }
-
-    return (
-      <PdfThumbnailList
-        session={session}
-        onJump={props.onJump}
-        scrollTop={props.scrollTop}
-        viewportHeight={props.viewportHeight}
-      />
-    );
+    return <p className="empty-note">PDF thumbnails are handled by the PDF viewer.</p>;
   }
 
   if (props.mode === "bookmarks") {
@@ -1973,158 +2385,33 @@ function SidebarRows(props: {
     }
 
     return session.bookmarks.map((bookmark) => (
-      <button
+      <BookmarkSidebarRow
         key={bookmark.id}
-        className={`sidebar-row ${isSameReaderLocation(bookmark.location, session.location) ? "active" : ""}`}
-        type="button"
-        aria-current={isSameReaderLocation(bookmark.location, session.location) ? "true" : undefined}
-        onClick={() => props.onJump(bookmark.location)}
-      >
-        {bookmark.title}
-      </button>
+        bookmark={bookmark}
+        active={isSameReaderLocation(bookmark.location, session.location)}
+        onJump={props.onJump}
+        onRename={props.onRenameBookmark}
+      />
     ));
   }
 
   if (props.mode === "annotations") {
-    const hasAnnotations = session.annotations.length > 0;
-    const hasVisibleAnnotations = session.annotations.some((annotation) => !annotation.hidden);
-    const annotations = session.annotations.filter((annotation) => {
-      if (!showHiddenAnnotations && annotation.hidden) {
-        return false;
-      }
-
-      return (
-        (annotationTypeFilter === "all" || annotation.type === annotationTypeFilter) &&
-        (annotationTagFilter === "all" || annotation.tag === annotationTagFilter)
-      );
-    });
-    const range = visibleRowRange(
-      annotations.length,
-      ANNOTATION_ROW_HEIGHT,
-      Math.max(0, props.scrollTop - annotationWindowOffsetTop),
-      props.viewportHeight || ANNOTATION_FALLBACK_VIEWPORT_HEIGHT,
-      ANNOTATION_OVERSCAN_ROWS
-    );
-    const visibleAnnotations = annotations.slice(range.start, range.end);
-
     return (
-      <div className="annotation-sidebar">
-        <div className="annotation-filters">
-          <select
-            aria-label="Annotation type filter"
-            value={annotationTypeFilter}
-            onChange={(event) => setAnnotationTypeFilter(event.currentTarget.value as AnnotationType | "all")}
-          >
-            <option value="all">All types</option>
-            {annotationTypes.map((type) => (
-              <option key={type} value={type}>{annotationTypeLabel(type)}</option>
-            ))}
-          </select>
-          <select
-            aria-label="Annotation tag filter"
-            value={annotationTagFilter}
-            onChange={(event) => setAnnotationTagFilter(event.currentTarget.value as AnnotationTag | "all")}
-          >
-            <option value="all">All tags</option>
-            {annotationTags.map((tag) => (
-              <option key={tag} value={tag}>{tag}</option>
-            ))}
-          </select>
-          <label>
-            <input
-              type="checkbox"
-              checked={showHiddenAnnotations}
-              onChange={(event) => setShowHiddenAnnotations(event.currentTarget.checked)}
-            />
-            Show hidden
-          </label>
-        </div>
-        <div className="annotation-bulk-actions">
-          <button
-            type="button"
-            disabled={!hasAnnotations}
-            onClick={() => props.onExportAnnotations(session)}
-          >
-            Export annotations
-          </button>
-          <button
-            type="button"
-            disabled={!hasAnnotations}
-            onClick={props.onToggleAllAnnotationsHidden}
-          >
-            {hasVisibleAnnotations ? "Hide all annotations" : "Show all annotations"}
-          </button>
-        </div>
-        {annotations.length === 0 ? (
-          <p className="empty-note">No annotations match these filters.</p>
-        ) : (
-          <div
-            ref={annotationWindowRef}
-            className="annotation-window"
-            style={{
-              ...outlineWindowStyle,
-              height: `${annotations.length * ANNOTATION_ROW_HEIGHT}px`
-            }}
-          >
-            {visibleAnnotations.map((annotation, offset) => {
-              const index = range.start + offset;
-              const title = annotationTitle(annotation);
-              const confirmingDelete = confirmingDeleteId === annotation.id;
-
-              return (
-                <div
-                  key={annotation.id}
-                  className={`annotation-row ${annotation.hidden ? "hidden" : ""}`}
-                  style={{
-                    position: "absolute",
-                    top: `${index * ANNOTATION_ROW_HEIGHT}px`,
-                    left: 0,
-                    right: 0,
-                    height: `${ANNOTATION_ROW_HEIGHT}px`,
-                    boxSizing: "border-box"
-                  }}
-                >
-                  <button
-                    className="annotation-row-main"
-                    type="button"
-                    onClick={() => props.onJump(annotation.location)}
-                  >
-                    <span>
-                      <strong>{title}</strong>
-                      <small>{annotationTypeLabel(annotation.type)} · {annotation.tag}</small>
-                    </span>
-                  </button>
-                  <div className="annotation-row-actions">
-                    <button
-                      type="button"
-                      aria-label={`${annotation.hidden ? "Show" : "Hide"} annotation ${title}`}
-                      onClick={() => props.onToggleAnnotationHidden(annotation.id)}
-                    >
-                      {annotation.hidden ? "Show" : "Hide"}
-                    </button>
-                    <button
-                      type="button"
-                      className={confirmingDelete ? "danger" : ""}
-                      aria-label={`${confirmingDelete ? "Confirm delete" : "Delete"} annotation ${title}`}
-                      onClick={() => {
-                        if (confirmingDelete) {
-                          props.onDeleteAnnotation(annotation.id);
-                          setConfirmingDeleteId("");
-                          return;
-                        }
-
-                        setConfirmingDeleteId(annotation.id);
-                      }}
-                    >
-                      {confirmingDelete ? "Confirm" : "Delete"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      <AnnotationSidebar
+        session={session}
+        selectedAnnotationId={props.selectedAnnotationId}
+        getAnnotationTitle={annotationTitle}
+        onJump={props.onJump}
+        onSelectAnnotation={props.onSelectAnnotation}
+        onClearSelectedAnnotation={props.onClearSelectedAnnotation}
+        onUpdateAnnotation={props.onUpdateAnnotation}
+        onToggleAnnotationHidden={props.onToggleAnnotationHidden}
+        onToggleAllAnnotationsHidden={props.onToggleAllAnnotationsHidden}
+        onExportAnnotations={props.onExportAnnotations}
+        onDeleteAnnotation={props.onDeleteAnnotation}
+        scrollTop={props.scrollTop}
+        viewportHeight={props.viewportHeight}
+      />
     );
   }
 
@@ -2173,6 +2460,46 @@ function SidebarRows(props: {
           </button>
         );
       })}
+    </div>
+  );
+}
+
+function BookmarkSidebarRow(props: {
+  bookmark: Bookmark;
+  active: boolean;
+  onJump: (location: ReaderLocation) => void;
+  onRename: (id: string, title: string) => void;
+}) {
+  const [title, setTitle] = useState(props.bookmark.title);
+
+  useEffect(() => {
+    setTitle(props.bookmark.title);
+  }, [props.bookmark.id, props.bookmark.title]);
+
+  return (
+    <div className={`sidebar-row mark-row ${props.active ? "active" : ""}`}>
+      <button
+        type="button"
+        aria-current={props.active ? "true" : undefined}
+        onClick={() => props.onJump(props.bookmark.location)}
+      >
+        {props.bookmark.title}
+      </button>
+      <input
+        aria-label={`Rename mark ${props.bookmark.title}`}
+        value={title}
+        onChange={(event) => setTitle(event.currentTarget.value)}
+        onBlur={() => {
+          const trimmed = title.trim();
+          if (!trimmed) {
+            setTitle(props.bookmark.title);
+            return;
+          }
+
+          props.onRename(props.bookmark.id, trimmed);
+          setTitle(trimmed);
+        }}
+      />
     </div>
   );
 }
@@ -2228,111 +2555,6 @@ const OutlineSidebarRow = memo(function OutlineSidebarRow(props: {
   );
 });
 
-function PdfThumbnailList(props: {
-  session: DocumentSession;
-  onJump: (location: ReaderLocation) => void;
-  scrollTop: number;
-  viewportHeight: number;
-}) {
-  const pageCount = props.session.pageCount ?? 0;
-  const path = props.session.fileSource.kind === "desktop-path" ? props.session.fileSource.path : undefined;
-  const range = visibleRowRange(
-    pageCount,
-    THUMBNAIL_ROW_HEIGHT,
-    props.scrollTop,
-    props.viewportHeight || THUMBNAIL_FALLBACK_VIEWPORT_HEIGHT,
-    THUMBNAIL_OVERSCAN_ROWS
-  );
-  const activePage = props.session.location.kind === "page" ? props.session.location.page : undefined;
-
-  if (pageCount === 0) {
-    return <p className="empty-note">PDF thumbnails appear after page metadata loads.</p>;
-  }
-
-  const visiblePages = Array.from({ length: range.end - range.start }, (_, index) => range.start + index + 1);
-  if (activePage && activePage >= 1 && activePage <= pageCount && !visiblePages.includes(activePage)) {
-    visiblePages.push(activePage);
-    visiblePages.sort((first, second) => first - second);
-  }
-
-  return (
-    <div
-      style={{
-        ...outlineWindowStyle,
-        height: `${pageCount * THUMBNAIL_ROW_HEIGHT}px`
-      }}
-    >
-      {visiblePages.map((page) => (
-        <PdfThumbnailRow
-          key={`${props.session.id}-${page}`}
-          path={path}
-          page={page}
-          active={activePage === page}
-          onJump={props.onJump}
-        />
-      ))}
-    </div>
-  );
-}
-
-function PdfThumbnailRow(props: {
-  path?: string;
-  page: number;
-  active: boolean;
-  onJump: (location: ReaderLocation) => void;
-}) {
-  const [dataUrl, setDataUrl] = useState("");
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let disposed = false;
-    if (!props.path) {
-      return;
-    }
-
-    setDataUrl("");
-    setFailed(false);
-    renderPdfPageImage(props.path, props.page, THUMBNAIL_SCALE)
-      .then((image) => {
-        if (!disposed) {
-          setDataUrl(image.dataUrl);
-        }
-      })
-      .catch(() => {
-        if (!disposed) {
-          setFailed(true);
-        }
-      });
-
-    return () => {
-      disposed = true;
-    };
-  }, [props.page, props.path]);
-
-  return (
-    <button
-      className={`thumbnail-row ${props.active ? "active" : ""}`}
-      type="button"
-      aria-label={`Page ${props.page}`}
-      onClick={() => props.onJump({ kind: "page", page: props.page })}
-      style={{
-        position: "absolute",
-        top: `${(props.page - 1) * THUMBNAIL_ROW_HEIGHT}px`,
-        left: 0,
-        right: 0,
-        height: `${THUMBNAIL_ROW_HEIGHT}px`,
-        boxSizing: "border-box"
-      }}
-    >
-      <span className="thumbnail-box">
-        {dataUrl ? <img src={dataUrl} alt={`Thumbnail page ${props.page}`} /> : failed ? "!" : props.page}
-      </span>
-      <span>Page {props.page}</span>
-      {failed ? <small>Preview failed</small> : null}
-    </button>
-  );
-}
-
 function ReaderViewport(props: {
   session?: DocumentSession;
   recentFiles: RecentFile[];
@@ -2348,11 +2570,21 @@ function ReaderViewport(props: {
   onOutlineChange: (outline: OutlineItem[]) => void;
   onPageCountChange: (pageCount: number) => void;
   onSearchReady: (handler: (query: string) => Promise<SearchResult[]>, wasmDocuments?: SearchWorkerDocument[]) => void;
+  onPdfSearchReady: (bridge?: PdfSearchBridge) => void;
+  onPdfNativeAnnotationReady: (bridge?: PdfNativeAnnotationBridge) => void;
+  onPdfNativeAnnotationsChange: (annotations: unknown[]) => void;
   searchQuery: string;
   searchSelection?: SearchSelection;
   annotationDraft: AnnotationDraft;
   onAnnotationDraftChange: (draft: AnnotationDraft) => void;
-  onAddAnnotation: () => void;
+  onAddAnnotation: (type?: AnnotationType, context?: AnnotationSelectionContext) => void;
+  onExportNativePdfAnnotations: () => void;
+  onImportNativePdfAnnotations: (content: string) => void | Promise<void>;
+  onReaderSelection: (event: ReactMouseEvent<HTMLElement>) => void;
+  onPdfSelectionContextChange: (context?: AnnotationSelectionContext) => void;
+  selectionContext?: AnnotationSelectionContext;
+  selectedAnnotationId: string;
+  onSelectAnnotation: (id: string) => void;
   onPinchZoom: (event: React.WheelEvent<HTMLElement>) => void;
 }) {
   const session = props.session;
@@ -2377,13 +2609,22 @@ function ReaderViewport(props: {
       className="reader-viewport"
       tabIndex={0}
       aria-label={`${session.title} reader`}
+      onMouseUp={session.format === "pdf" ? undefined : props.onReaderSelection}
       onWheel={props.onPinchZoom}
     >
-      <AnnotationBar
-        draft={props.annotationDraft}
-        onChange={props.onAnnotationDraftChange}
-        onAdd={props.onAddAnnotation}
-      />
+      {session.format !== "pdf" || props.preferences.pdfKit.enabled ? (
+        <AnnotationBar
+          draft={props.annotationDraft}
+          onChange={props.onAnnotationDraftChange}
+          onAdd={props.onAddAnnotation}
+        />
+      ) : null}
+      {props.selectionContext && (session.format !== "pdf" || props.preferences.pdfKit.enabled) ? (
+        <AnnotationQuickMenu
+          context={props.selectionContext}
+          onCreate={(type) => props.onAddAnnotation(type, props.selectionContext)}
+        />
+      ) : null}
       {session.format === "pdf" ? (
         <PdfReader
           session={session}
@@ -2393,9 +2634,16 @@ function ReaderViewport(props: {
           onLocationChange={props.onLocationChange}
           onOutlineChange={props.onOutlineChange}
           onPageCountChange={props.onPageCountChange}
-          onSearchReady={props.onSearchReady}
-          searchQuery={props.searchQuery}
-          searchSelection={props.searchSelection}
+          onPdfSearchReady={props.onPdfSearchReady}
+          onNativeAnnotationReady={props.onPdfNativeAnnotationReady}
+          onNativeAnnotationsChange={props.onPdfNativeAnnotationsChange}
+          selectedAnnotationId={props.selectedAnnotationId}
+          onSelectAnnotation={props.onSelectAnnotation}
+          onAddAnnotation={props.onAddAnnotation}
+          selectionContextEnabled={props.preferences.pdfKit.enabled}
+          onSelectionContextChange={
+            props.preferences.pdfKit.enabled ? props.onPdfSelectionContextChange : () => undefined
+          }
         />
       ) : (
         <EpubReader
@@ -2408,69 +2656,11 @@ function ReaderViewport(props: {
           onSearchReady={props.onSearchReady}
           searchQuery={props.searchQuery}
           searchSelection={props.searchSelection}
+          selectedAnnotationId={props.selectedAnnotationId}
+          onSelectAnnotation={props.onSelectAnnotation}
         />
       )}
     </section>
-  );
-}
-
-function AnnotationBar(props: {
-  draft: AnnotationDraft;
-  onChange: (draft: AnnotationDraft) => void;
-  onAdd: () => void;
-}) {
-  return (
-    <form
-      className="annotation-bar"
-      onSubmit={(event) => {
-        event.preventDefault();
-        props.onAdd();
-      }}
-    >
-      <select
-        aria-label="Annotation type"
-        value={props.draft.type}
-        onChange={(event) => props.onChange({ ...props.draft, type: event.currentTarget.value as AnnotationType })}
-      >
-        {annotationTypes.map((type) => (
-          <option key={type} value={type}>{annotationTypeLabel(type)}</option>
-        ))}
-      </select>
-      <select
-        aria-label="Annotation tag"
-        value={props.draft.tag}
-        onChange={(event) => props.onChange({ ...props.draft, tag: event.currentTarget.value as AnnotationTag })}
-      >
-        {annotationTags.map((tag) => (
-          <option key={tag} value={tag}>{tag}</option>
-        ))}
-      </select>
-      <select
-        aria-label="Annotation color"
-        value={props.draft.color}
-        onChange={(event) => props.onChange({ ...props.draft, color: event.currentTarget.value })}
-      >
-        {annotationColors.map((color) => (
-          <option key={color} value={color}>{color}</option>
-        ))}
-      </select>
-      <select
-        aria-label="Annotation thickness"
-        value={props.draft.thickness}
-        onChange={(event) => props.onChange({ ...props.draft, thickness: Number(event.currentTarget.value) })}
-      >
-        {annotationThicknesses.map((thickness) => (
-          <option key={thickness} value={thickness}>{thickness}px</option>
-        ))}
-      </select>
-      <input
-        aria-label="Annotation note"
-        placeholder="Note"
-        value={props.draft.note}
-        onChange={(event) => props.onChange({ ...props.draft, note: event.currentTarget.value })}
-      />
-      <button type="submit">Add annotation</button>
-    </form>
   );
 }
 
@@ -2562,86 +2752,81 @@ function PdfReader(props: {
   onLocationChange: (location: ReaderLocation) => void;
   onOutlineChange: (outline: OutlineItem[]) => void;
   onPageCountChange: (pageCount: number) => void;
-  onSearchReady: (handler: (query: string) => Promise<SearchResult[]>, wasmDocuments?: SearchWorkerDocument[]) => void;
-  searchQuery: string;
-  searchSelection?: SearchSelection;
+  onPdfSearchReady: (bridge?: PdfSearchBridge) => void;
+  onNativeAnnotationReady: (bridge?: PdfNativeAnnotationBridge) => void;
+  onNativeAnnotationsChange: (annotations: unknown[]) => void;
+  selectedAnnotationId: string;
+  onSelectAnnotation: (id: string) => void;
+  onAddAnnotation: (type?: AnnotationType, context?: AnnotationSelectionContext) => void;
+  selectionContextEnabled: boolean;
+  onSelectionContextChange: (context?: AnnotationSelectionContext) => void;
 }) {
-  const canvasRef = useRef<HTMLDivElement>(null);
+  const viewerRef = useRef<HTMLDivElement>(null);
   const lastScrollRevisionRef = useRef<number | undefined>(undefined);
-  const [pdf, setPdf] = useState<PDFDocumentProxy | undefined>(
-    () => props.documentCache.get(props.session.id)?.pdf
+  const lastSelectionPointerRef = useRef<{ left: number; top: number } | undefined>(undefined);
+  const nativeAnnotationsImportKeyRef = useRef("");
+  const [viewerUrl, setViewerUrl] = useState<string | undefined>(
+    () => props.documentCache.get(props.session.id)?.pdfViewerUrl
   );
+  const [viewerRegistry, setViewerRegistry] = useState<PluginRegistry | undefined>();
   const [error, setError] = useState("");
-  const [pdfKitNotice, setPdfKitNotice] = useState("");
-  const pdfKitPath =
-    props.preferences.pdfKit.enabled && props.session.fileSource.kind === "desktop-path"
-      ? props.session.fileSource.path
-      : undefined;
-
-  useEffect(() => {
-    setPdfKitNotice("");
-  }, [pdfKitPath]);
+  const nativeAnnotationsImportKey = nativePdfAnnotationImportKey(props.session.id, props.session.nativePdfAnnotations);
 
   useEffect(() => {
     let disposed = false;
     const cachedDocument = props.documentCache.get(props.session.id);
-    const cached = cachedDocument?.pdf;
+    const cachedViewerUrl = cachedDocument?.pdfViewerUrl;
+    const cachedMetadata = cachedDocument?.pdfMetadata;
 
     async function loadPdf() {
       setError("");
-      const metadataPromise = loadPdfMetadata(props.session, props.documentCache);
+      setViewerRegistry(undefined);
 
-      if (cached) {
-        setPdf(cached);
-        metadataPromise.then((metadata) => {
-          if (disposed) {
-            return;
-          }
-          props.onPageCountChange(metadata.pageCount);
-          props.onOutlineChange(metadata.outline);
-          props.onSearchReady(createPdfSearchHandler(props.session.fileSource, cached));
-        }).catch(() => {
-          if (disposed) {
-            return;
-          }
-          props.onPageCountChange(cached.numPages);
-          props.onSearchReady((query) => searchPdf(cached, query));
-        });
+      if (cachedViewerUrl && cachedMetadata) {
+        setViewerUrl(cachedViewerUrl);
+        props.onPageCountChange(cachedMetadata.pageCount);
+        props.onOutlineChange(cachedMetadata.outline);
         return;
       }
 
-      setPdf(undefined);
+      setViewerUrl(cachedViewerUrl);
 
       try {
         if (props.session.fileSource.kind === "empty") {
           throw new Error("Missing file source");
         }
+        const metadataPromise = loadPdfMetadata(props.session, props.documentCache);
         const data = await readFileSource(props.session.fileSource);
-        const pdfjs = await loadPdfJs();
-        const loaded = await pdfjs.getDocument({ data }).promise;
+        const nextViewerUrl = createPdfViewerBlobUrl(data);
 
         if (disposed) {
-          loaded.destroy();
+          URL.revokeObjectURL(nextViewerUrl);
           return;
         }
 
         props.documentCache.set(props.session.id, {
           ...props.documentCache.get(props.session.id),
-          pdf: loaded
+          pdfViewerUrl: nextViewerUrl
         });
-        setPdf(loaded);
-        const metadata = await metadataPromise.catch(async () => ({
-          id: props.session.filePath ?? props.session.id,
-          pageCount: loaded.numPages,
-          outline: await outlineFromPdf(loaded)
-        }));
+        setViewerUrl(nextViewerUrl);
+
+        const metadata = await metadataPromise.catch(async () => {
+          return {
+            id: props.session.filePath ?? props.session.id,
+            pageCount: props.session.pageCount ?? 0,
+            outline: props.session.outline
+          };
+        });
+
         if (disposed) {
-          loaded.destroy();
           return;
         }
+        props.documentCache.set(props.session.id, {
+          ...props.documentCache.get(props.session.id),
+          pdfMetadata: metadata
+        });
         props.onPageCountChange(metadata.pageCount);
         props.onOutlineChange(metadata.outline);
-        props.onSearchReady(createPdfSearchHandler(props.session.fileSource, loaded));
       } catch {
         setError("This PDF could not be rendered.");
       }
@@ -2651,10 +2836,10 @@ function PdfReader(props: {
     return () => {
       disposed = true;
     };
-  }, [props.documentCache, props.onSearchReady, props.session.id]);
+  }, [props.documentCache, props.session.id]);
 
   useEffect(() => {
-    if (!pdf || props.session.fitMode === "single" || props.session.location.kind !== "page") {
+    if (!viewerRegistry || props.session.location.kind !== "page") {
       return;
     }
 
@@ -2663,298 +2848,198 @@ function PdfReader(props: {
     }
 
     lastScrollRevisionRef.current = props.scrollRevision;
-    window.requestAnimationFrame(() => {
-      const pageFrame = canvasRef.current?.querySelector<HTMLElement>(
-        `[data-page-number="${props.session.location.kind === "page" ? props.session.location.page : 1}"]`
-      );
-      pageFrame?.scrollIntoView?.({ block: "start" });
+    const frame = window.requestAnimationFrame(() => {
+      scrollEmbedPdfViewerToPage(viewerRegistry, props.session.location.kind === "page" ? props.session.location.page : 1);
     });
-  }, [pdf, props.scrollRevision, props.session.fitMode, props.session.id, props.session.location]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [props.scrollRevision, props.session.id, props.session.location, viewerRegistry]);
 
-  const handleVisiblePage = useCallback((pageNumber: number) => {
-    if (props.session.location.kind === "page" && props.session.location.page === pageNumber) {
+  useEffect(() => {
+    if (!viewerRegistry) {
       return;
     }
 
-    props.onLocationChange({ kind: "page", page: pageNumber });
-  }, [props.onLocationChange, props.session.location]);
+    const scroll = embedPdfScrollCapability(viewerRegistry);
+    return scroll?.onPageChange((event) => {
+      if (event.totalPages > 0 && props.session.pageCount !== event.totalPages) {
+        props.onPageCountChange(event.totalPages);
+      }
+
+      if (props.session.location.kind === "page" && props.session.location.page === event.pageNumber) {
+        return;
+      }
+
+      props.onLocationChange({ kind: "page", page: event.pageNumber });
+    });
+  }, [props.onLocationChange, props.onPageCountChange, props.session.location, props.session.pageCount, viewerRegistry]);
+
+  useEffect(() => {
+    if (!viewerRegistry) {
+      return;
+    }
+
+    const documentId = embedPdfActiveDocumentId(viewerRegistry);
+    if (!documentId) {
+      return;
+    }
+
+    embedPdfZoomCapability(viewerRegistry)?.forDocument(documentId).requestZoom(
+      embedPdfZoomLevel(props.session.fitMode, props.session.zoom)
+    );
+  }, [props.session.fitMode, props.session.zoom, viewerRegistry]);
+
+  useEffect(() => {
+    if (!viewerRegistry) {
+      props.onPdfSearchReady(undefined);
+      return;
+    }
+
+    const search = embedPdfSearchCapability(viewerRegistry);
+    const documentId = embedPdfActiveDocumentId(viewerRegistry);
+    props.onPdfSearchReady(
+      search && documentId
+        ? {
+            openSearch: () => {
+              search.startSearch(documentId);
+              search.setShowAllResults(true, documentId);
+              return true;
+            },
+            nextResult: () => {
+              search.nextResult(documentId);
+              return true;
+            },
+            previousResult: () => {
+              search.previousResult(documentId);
+              return true;
+            }
+          }
+        : undefined
+    );
+    return () => props.onPdfSearchReady(undefined);
+  }, [props.onPdfSearchReady, viewerRegistry]);
+
+  useEffect(() => {
+    if (!viewerRegistry) {
+      props.onNativeAnnotationReady(undefined);
+      return;
+    }
+
+    const bridge = createEmbedPdfAnnotationBridge(viewerRegistry, (annotations) => {
+      nativeAnnotationsImportKeyRef.current = nativePdfAnnotationImportKey(
+        props.session.id,
+        nativePdfAnnotationSnapshot(annotations)
+      );
+    });
+    props.onNativeAnnotationReady(bridge);
+    if (!bridge) {
+      return () => props.onNativeAnnotationReady(undefined);
+    }
+
+    const persistedAnnotations = nativePdfAnnotationImportItems(props.session.nativePdfAnnotations);
+    if (persistedAnnotations.length > 0 && nativeAnnotationsImportKeyRef.current !== nativeAnnotationsImportKey) {
+      bridge.importAnnotations(persistedAnnotations);
+    }
+
+    const unsubscribe = bridge.subscribeToChanges(() => {
+      bridge
+        .exportAnnotations()
+        .then((envelope) => props.onNativeAnnotationsChange(envelope.annotations))
+        .catch(() => undefined);
+    });
+
+    return () => {
+      unsubscribe();
+      props.onNativeAnnotationReady(undefined);
+    };
+  }, [
+    props.onNativeAnnotationReady,
+    props.onNativeAnnotationsChange,
+    props.session.id,
+    nativeAnnotationsImportKey,
+    viewerRegistry
+  ]);
+
+  useEffect(() => {
+    if (!viewerRegistry || !props.selectionContextEnabled) {
+      return;
+    }
+
+    const selection = embedPdfSelectionCapability(viewerRegistry);
+    if (!selection) {
+      return;
+    }
+
+    const documentId = embedPdfActiveDocumentId(viewerRegistry);
+    if (!documentId) {
+      return;
+    }
+
+    let disposed = false;
+    const syncSelectionContext = () => {
+      const context = pdfSelectionContextFromEmbedPdfSelection(
+        viewerRegistry,
+        selection,
+        documentId,
+        lastSelectionPointerRef.current
+      );
+      if (!context) {
+        props.onSelectionContextChange(undefined);
+        return;
+      }
+
+      context.then((nextContext) => {
+        if (!disposed) {
+          props.onSelectionContextChange(nextContext);
+        }
+      });
+    };
+    const unsubscribeSelection = selection.onSelectionChange((event) => {
+      if (event.documentId !== documentId || !event.selection) {
+        props.onSelectionContextChange(undefined);
+      }
+    });
+    const unsubscribeEndSelection = selection.onEndSelection((event) => {
+      if (event.documentId === documentId) {
+        syncSelectionContext();
+      }
+    });
+
+    return () => {
+      disposed = true;
+      unsubscribeSelection();
+      unsubscribeEndSelection();
+    };
+  }, [props.onSelectionContextChange, props.selectionContextEnabled, viewerRegistry]);
 
   if (error) {
     return <InlineReaderError message={error} />;
   }
 
-  if (!pdf) {
+  if (!viewerUrl) {
     return <ReaderLoading title={props.session.title} detail="Preparing PDF pages" />;
   }
 
-  const pageNumbers =
-    props.session.fitMode === "single" && props.session.location.kind === "page"
-      ? [props.session.location.page]
-      : Array.from({ length: pdf.numPages }, (_, index) => index + 1);
-  const currentPage = props.session.location.kind === "page" ? props.session.location.page : 1;
-  const searchMatchedPages = new Set(
-    props.session.searchResults
-      .map((result) => result.location)
-      .filter((location): location is Extract<ReaderLocation, { kind: "page" }> => location.kind === "page")
-      .map((location) => location.page)
-  );
-  const currentSearchPage =
-    props.searchSelection && props.searchSelection.currentIndex >= 0
-      ? props.session.searchResults[props.searchSelection.currentIndex]?.location
-      : undefined;
+  const viewerConfig = createEmbedPdfViewerConfig(viewerUrl, props.session, props.preferences);
 
   return (
-    <div ref={canvasRef} className="pdf-canvas">
-      {pdfKitNotice ? <InlineReaderNotice message={pdfKitNotice} /> : null}
-      {pageNumbers.map((pageNumber) => (
-        <PdfPage
-          key={`${props.session.id}-${pageNumber}`}
-          pdf={pdf}
-          pageNumber={pageNumber}
-          zoom={zoomForFitMode(props.session.fitMode, props.session.zoom)}
-          pdfKitPath={pdfKitPath}
-          renderImmediately={props.session.fitMode === "single" || Math.abs(pageNumber - currentPage) <= 1}
-          searchMatch={
-            currentSearchPage?.kind === "page" && currentSearchPage.page === pageNumber
-              ? "current"
-              : searchMatchedPages.has(pageNumber)
-                ? "match"
-                : undefined
-          }
-          searchQuery={props.searchQuery}
-          annotations={props.session.annotations.filter((annotation) =>
-            annotation.location.kind === "page" && annotation.location.page === pageNumber && !annotation.hidden
-          )}
-          onVisiblePage={handleVisiblePage}
-          onPdfKitFallback={() => setPdfKitNotice("PDFKit unavailable; using PDF.js.")}
-        />
-      ))}
-    </div>
-  );
-}
-
-function PdfPage(props: {
-  pdf: PDFDocumentProxy;
-  pageNumber: number;
-  zoom: number;
-  pdfKitPath?: string;
-  renderImmediately: boolean;
-  searchMatch?: "match" | "current";
-  searchQuery: string;
-  annotations: ReaderAnnotation[];
-  onVisiblePage: (pageNumber: number) => void;
-  onPdfKitFallback?: () => void;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const pageRef = useRef<HTMLElement>(null);
-  const [error, setError] = useState("");
-  const [imageDataUrl, setImageDataUrl] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [shouldRender, setShouldRender] = useState(props.renderImmediately);
-  const [searchHighlights, setSearchHighlights] = useState<PdfSearchHighlight[]>([]);
-
-  useEffect(() => {
-    if (props.renderImmediately || shouldRender) {
-      setShouldRender(true);
-      return;
-    }
-
-    const element = pageRef.current;
-
-    if (!element || !window.IntersectionObserver) {
-      setShouldRender(true);
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setShouldRender(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "900px 0px" }
-    );
-
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [props.renderImmediately, shouldRender]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let renderTask: PdfRenderTask | undefined;
-
-    async function renderPage() {
-      if (!shouldRender) {
-        return;
-      }
-
-      setLoading(true);
-      setError("");
-      setImageDataUrl("");
-      try {
-        if (props.pdfKitPath) {
-          try {
-            const image = await renderPdfPageImage(props.pdfKitPath, props.pageNumber, props.zoom);
-            if (cancelled) {
-              return;
-            }
-            setImageDataUrl(image.dataUrl);
-            setLoading(false);
-            return;
-          } catch {
-            props.onPdfKitFallback?.();
-          }
-        }
-
-        const page = await props.pdf.getPage(props.pageNumber);
-        if (cancelled) {
-          return;
-        }
-        renderTask = renderPdfPage(page, canvasRef.current, props.zoom);
-        if (!renderTask) {
-          if (!cancelled) {
-            setLoading(false);
-          }
-          return;
-        }
-        await renderTask.promise;
-        if (cancelled) {
-          return;
-        }
-        setLoading(false);
-      } catch (renderError) {
-        if (cancelled || isPdfRenderCancelled(renderError)) {
-          return;
-        }
-
-        console.error("PDF page render failed", renderError);
-        setError("Page render failed.");
-        setLoading(false);
-      }
-    }
-
-    renderPage();
-    return () => {
-      cancelled = true;
-      try {
-        renderTask?.cancel();
-      } catch {
-        // PDF.js render cancellation can throw if the task has already finished.
-      }
-    };
-  }, [props.pageNumber, props.pdf, props.pdfKitPath, props.zoom, shouldRender]);
-
-  useEffect(() => {
-    const element = pageRef.current;
-
-    if (!element) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && entry.intersectionRatio > 0.45) {
-          props.onVisiblePage(props.pageNumber);
-        }
-      },
-      { threshold: [0.45] }
-    );
-
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [props.onVisiblePage, props.pageNumber]);
-
-  useEffect(() => {
-    let disposed = false;
-    const query = props.searchQuery.trim();
-
-    if (!shouldRender || !query || !props.searchMatch) {
-      setSearchHighlights([]);
-      return;
-    }
-
-    props.pdf.getPage(props.pageNumber)
-      .then(async (page) => {
-        const viewport = page.getViewport({ scale: props.zoom * 1.35 });
-        const items = await getCachedPdfTextContentItems(props.pdf, props.pageNumber, page);
-        if (!disposed) {
-          setSearchHighlights(pdfSearchHighlightsFromTextContent(items, query, viewport.height, props.zoom * 1.35));
-        }
-      })
-      .catch(() => {
-        if (!disposed) {
-          setSearchHighlights([]);
-        }
-      });
-
-    return () => {
-      disposed = true;
-    };
-  }, [props.pageNumber, props.pdf, props.searchMatch, props.searchQuery, props.zoom, shouldRender]);
-
-  return (
-    <article
-      ref={pageRef}
-      className={`pdf-page-frame ${props.searchMatch ? `search-${props.searchMatch}` : ""}`}
-      data-page-number={props.pageNumber}
-      data-search-match={props.searchMatch}
-      aria-label={`Page ${props.pageNumber}`}
+    <div
+      ref={viewerRef}
+      className="pdf-canvas embedpdf-reader-shell"
+      onPointerUp={(event) => {
+        lastSelectionPointerRef.current = { left: event.clientX, top: event.clientY };
+      }}
+      onMouseUp={(event) => {
+        lastSelectionPointerRef.current = { left: event.clientX, top: event.clientY };
+      }}
     >
-      {loading || !shouldRender ? <div className="page-skeleton" /> : null}
-      {error ? (
-        <div className="page-error">
-          <span>{error}</span>
-          <button type="button" onClick={() => window.location.reload()}>
-            Retry
-          </button>
-        </div>
-      ) : null}
-      {imageDataUrl ? (
-        <img className="pdf-page-image" src={imageDataUrl} alt={`Page ${props.pageNumber}`} />
-      ) : (
-        <canvas ref={canvasRef} />
-      )}
-      {searchHighlights.length > 0 ? (
-        <div className="pdf-search-layer" aria-hidden="true">
-          {searchHighlights.map((highlight) => (
-            <span
-              key={highlight.id}
-              className="pdf-search-highlight"
-              style={{
-                left: `${highlight.left}px`,
-                top: `${highlight.top}px`,
-                width: `${highlight.width}px`,
-                height: `${highlight.height}px`
-              }}
-            />
-          ))}
-        </div>
-      ) : null}
-      {props.annotations.length > 0 ? (
-        <div className="pdf-annotation-layer" aria-label={`Page ${props.pageNumber} annotations`}>
-          {props.annotations.map((annotation, index) => (
-            <span
-              key={annotation.id}
-              className={`pdf-annotation-marker ${annotation.type}`}
-              style={{
-                borderColor: safeAnnotationColor(annotation.color),
-                backgroundColor:
-                  annotation.type === "highlight" || annotation.type === "note"
-                    ? safeAnnotationColor(annotation.color)
-                    : "transparent",
-                borderWidth: `${safeAnnotationThickness(annotation.thickness)}px`,
-                top: `${24 + index * 30}px`
-              }}
-              title={annotationTitle(annotation)}
-            >
-              {annotationTypeLabel(annotation.type)}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      <span className="page-number">{props.pageNumber}</span>
-    </article>
+      <PDFViewer
+        key={`${props.session.id}:${viewerUrl}`}
+        className="embedpdf-reader"
+        config={viewerConfig}
+        onReady={setViewerRegistry}
+        style={{ height: "100%", width: "100%" }}
+      />
+    </div>
   );
 }
 
@@ -2968,6 +3053,8 @@ function EpubReader(props: {
   onSearchReady: (handler: (query: string) => Promise<SearchResult[]>, wasmDocuments?: SearchWorkerDocument[]) => void;
   searchQuery: string;
   searchSelection?: SearchSelection;
+  selectedAnnotationId: string;
+  onSelectAnnotation: (id: string) => void;
 }) {
   const containerRef = useRef<HTMLElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -3244,12 +3331,19 @@ function EpubReader(props: {
         ? { query: trimmedSearchQuery, occurrenceIndex: currentSearchMatchIndex }
         : undefined;
 
-    return renderEpubHtml(activeChapter.html, visibleChapterAnnotations, searchTarget);
+    return renderEpubHtml(
+      activeChapter.html,
+      visibleChapterAnnotations,
+      searchTarget,
+      props.selectedAnnotationId,
+      annotationTitle
+    );
   }, [
     activeChapter?.href,
     activeChapter?.html,
     currentSearchChapterHref,
     currentSearchMatchIndex,
+    props.selectedAnnotationId,
     trimmedSearchQuery,
     visibleChapterAnnotations
   ]);
@@ -3334,7 +3428,18 @@ function EpubReader(props: {
         <div className="epub-progress-track" aria-label={chapterStatus}>
           <span style={{ width: `${chapterPercent}%` }} />
         </div>
-        <div className="epub-content" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+        <div
+          className="epub-content"
+          onClick={(event) => {
+            const target = event.target instanceof Element
+              ? event.target.closest<HTMLElement>("[data-annotation-id]")
+              : undefined;
+            if (target?.dataset.annotationId) {
+              props.onSelectAnnotation(target.dataset.annotationId);
+            }
+          }}
+          dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+        />
         {visibleChapterAnnotations.length > 0 ? (
           <div className="epub-annotation-anchors" aria-label="Chapter annotations">
             {visibleChapterAnnotations.map((annotation) => (
@@ -3419,8 +3524,8 @@ interface EpubDocumentCache {
 }
 
 interface LoadedReaderDocument {
-  pdf?: PDFDocumentProxy;
   pdfMetadata?: PdfDocumentMetadata;
+  pdfViewerUrl?: string;
   epub?: EpubDocumentCache;
 }
 
@@ -3468,8 +3573,8 @@ function applyEpubPreferencesToSession(session: DocumentSession, preferences: Pr
 }
 
 function disposeLoadedReaderDocument(document?: LoadedReaderDocument) {
-  if (document?.pdf) {
-    void document.pdf.destroy();
+  if (document?.pdfViewerUrl) {
+    URL.revokeObjectURL(document.pdfViewerUrl);
   }
 
   document?.epub?.chapters.clear();
@@ -3508,7 +3613,556 @@ function currentScrollTop(container: HTMLElement | null): number | undefined {
   return Math.max(0, Math.round(container.scrollTop));
 }
 
-let pdfJsModule: Promise<typeof import("pdfjs-dist")> | undefined;
+interface EmbedPdfScrollCapability {
+  forDocument: (documentId: string) => {
+    getMetrics: () => {
+      scrollOffset: {
+        x: number;
+        y: number;
+      };
+    };
+    getLayout: () => {
+      virtualItems: Array<{
+        pageLayouts: Array<{
+          pageNumber: number;
+          height: number;
+        }>;
+      }>;
+    };
+    getRectPositionForPage: (pageIndex: number, rect: EmbedPdfRect, scale?: number) => EmbedPdfRect | null;
+    scrollToPage: (options: { pageNumber: number; behavior?: "instant" | "smooth" | "auto" }) => void;
+  };
+  onPageChange: (handler: (event: { documentId: string; pageNumber: number; totalPages: number }) => void) => () => void;
+  onScroll: (handler: (event: { documentId: string }) => void) => () => void;
+  onLayoutChange: (handler: (event: { documentId: string }) => void) => () => void;
+}
+
+interface EmbedPdfDocumentManagerCapability {
+  getActiveDocumentId: () => string | null;
+}
+
+interface EmbedPdfSearchCapability {
+  nextResult: (documentId?: string) => number;
+  previousResult: (documentId?: string) => number;
+  setShowAllResults: (showAll: boolean, documentId?: string) => void;
+  startSearch: (documentId?: string) => void;
+  stopSearch: (documentId?: string) => void;
+}
+
+interface EmbedPdfTask<T> {
+  toPromise: () => Promise<T>;
+}
+
+interface EmbedPdfZoomCapability {
+  forDocument: (documentId: string) => {
+    requestZoom: (level: ZoomLevel) => void;
+  };
+}
+
+interface PdfSearchBridge {
+  openSearch: () => boolean;
+  nextResult: () => boolean;
+  previousResult: () => boolean;
+}
+
+interface PdfNativeAnnotationBridge {
+  activateTool: (type: AnnotationType, draft: AnnotationDraft) => boolean;
+  exportAnnotations: () => Promise<EmbedPdfAnnotationExportEnvelope>;
+  importAnnotations: (items: unknown[]) => void;
+  subscribeToChanges: (listener: () => void) => () => void;
+}
+
+interface EmbedPdfAnnotationExportEnvelope {
+  schemaVersion: 1;
+  exportedAt: string;
+  annotations: unknown[];
+}
+
+interface EmbedPdfAnnotationScope {
+  setActiveTool: (toolId: string | null, context?: Record<string, unknown>) => void;
+  exportAnnotations: () => EmbedPdfTask<unknown[]>;
+  importAnnotations: (items: unknown[]) => void;
+  onAnnotationEvent?: (listener: (event: unknown) => void) => () => void;
+}
+
+interface EmbedPdfAnnotationCapability {
+  forDocument: (documentId: string) => EmbedPdfAnnotationScope;
+  setToolDefaults: (toolId: string, patch: Record<string, unknown>) => void;
+}
+
+interface EmbedPdfRect {
+  origin: {
+    x: number;
+    y: number;
+  };
+  size: {
+    width: number;
+    height: number;
+  };
+}
+
+interface EmbedPdfFormattedSelection {
+  pageIndex: number;
+  rect: EmbedPdfRect;
+  segmentRects: EmbedPdfRect[];
+}
+
+interface EmbedPdfSelectionCapability {
+  getFormattedSelection: (documentId?: string) => EmbedPdfFormattedSelection[];
+  getSelectedText: (documentId?: string) => { toPromise(): Promise<string[]> };
+  onEndSelection: (handler: (event: { documentId: string; modeId: string }) => void) => () => void;
+  onSelectionChange: (handler: (event: { documentId: string; selection: unknown }) => void) => () => void;
+}
+
+interface EmbedPdfPlugin<TCapability> {
+  id: string;
+  provides(): TCapability;
+}
+
+function createPdfViewerBlobUrl(data: ArrayBuffer): string {
+  const bytes = new Uint8Array(data);
+  const ownedBytes = new Uint8Array(bytes.byteLength);
+  ownedBytes.set(bytes);
+
+  return URL.createObjectURL(new Blob([ownedBytes], { type: "application/pdf" }));
+}
+
+function createEmbedPdfViewerConfig(
+  src: string,
+  session: DocumentSession,
+  preferences: Preferences
+): PDFViewerConfig {
+  return {
+    src,
+    disabledCategories: ["redaction"],
+    fonts: { ui: null, signature: null },
+    tabBar: "never",
+    theme: {
+      preference: preferences.epubTheme,
+      light: embedPdfLightThemeColors,
+      dark: embedPdfDarkThemeColors
+    },
+    scroll: {
+      defaultStrategy: ScrollStrategy.Vertical,
+      defaultBufferSize: session.fitMode === "single" ? 2 : 6,
+      defaultPageGap: 12
+    },
+    annotations: {
+      colorPresets: annotationColors,
+      autoCommit: true,
+      annotationAuthor: "SmartReader",
+      deactivateToolAfterCreate: true,
+      selectAfterCreate: true,
+      editAfterCreate: false
+    },
+    search: { showAllResults: true },
+    selection: { menuHeight: 48, marquee: { enabled: true } },
+    zoom: {
+      defaultZoomLevel: embedPdfZoomLevel(session.fitMode, session.zoom),
+      maxZoom: 3,
+      minZoom: 0.5,
+      zoomStep: 0.1
+    }
+  };
+}
+
+const embedPdfLightThemeColors = {
+  background: {
+    app: "#e9e3d8",
+    surface: "#fffdf8",
+    surfaceAlt: "#f4eee5",
+    elevated: "#fffdf8",
+    overlay: "rgba(45, 37, 28, 0.28)",
+    input: "#fffdf8"
+  },
+  foreground: {
+    primary: "#181713",
+    secondary: "#4c4439",
+    muted: "#6d665c",
+    disabled: "#aaa196",
+    onAccent: "#fffdf8"
+  },
+  border: {
+    default: "#cdc3b5",
+    subtle: "#e6ded2",
+    strong: "#aa9f92"
+  },
+  accent: {
+    primary: "#9b633f",
+    primaryHover: "#855333",
+    primaryActive: "#6f4329",
+    primaryLight: "#f0dfd1",
+    primaryForeground: "#fffdf8"
+  },
+  interactive: {
+    hover: "#f4eee5",
+    active: "#eadbc9",
+    selected: "#f0dfd1",
+    focus: "#9b633f",
+    focusRing: "rgba(155, 99, 63, 0.28)"
+  },
+  state: {
+    error: "#aa4f2b",
+    errorLight: "#fbebe2",
+    warning: "#9a6419",
+    warningLight: "#f7ead5",
+    success: "#5f7f45",
+    successLight: "#eef4e6",
+    info: "#8b6a42",
+    infoLight: "#f4eee5"
+  },
+  scrollbar: {
+    track: "#eee8dd",
+    thumb: "#aa9f92",
+    thumbHover: "#928a7d"
+  },
+  tooltip: {
+    background: "#3a2a17",
+    foreground: "#fffdf8"
+  }
+};
+
+const embedPdfDarkThemeColors = {
+  background: {
+    app: "#201a15",
+    surface: "#2b241d",
+    surfaceAlt: "#352c23",
+    elevated: "#3a3027",
+    overlay: "rgba(0, 0, 0, 0.5)",
+    input: "#241e18"
+  },
+  foreground: {
+    primary: "#f6f2ea",
+    secondary: "#d8cec1",
+    muted: "#b5aa9b",
+    disabled: "#766d62",
+    onAccent: "#fffdf8"
+  },
+  border: {
+    default: "#5a4b3d",
+    subtle: "#45392e",
+    strong: "#8a7663"
+  },
+  accent: {
+    primary: "#d19a75",
+    primaryHover: "#e0aa86",
+    primaryActive: "#b98462",
+    primaryLight: "#4a3426",
+    primaryForeground: "#21160f"
+  },
+  interactive: {
+    hover: "#352c23",
+    active: "#4a3b2f",
+    selected: "#4a3426",
+    focus: "#d19a75",
+    focusRing: "rgba(209, 154, 117, 0.34)"
+  },
+  state: {
+    error: "#e08b6f",
+    errorLight: "#4b2a22",
+    warning: "#d8a45f",
+    warningLight: "#46331c",
+    success: "#9fbe7c",
+    successLight: "#2d3b24",
+    info: "#d0b38a",
+    infoLight: "#403327"
+  },
+  scrollbar: {
+    track: "#2b241d",
+    thumb: "#6d5b4a",
+    thumbHover: "#8a7663"
+  },
+  tooltip: {
+    background: "#f6f2ea",
+    foreground: "#201a15"
+  }
+};
+
+function embedPdfZoomLevel(fitMode: FitMode, zoom: number): ZoomLevel {
+  if (fitMode === "fit-page") {
+    return ZoomMode.FitPage;
+  }
+
+  if (fitMode === "fit-width") {
+    return ZoomMode.FitWidth;
+  }
+
+  return zoomForFitMode(fitMode, zoom);
+}
+
+function embedPdfActiveDocumentId(registry: PluginRegistry): string | undefined {
+  return embedPdfDocumentManagerCapability(registry)?.getActiveDocumentId() ?? undefined;
+}
+
+function embedPdfDocumentManagerCapability(
+  registry: PluginRegistry
+): EmbedPdfDocumentManagerCapability | undefined {
+  return registry
+    .getPlugin<EmbedPdfPlugin<EmbedPdfDocumentManagerCapability>>(DocumentManagerPlugin.id)
+    ?.provides();
+}
+
+function embedPdfScrollCapability(registry: PluginRegistry): EmbedPdfScrollCapability | undefined {
+  return registry
+    .getPlugin<EmbedPdfPlugin<EmbedPdfScrollCapability>>(ScrollPlugin.id)
+    ?.provides();
+}
+
+function embedPdfSearchCapability(registry: PluginRegistry): EmbedPdfSearchCapability | undefined {
+  return registry
+    .getPlugin<EmbedPdfPlugin<EmbedPdfSearchCapability>>(SearchPlugin.id)
+    ?.provides();
+}
+
+function embedPdfAnnotationCapability(registry: PluginRegistry): EmbedPdfAnnotationCapability | undefined {
+  return registry
+    .getPlugin<EmbedPdfPlugin<EmbedPdfAnnotationCapability>>(AnnotationPlugin.id)
+    ?.provides();
+}
+
+function embedPdfSelectionCapability(registry: PluginRegistry): EmbedPdfSelectionCapability | undefined {
+  return registry
+    .getPlugin<EmbedPdfPlugin<EmbedPdfSelectionCapability>>(SelectionPlugin.id)
+    ?.provides();
+}
+
+function embedPdfZoomCapability(registry: PluginRegistry): EmbedPdfZoomCapability | undefined {
+  return registry
+    .getPlugin<EmbedPdfPlugin<EmbedPdfZoomCapability>>(ZoomPlugin.id)
+    ?.provides();
+}
+
+function scrollEmbedPdfViewerToPage(registry: PluginRegistry, pageNumber: number) {
+  const documentId = embedPdfActiveDocumentId(registry);
+  if (!documentId) {
+    return;
+  }
+
+  embedPdfScrollCapability(registry)?.forDocument(documentId).scrollToPage({
+    pageNumber,
+    behavior: "instant"
+  });
+}
+
+function createEmbedPdfAnnotationBridge(
+  registry: PluginRegistry,
+  onSnapshotSynced?: (annotations: unknown[]) => void
+): PdfNativeAnnotationBridge | undefined {
+  const documentId = embedPdfActiveDocumentId(registry);
+  const annotation = embedPdfAnnotationCapability(registry);
+  if (!documentId || !annotation) {
+    return undefined;
+  }
+
+  const scope = annotation.forDocument(documentId);
+
+  return {
+    activateTool: (type, draft) => {
+      const toolId = embedPdfAnnotationToolId(type);
+      if (!toolId) {
+        return false;
+      }
+
+      annotation.setToolDefaults(toolId, embedPdfAnnotationDefaults(type, draft));
+      scope.setActiveTool(toolId, {
+        smartReaderTag: draft.tag,
+        smartReaderNote: draft.note.trim() || undefined
+      });
+      return true;
+    },
+    exportAnnotations: async () => {
+      const annotations = await scope.exportAnnotations().toPromise();
+      onSnapshotSynced?.(annotations);
+
+      return {
+        schemaVersion: 1,
+        exportedAt: new Date().toISOString(),
+        annotations
+      };
+    },
+    importAnnotations: (items) => {
+      scope.importAnnotations(items);
+      onSnapshotSynced?.(items);
+    },
+    subscribeToChanges: (listener) => scope.onAnnotationEvent?.(() => listener()) ?? (() => undefined)
+  };
+}
+
+function nativePdfAnnotationSnapshot(annotations: unknown[]): NativePdfAnnotationSnapshot | undefined {
+  const safeAnnotations = jsonCloneArray(annotations);
+  if (!safeAnnotations || safeAnnotations.length === 0) {
+    return undefined;
+  }
+
+  return {
+    schemaVersion: 1,
+    annotations: safeAnnotations,
+    updatedAt: Date.now()
+  };
+}
+
+function jsonCloneArray(value: unknown[]): unknown[] | undefined {
+  try {
+    const cloned = JSON.parse(JSON.stringify(value)) as unknown;
+
+    return Array.isArray(cloned) ? cloned : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function nativePdfAnnotationImportItems(snapshot: NativePdfAnnotationSnapshot | undefined): unknown[] {
+  if (!snapshot || snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.annotations)) {
+    return [];
+  }
+
+  return snapshot.annotations;
+}
+
+function nativePdfAnnotationImportKey(sessionId: string, snapshot: NativePdfAnnotationSnapshot | undefined): string {
+  return `${sessionId}:${JSON.stringify(nativePdfAnnotationImportItems(snapshot))}`;
+}
+
+function embedPdfAnnotationToolId(type: AnnotationType): string | undefined {
+  const toolIds: Record<AnnotationType, string> = {
+    highlight: "highlight",
+    underline: "underline",
+    strike: "strikeout",
+    wavy: "squiggly",
+    "red-text": "freeText",
+    note: "textComment",
+    area: "square"
+  };
+
+  return toolIds[type];
+}
+
+function embedPdfAnnotationDefaults(type: AnnotationType, draft: AnnotationDraft): Record<string, unknown> {
+  const color = safeAnnotationColor(draft.color);
+  const thickness = safeAnnotationThickness(draft.thickness);
+
+  if (type === "area") {
+    return {
+      color: "transparent",
+      strokeColor: color,
+      strokeWidth: thickness
+    };
+  }
+
+  if (type === "note") {
+    return {
+      strokeColor: color,
+      contents: draft.note.trim()
+    };
+  }
+
+  if (type === "red-text") {
+    return {
+      fontColor: color,
+      color: "transparent",
+      backgroundColor: "transparent",
+      contents: draft.note.trim()
+    };
+  }
+
+  return {
+    color,
+    strokeColor: color,
+    strokeWidth: thickness
+  };
+}
+
+function pdfSelectionContextFromEmbedPdfSelection(
+  registry: PluginRegistry,
+  selection: EmbedPdfSelectionCapability,
+  documentId: string,
+  pointer?: { left: number; top: number }
+): Promise<AnnotationSelectionContext | undefined> | undefined {
+  const formattedSelection = selection.getFormattedSelection(documentId);
+  const selectedPages = new Set(formattedSelection.map((item) => item.pageIndex));
+
+  if (formattedSelection.length === 0 || selectedPages.size !== 1) {
+    return;
+  }
+
+  return selection.getSelectedText(documentId).toPromise().then((selectedTextItems) => {
+    const selectedText = selectedTextItems.join("\n").replace(/\u200b/g, "").trim().slice(0, 500);
+    if (!selectedText) {
+      return undefined;
+    }
+
+    const firstSelection = formattedSelection[0];
+    const rects = formattedSelection.flatMap((item) => {
+      const sourceRects = item.segmentRects.length > 0 ? item.segmentRects : [item.rect];
+      return sourceRects.map((rect) => embedPdfRectToAnnotationRect(registry, documentId, item.pageIndex, rect));
+    });
+    const area = rects[0];
+    const menuPoint = pointer ?? embedPdfSelectionMenuPoint(registry, documentId, firstSelection);
+
+    return {
+      selectedText,
+      location: { kind: "page" as const, page: firstSelection.pageIndex + 1 },
+      menuLeft: menuPoint.left,
+      menuTop: menuPoint.top,
+      area,
+      rects
+    };
+  }).catch(() => undefined);
+}
+
+function embedPdfRectToAnnotationRect(
+  registry: PluginRegistry,
+  documentId: string,
+  pageIndex: number,
+  rect: EmbedPdfRect
+): NonNullable<ReaderAnnotation["rects"]>[number] {
+  const page = pageIndex + 1;
+  const pageHeight = embedPdfRenderedPageHeight(registry, documentId, page);
+
+  return {
+    page,
+    left: roundViewportPoint(rect.origin.x),
+    top: roundViewportPoint(rect.origin.y),
+    width: roundViewportPoint(rect.size.width),
+    height: roundViewportPoint(rect.size.height),
+    viewportHeight: pageHeight,
+    viewportScale: 1
+  };
+}
+
+function embedPdfSelectionMenuPoint(
+  registry: PluginRegistry,
+  documentId: string,
+  selection: EmbedPdfFormattedSelection
+): { left: number; top: number } {
+  const scroll = embedPdfScrollCapability(registry);
+  const viewportRect = scroll?.forDocument(documentId).getRectPositionForPage(
+    selection.pageIndex,
+    selection.rect
+  );
+
+  if (!viewportRect) {
+    return { left: 48, top: 96 };
+  }
+
+  return {
+    left: Math.max(12, Math.round(viewportRect.origin.x + viewportRect.size.width / 2)),
+    top: Math.max(12, Math.round(viewportRect.origin.y))
+  };
+}
+
+function embedPdfRenderedPageHeight(
+  registry: PluginRegistry,
+  documentId: string,
+  pageNumber: number
+): number | undefined {
+  const layout = embedPdfScrollCapability(registry)?.forDocument(documentId).getLayout();
+  const pageLayout = layout?.virtualItems
+    .flatMap((item) => item.pageLayouts)
+    .find((page) => page.pageNumber === pageNumber);
+
+  return pageLayout?.height && Number.isFinite(pageLayout.height) ? roundViewportPoint(pageLayout.height) : undefined;
+}
 
 async function loadPdfMetadata(
   session: DocumentSession,
@@ -3520,7 +4174,7 @@ async function loadPdfMetadata(
   }
 
   if (session.fileSource.kind !== "desktop-path") {
-    throw new Error("Browser-file PDF metadata is resolved through PDF.js");
+    throw new Error("Browser-file PDF metadata is resolved after the EmbedPDF document loads");
   }
 
   const document = await openPdfDocument(session.fileSource.path);
@@ -3544,20 +4198,6 @@ function desktopDocumentToPdfMetadata(path: string, document: DesktopPdfDocument
       level: item.level
     }))
   };
-}
-
-async function loadPdfJs(): Promise<typeof import("pdfjs-dist")> {
-  if (!pdfJsModule) {
-    pdfJsModule = Promise.all([
-      import("pdfjs-dist/legacy/build/pdf.mjs"),
-      import("pdfjs-dist/legacy/build/pdf.worker.mjs?url")
-    ]).then(([pdfjs, worker]) => {
-      pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
-      return pdfjs;
-    });
-  }
-
-  return pdfJsModule;
 }
 
 async function loadDesktopEpubMetadata(path: string): Promise<EpubDocumentCache> {
@@ -3677,28 +4317,6 @@ function createEpubSearchHandler(
   }
 
   return async () => [];
-}
-
-function createPdfSearchHandler(
-  source: DocumentSession["fileSource"],
-  pdf: PDFDocumentProxy
-): (query: string) => Promise<SearchResult[]> {
-  if (source.kind === "desktop-path") {
-    return (query) => searchDesktopPdf(source.path, query);
-  }
-
-  return (query) => searchPdf(pdf, query);
-}
-
-async function searchDesktopPdf(path: string, query: string): Promise<SearchResult[]> {
-  const results = await searchPdfDocument(path, query);
-
-  return results.map((result) => ({
-    id: result.id,
-    label: result.label,
-    snippet: result.snippet,
-    location: { kind: "page", page: result.page }
-  }));
 }
 
 async function searchDesktopEpub(path: string, query: string): Promise<SearchResult[]> {
@@ -3914,302 +4532,8 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function renderEpubHtml(
-  html: string,
-  annotations: ReaderAnnotation[],
-  searchTarget?: { query: string; occurrenceIndex: number }
-): string {
-  const hasTextAnnotations = annotations.some((annotation) => Boolean(annotation.selectedText?.trim()));
-  const query = searchTarget?.query.trim() ?? "";
-
-  if (!hasTextAnnotations && !query) {
-    return html;
-  }
-
-  const document = new DOMParser().parseFromString(html, "text/html");
-
-  if (hasTextAnnotations) {
-    annotations.forEach((annotation) => {
-      const selectedText = annotation.selectedText?.trim();
-      if (selectedText) {
-        applyAnnotationToDocument(document, annotation, selectedText);
-      }
-    });
-  }
-
-  if (query) {
-    applySearchHighlightToDocument(document, query, searchTarget?.occurrenceIndex ?? 0);
-  }
-
-  return document.body.innerHTML;
-}
-
-function applyAnnotationToDocument(document: Document, annotation: ReaderAnnotation, selectedText: string) {
-  const matcher = new RegExp(selectedText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  let node = walker.nextNode();
-
-  while (node) {
-    const textNode = node as Text;
-    const text = textNode.nodeValue ?? "";
-    const match = matcher.exec(text);
-
-    if (!match) {
-      node = walker.nextNode();
-      continue;
-    }
-
-    const fragment = document.createDocumentFragment();
-    if (match.index > 0) {
-      fragment.append(document.createTextNode(text.slice(0, match.index)));
-    }
-
-    const span = document.createElement("span");
-    span.className = `reader-annotation ${annotation.type}`;
-    span.setAttribute("data-annotation-id", annotation.id);
-    span.setAttribute("title", annotationTitle(annotation));
-    span.setAttribute("style", annotationInlineStyle(annotation));
-    span.textContent = match[0];
-    fragment.append(span);
-
-    const cursor = match.index + match[0].length;
-    if (cursor < text.length) {
-      fragment.append(document.createTextNode(text.slice(cursor)));
-    }
-
-    textNode.replaceWith(fragment);
-    break;
-  }
-}
-
-function annotationInlineStyle(annotation: ReaderAnnotation): string {
-  const color = safeAnnotationColor(annotation.color);
-  const thickness = safeAnnotationThickness(annotation.thickness);
-
-  if (annotation.type === "underline") {
-    return `text-decoration: underline; text-decoration-color: ${color}; text-decoration-thickness: ${thickness}px;`;
-  }
-
-  if (annotation.type === "strike") {
-    return `text-decoration: line-through; text-decoration-color: ${color}; text-decoration-thickness: ${thickness}px;`;
-  }
-
-  if (annotation.type === "note") {
-    return `border-bottom: ${thickness}px solid ${color};`;
-  }
-
-  return `background: ${color};`;
-}
-
-function highlightCurrentSearchMatch(html: string, query: string, occurrenceIndex = 0): string {
-  if (!query) {
-    return html;
-  }
-
-  const document = new DOMParser().parseFromString(html, "text/html");
-  applySearchHighlightToDocument(document, query, occurrenceIndex);
-
-  return document.body.innerHTML;
-}
-
-function applySearchHighlightToDocument(document: Document, query: string, occurrenceIndex = 0) {
-  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const matcher = new RegExp(escapedQuery, "i");
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  let node = walker.nextNode();
-  let remainingOccurrences = Math.max(0, occurrenceIndex);
-
-  while (node) {
-    const textNode = node as Text;
-    const text = textNode.nodeValue ?? "";
-    let match = matcher.exec(text);
-
-    if (!match) {
-      node = walker.nextNode();
-      continue;
-    }
-
-    while (match && remainingOccurrences > 0) {
-      remainingOccurrences -= 1;
-      matcher.lastIndex = 0;
-      const nextStart = match.index + match[0].length;
-      match = matcher.exec(text.slice(nextStart));
-      if (match) {
-        match.index += nextStart;
-      }
-    }
-
-    if (!match) {
-      node = walker.nextNode();
-      continue;
-    }
-
-    const fragment = document.createDocumentFragment();
-    if (match.index > 0) {
-      fragment.append(document.createTextNode(text.slice(0, match.index)));
-    }
-
-    const mark = document.createElement("mark");
-    mark.className = "search-highlight current";
-    mark.textContent = match[0];
-    fragment.append(mark);
-    const cursor = match.index + match[0].length;
-    if (cursor < text.length) {
-      fragment.append(document.createTextNode(text.slice(cursor)));
-    }
-
-    textNode.replaceWith(fragment);
-    break;
-  }
-}
-
-function pdfSearchHighlightsFromTextContent(
-  items: unknown[],
-  query: string,
-  viewportHeight: number,
-  scale: number
-): PdfSearchHighlight[] {
-  const normalizedQuery = query.toLowerCase();
-  const { ranges, text } = pdfTextContentRangeMap(items);
-  const normalizedText = text.toLowerCase();
-  const highlights: PdfSearchHighlight[] = [];
-  let matchIndex = normalizedText.indexOf(normalizedQuery);
-
-  while (matchIndex >= 0) {
-    const matchEnd = matchIndex + normalizedQuery.length;
-
-    ranges.forEach((range) => {
-      if (range.end <= matchIndex || range.start >= matchEnd) {
-        return;
-      }
-
-      const left = Math.max(0, range.item.transform[4] * scale);
-      const height = Math.max(12, (range.item.height ?? 12) * scale);
-      const top = Math.max(0, viewportHeight - range.item.transform[5] * scale - height);
-
-      highlights.push({
-        id: `search-highlight-${matchIndex}-${range.index}`,
-        left,
-        top,
-        width: Math.max(48, (range.item.width ?? range.item.str.length * 7) * scale),
-        height
-      });
-    });
-
-    matchIndex = normalizedText.indexOf(normalizedQuery, matchEnd);
-  }
-
-  return highlights;
-}
-
-function pdfTextContentRangeMap(items: unknown[]): { ranges: PdfTextContentRange[]; text: string } {
-  const ranges: PdfTextContentRange[] = [];
-  let text = "";
-
-  items.forEach((item, index) => {
-    const itemText = isPdfTextContentItem(item) ? item.str : "";
-    const start = text.length;
-    text += itemText;
-
-    if (isPdfTextContentItem(item) && itemText) {
-      ranges.push({
-        item,
-        index,
-        start,
-        end: start + itemText.length
-      });
-    }
-
-    if (index < items.length - 1) {
-      text += " ";
-    }
-  });
-
-  return { ranges, text };
-}
-
-function getCachedPdfTextContentItems(
-  pdf: PDFDocumentProxy,
-  pageNumber: number,
-  page?: PDFPageProxy
-): Promise<unknown[]> {
-  let documentCache = pdfTextContentCache.get(pdf);
-
-  if (!documentCache) {
-    documentCache = new Map();
-    pdfTextContentCache.set(pdf, documentCache);
-  }
-
-  const cached = documentCache.get(pageNumber);
-  if (cached) {
-    return cached;
-  }
-
-  const items = (page ? Promise.resolve(page) : pdf.getPage(pageNumber))
-    .then((pdfPage) => pdfPage.getTextContent())
-    .then((textContent) => textContent.items as unknown[])
-    .catch((error) => {
-      documentCache?.delete(pageNumber);
-      throw error;
-    });
-
-  documentCache.set(pageNumber, items);
-  return items;
-}
-
-function isPdfTextContentItem(value: unknown): value is {
-  str: string;
-  transform: number[];
-  width?: number;
-  height?: number;
-} {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "str" in value &&
-    typeof value.str === "string" &&
-    "transform" in value &&
-    Array.isArray(value.transform) &&
-    value.transform.length >= 6
-  );
-}
-
-function renderPdfPage(page: PDFPageProxy, canvas: HTMLCanvasElement | null, zoom: number): PdfRenderTask | undefined {
-  if (!canvas) {
-    return;
-  }
-
-  const viewport = page.getViewport({ scale: zoom * 1.35 });
-  const context = canvas.getContext("2d");
-
-  if (!context) {
-    return;
-  }
-
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-  canvas.style.width = `${viewport.width}px`;
-  canvas.style.height = `${viewport.height}px`;
-
-  return page.render({ canvas, canvasContext: context, viewport }) as PdfRenderTask;
-}
-
-function isPdfRenderCancelled(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-
-  const name = "name" in error ? String(error.name) : "";
-  const message = "message" in error ? String(error.message).toLowerCase() : "";
-  return name === "RenderingCancelledException" || message.includes("cancel");
-}
-
 function clampZoom(zoom: number): number {
   return Math.min(3, Math.max(0.5, Number(zoom.toFixed(2))));
-}
-
-async function searchPdf(pdf: PDFDocumentProxy, query: string): Promise<SearchResult[]> {
-  return searchPdfDocumentText(pdf, query);
 }
 
 function readerShortcutLabel(commandId: string): string {
@@ -4370,17 +4694,8 @@ function modeLabel(mode: SidebarMode): string {
   }[mode];
 }
 
-function annotationTypeLabel(type: AnnotationType): string {
-  return {
-    highlight: "Highlight",
-    underline: "Underline",
-    strike: "Strike",
-    note: "Note"
-  }[type];
-}
-
 function annotationTitle(annotation: ReaderAnnotation): string {
-  return annotation.note?.trim() || annotation.selectedText?.trim() || locationToStatus(annotation.location);
+  return readerAnnotationTitle(annotation, locationToStatus(annotation.location));
 }
 
 function createAnnotationId(): string {
@@ -4391,60 +4706,242 @@ function createAnnotationId(): string {
   return `annotation-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function safeAnnotationColor(color: string): string {
-  return /^#[0-9a-f]{6}$/i.test(color) ? color : annotationColors[0];
+function defaultAnnotationArea(location: ReaderLocation): ReaderAnnotation["area"] {
+  return location.kind === "page"
+    ? {
+        page: location.page,
+        left: 24,
+        top: 24,
+        width: 180,
+        height: 48
+      }
+    : undefined;
 }
 
-function safeAnnotationThickness(thickness: number): number {
-  return annotationThicknesses.includes(thickness) ? thickness : 2;
+function annotationAreaForType(
+  type: AnnotationType,
+  location: ReaderLocation,
+  context: AnnotationSelectionContext | undefined
+): ReaderAnnotation["area"] {
+  if (type === "area") {
+    return context?.area ?? defaultAnnotationArea(location);
+  }
+
+  return location.kind === "page" && isPdfTextMarkupAnnotation(type) ? context?.area : undefined;
 }
 
-function annotationsToMarkdown(session: DocumentSession): string {
-  const documentTitle = markdownExportValue(session.title);
-  const lines = [
-    `# ${documentTitle} annotations`,
-    "",
-    `- Document: ${documentTitle}`,
-    `- Exported at: ${formatAnnotationTime(Date.now())}`,
-    `- Count: ${session.annotations.length}`,
-    ""
-  ];
-
-  session.annotations.forEach((annotation, index) => {
-    lines.push(
-      `## ${index + 1}. ${markdownExportValue(annotationTitle(annotation))}`,
-      "",
-      `- Document: ${documentTitle}`,
-      `- Location: ${markdownExportValue(locationToStatus(annotation.location, session.pageCount))}`,
-      `- Type: ${annotationTypeLabel(annotation.type)}`,
-      `- Tag: ${annotation.tag}`,
-      `- Color: ${annotation.color}`,
-      `- Thickness: ${annotation.thickness}`,
-      `- Selected text: ${markdownExportValue(annotation.selectedText?.trim() ?? "")}`,
-      `- Note: ${markdownExportValue(annotation.note?.trim() ?? "")}`,
-      `- Created: ${formatAnnotationTime(annotation.createdAt)}`,
-      `- Updated: ${formatAnnotationTime(annotation.updatedAt)}`,
-      ""
-    );
-  });
-
-  return lines.join("\n");
+function annotationRectsForType(
+  type: AnnotationType,
+  context: AnnotationSelectionContext | undefined
+): ReaderAnnotation["rects"] {
+  return isPdfTextMarkupAnnotation(type) ? context?.rects : undefined;
 }
 
-function markdownExportValue(value: string): string {
-  return escapeHtml(value.trim().replace(/\r\n?/g, "\n"))
-    .replace(/([\\`*_{}\[\]()#+!|>\-])/g, "\\$1")
-    .replace(/\n/g, "\\n");
+function isPdfTextMarkupAnnotation(type: AnnotationType): boolean {
+  return (
+    type === "note" ||
+    type === "highlight" ||
+    type === "underline" ||
+    type === "strike" ||
+    type === "wavy" ||
+    type === "red-text"
+  );
 }
 
-function formatAnnotationTime(timestamp: number): string {
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+function epubSelectionOccurrenceIndex(
+  selection: Selection,
+  selectedText: string,
+  selectionElement: Element | undefined
+): number | undefined {
+  const content = selectionElement?.closest(".epub-content");
+  const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : undefined;
+
+  if (!range || !selectedText) {
+    return undefined;
+  }
+
+  if (content) {
+    try {
+      const prefixRange = range.cloneRange();
+      prefixRange.selectNodeContents(content);
+      prefixRange.setEnd(range.startContainer, range.startOffset);
+      return epubAnchorOccurrenceIndex(prefixRange.toString(), selectedText);
+    } catch {
+      const selectionPrefix = epubTextBeforeSelectionStart(content, selection);
+
+      if (typeof selectionPrefix === "string") {
+        return epubAnchorOccurrenceIndex(selectionPrefix, selectedText);
+      }
+
+      return epubSelectionOccurrenceIndexFromBoundary(content, range, selectedText);
+    }
+  }
+
+  const selectionPrefix = epubTextBeforeDetachedSelectionStart(selection);
+
+  return typeof selectionPrefix === "string"
+    ? epubAnchorOccurrenceIndex(selectionPrefix, selectedText)
+    : undefined;
 }
 
-function downloadSafeName(name: string): string {
-  const safeName = name.trim().replace(/[\\/:*?"<>|]+/g, "-");
-  return safeName || "document";
+function epubSelectionOccurrenceIndexFromBoundary(
+  content: Element,
+  range: Range,
+  selectedText: string
+): number | undefined {
+  const prefix = epubTextBeforeRangeStart(content, range);
+
+  if (typeof prefix === "string") {
+    return epubAnchorOccurrenceIndex(prefix, selectedText);
+  }
+
+  const detachedPrefix = epubTextBeforeDetachedBoundary(range.startContainer, range.startOffset);
+
+  return typeof detachedPrefix === "string"
+    ? epubAnchorOccurrenceIndex(detachedPrefix, selectedText)
+    : undefined;
+}
+
+function epubTextBeforeRangeStart(content: Element, range: Range): string | undefined {
+  return epubTextBeforeBoundary(content, range.startContainer, range.startOffset);
+}
+
+function epubTextBeforeSelectionStart(content: Element, selection: Selection): string | undefined {
+  const boundary = epubSelectionStartBoundary(selection);
+
+  if (boundary) {
+    const prefix = epubTextBeforeBoundary(content, boundary.node, boundary.offset);
+
+    if (typeof prefix === "string") {
+      return prefix;
+    }
+  }
+
+  return epubTextBeforeDetachedSelectionStart(selection);
+}
+
+function epubTextBeforeDetachedSelectionStart(selection: Selection): string | undefined {
+  const boundary = epubSelectionStartBoundary(selection);
+
+  return boundary ? epubTextBeforeDetachedBoundary(boundary.node, boundary.offset) : undefined;
+}
+
+function epubSelectionStartBoundary(selection: Selection): { node: Node; offset: number } | undefined {
+  const anchorNode = selection.anchorNode;
+
+  if (!anchorNode) {
+    return undefined;
+  }
+
+  if (selection.focusNode) {
+    try {
+      const range = document.createRange();
+      range.setStart(anchorNode, selection.anchorOffset);
+      range.setEnd(selection.focusNode, selection.focusOffset);
+
+      if (
+        range.collapsed &&
+        (selection.focusNode !== anchorNode || selection.focusOffset !== selection.anchorOffset)
+      ) {
+        return { node: selection.focusNode, offset: selection.focusOffset };
+      }
+    } catch {
+      return { node: anchorNode, offset: selection.anchorOffset };
+    }
+  }
+
+  return { node: anchorNode, offset: selection.anchorOffset };
+}
+
+function epubTextBeforeDetachedBoundary(startContainer: Node, startOffset: number): string | undefined {
+  if (startContainer.nodeType === Node.TEXT_NODE) {
+    return (startContainer.nodeValue ?? "").slice(0, startOffset);
+  }
+
+  if (startContainer instanceof Element) {
+    return Array.from(startContainer.childNodes)
+      .slice(0, startOffset)
+      .map((node) => node.textContent ?? "")
+      .join("");
+  }
+
+  return undefined;
+}
+
+function epubTextBeforeBoundary(content: Element, startContainer: Node, startOffset: number): string | undefined {
+  if (startContainer !== content && !content.contains(startContainer)) {
+    return undefined;
+  }
+
+  if (startContainer.nodeType === Node.TEXT_NODE) {
+    const walker = content.ownerDocument.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    const chunks: string[] = [];
+    let node = walker.nextNode();
+
+    while (node) {
+      if (node === startContainer) {
+        chunks.push((node.nodeValue ?? "").slice(0, startOffset));
+        return chunks.join("");
+      }
+
+      chunks.push(node.nodeValue ?? "");
+      node = walker.nextNode();
+    }
+  }
+
+  if (startContainer instanceof Element) {
+    const prefixRange = content.ownerDocument.createRange();
+    prefixRange.selectNodeContents(content);
+    prefixRange.setEnd(startContainer, startOffset);
+    return prefixRange.toString();
+  }
+
+  return undefined;
+}
+
+function countTextOccurrences(text: string, query: string): number {
+  if (!query) {
+    return 0;
+  }
+
+  const normalizedText = text.toLowerCase();
+  const normalizedQuery = query.toLowerCase();
+  let count = 0;
+  let cursor = normalizedText.indexOf(normalizedQuery);
+
+  while (cursor >= 0) {
+    count += 1;
+    cursor = normalizedText.indexOf(normalizedQuery, cursor + normalizedQuery.length);
+  }
+
+  return count;
+}
+
+function epubAnchorOccurrenceIndex(textBeforeSelection: string, selectedText: string): number | undefined {
+  const occurrenceIndex = countTextOccurrences(textBeforeSelection.replace(/\u200b/g, ""), selectedText);
+
+  return occurrenceIndex > 0 ? occurrenceIndex : undefined;
+}
+
+function roundViewportPoint(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function clampSidebarWidth(width: number): number {
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+}
+
+function parseEmbedPdfAnnotationImport(content: string): unknown[] | undefined {
+  const payload = JSON.parse(content) as unknown;
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (payload && typeof payload === "object" && Array.isArray((payload as { annotations?: unknown }).annotations)) {
+    return (payload as { annotations: unknown[] }).annotations;
+  }
+
+  return undefined;
 }
 
 function downloadTextFile(content: string, filename: string, type: string) {

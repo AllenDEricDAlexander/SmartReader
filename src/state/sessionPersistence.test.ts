@@ -239,7 +239,12 @@ describe("app session persistence", () => {
           updatedAt: 1,
           hidden: false
         }
-      ]
+      ],
+      nativePdfAnnotations: {
+        schemaVersion: 1 as const,
+        annotations: [{ annotation: { id: "native-annotation-1" } }],
+        updatedAt: 2
+      }
     };
 
     const snapshot = createAppSessionSnapshot({
@@ -252,5 +257,91 @@ describe("app session persistence", () => {
 
     expect(snapshot.sessions[0].annotations).toHaveLength(1);
     expect(restored.sessions[0].annotations).toEqual(session.annotations);
+    expect(snapshot.sessions[0].nativePdfAnnotations).toEqual(session.nativePdfAnnotations);
+    expect(restored.sessions[0].nativePdfAnnotations).toEqual(session.nativePdfAnnotations);
+  });
+
+  it("drops persisted PDFKit managed copy paths before restoring sessions", () => {
+    const session = {
+      ...createSessionFromFile({
+        kind: "desktop-path",
+        path: "/Users/mario/Books/spec.pdf",
+        name: "spec.pdf",
+        size: 0,
+        lastModified: 0
+      }),
+      annotations: [
+        {
+          id: "annotation-1",
+          type: "area" as const,
+          tag: "重点" as const,
+          color: "#ffe28a",
+          thickness: 2,
+          location: { kind: "page" as const, page: 4 },
+          nativePdfKit: {
+            supported: true,
+            status: "upserted",
+            nativeId: "smartreader:annotation-1",
+            writePath: "/.../legacy-write.pdf",
+            managedCopyPath: "/.../victim.pdf",
+            syncedAt: 1
+          },
+          createdAt: 1,
+          updatedAt: 1
+        }
+      ],
+      pendingDeletedAnnotations: [
+        {
+          id: "annotation-delete",
+          type: "area" as const,
+          tag: "重点" as const,
+          color: "#ffe28a",
+          thickness: 2,
+          location: { kind: "page" as const, page: 4 },
+          nativePdfKit: {
+            supported: false,
+            status: "sync-failed",
+            writePath: "/.../legacy-delete.pdf",
+            managedCopyPath: "/.../victim.pdf",
+            dirty: true,
+            pendingOperation: "delete" as const,
+            lastSyncError: "native delete failed",
+            failedAt: 2
+          },
+          createdAt: 1,
+          updatedAt: 1
+        }
+      ],
+      pdfKitManagedCopyPath: "/.../victim.pdf"
+    };
+
+    const snapshot = createAppSessionSnapshot({
+      sessions: [session],
+      activeTabId: session.id,
+      sidebarOpen: true,
+      preferences
+    });
+    const restored = restoreAppSessionSnapshot(
+      {
+        ...snapshot,
+        sessions: [
+          {
+            ...snapshot.sessions[0],
+            pdfKitManagedCopyPath: "/.../victim.pdf",
+            annotations: session.annotations,
+            pendingDeletedAnnotations: session.pendingDeletedAnnotations
+          } as typeof snapshot.sessions[number]
+        ]
+      },
+      preferences
+    );
+
+    expect(JSON.stringify(snapshot)).not.toContain("/.../victim.pdf");
+    expect(JSON.stringify(snapshot)).not.toContain("/.../legacy-write.pdf");
+    expect(restored.sessions[0].annotations[0].nativePdfKit).not.toHaveProperty("managedCopyPath");
+    expect(restored.sessions[0].annotations[0].nativePdfKit).not.toHaveProperty("writePath");
+    expect(restored.sessions[0].pendingDeletedAnnotations?.[0].nativePdfKit).not.toHaveProperty("managedCopyPath");
+    expect(restored.sessions[0].pendingDeletedAnnotations?.[0].nativePdfKit).not.toHaveProperty("writePath");
+    expect(restored.sessions[0].pdfKitManagedCopyPath).toBeUndefined();
   });
 });

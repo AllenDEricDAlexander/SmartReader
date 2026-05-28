@@ -233,10 +233,10 @@ describe("PreferencesDialog", () => {
     expect(props.onShortcutReset).toHaveBeenCalledWith("file.open");
   });
 
-  it("routes the experimental PDFKit renderer preference separately from WASM", () => {
+  it("routes the native PDFKit annotation copy preference separately from WASM", () => {
     const props = renderDialog();
 
-    fireEvent.click(screen.getByLabelText("Enable experimental PDFKit renderer"));
+    fireEvent.click(screen.getByLabelText("Enable native PDFKit annotation copy"));
 
     expect(props.onTogglePdfKit).toHaveBeenCalledWith(true);
     expect(props.onToggleWasm).not.toHaveBeenCalled();

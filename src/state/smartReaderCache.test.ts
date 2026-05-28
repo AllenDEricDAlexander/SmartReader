@@ -106,6 +106,69 @@ describe("smart reader cache", () => {
     expect(validateSmartReaderCacheEnvelope({ schemaVersion: 1, recentFiles: "bad" })).toBeUndefined();
   });
 
+  it("preserves pending PDFKit delete metadata for later retry without importing managed copy paths", () => {
+    const envelope = createSmartReaderCacheEnvelope({
+      settings: preferences,
+      recentFiles: [recentFile],
+      readingProgress: [progress],
+      session: {
+        ...session,
+        tabs: [
+          {
+            ...session.tabs[0],
+            pendingDeletedAnnotations: [
+              {
+                id: "annotation-delete",
+                type: "area",
+                tag: "重点",
+                color: "#ffe28a",
+                thickness: 2,
+                location: { kind: "page", page: 7 },
+                area: {
+                  page: 7,
+                  left: 24,
+                  top: 48,
+                  width: 160,
+                  height: 20,
+                  viewportHeight: 900,
+                  viewportScale: 1.25
+                },
+                nativePdfKit: {
+                  supported: false,
+                  status: "sync-failed",
+                  managedCopyPath: "/tmp/managed.pdf",
+                  dirty: true,
+                  pendingOperation: "delete",
+                  lastSyncError: "native delete failed",
+                  failedAt: 132
+                },
+                createdAt: 130,
+                updatedAt: 131
+              }
+            ]
+          }
+        ]
+      },
+      adapterCache: adapter
+    });
+
+    const restored = importSmartReaderCache(exportSmartReaderCache(envelope));
+
+    expect(restored?.session.tabs[0].annotations).toHaveLength(0);
+    expect(restored?.session.tabs[0].pendingDeletedAnnotations).toEqual([
+      expect.objectContaining({
+        id: "annotation-delete",
+        nativePdfKit: expect.objectContaining({
+          status: "sync-failed",
+          dirty: true,
+          pendingOperation: "delete",
+          lastSyncError: "native delete failed"
+        })
+      })
+    ]);
+    expect(restored?.session.tabs[0].pendingDeletedAnnotations?.[0].nativePdfKit).not.toHaveProperty("managedCopyPath");
+  });
+
   it("exports cache metadata without raw document content or browser-only handles", () => {
     const raw = exportSmartReaderCache(
       createSmartReaderCacheEnvelope({
@@ -148,6 +211,36 @@ describe("smart reader cache", () => {
     expect(raw).not.toContain("blob:smartreader-test");
     expect(raw).not.toContain("full chapter text");
     expect(raw).not.toContain("pdfProxy");
+  });
+
+  it("preserves native PDF annotation snapshots through cache sanitize", () => {
+    const envelope = createSmartReaderCacheEnvelope({
+      settings: preferences,
+      recentFiles: [recentFile],
+      readingProgress: [progress],
+      session: {
+        ...session,
+        tabs: [
+          {
+            ...session.tabs[0],
+            nativePdfAnnotations: {
+              schemaVersion: 1,
+              annotations: [{ annotation: { id: "native-annotation-1" } }],
+              updatedAt: 140
+            }
+          }
+        ]
+      },
+      adapterCache: adapter
+    });
+
+    const restored = importSmartReaderCache(exportSmartReaderCache(envelope));
+
+    expect(restored?.session.tabs[0].nativePdfAnnotations).toEqual({
+      schemaVersion: 1,
+      annotations: [{ annotation: { id: "native-annotation-1" } }],
+      updatedAt: 140
+    });
   });
 
   it("deep-sanitizes imported cache before state use or re-export", () => {
@@ -217,7 +310,58 @@ describe("smart reader cache", () => {
                   thickness: 2,
                   note: "Important",
                   selectedText: "important",
-                  location: { kind: "page", page: 7, rawText: "annotation location leak" },
+                  rects: [
+                    {
+                      page: 7,
+                      left: 24,
+                      top: 48,
+                      width: 160,
+                      height: 20,
+                      viewportHeight: 900,
+                      viewportScale: 1.25,
+                      rawText: "rect leak"
+                    }
+                  ],
+                  location: {
+                    kind: "epub",
+                    progress: 0.5,
+                    chapterHref: "OPS/chapter-one.xhtml",
+                    anchorOccurrenceIndex: 1,
+                    anchor: {
+                      chapterHref: "OPS/chapter-one.xhtml",
+                      selectedText: "important",
+                      occurrenceIndex: 1,
+                      startOffset: 20,
+                      endOffset: 29,
+                      prefix: "before ",
+                      suffix: " after",
+                      textHash: "fnv1a64:text",
+                      anchorHash: "fnv1a64:anchor",
+                      cfiHint: "epubcfi(/legacy)",
+                      rawText: "anchor leak"
+                    },
+                    rawText: "annotation location leak"
+                  },
+                  nativeEpub: {
+                    supported: false,
+                    status: "fallback-text-match",
+                    reason: "anchor-create-failed",
+                    lastError: "anchor create unavailable",
+                    failedAt: 133,
+                    rawText: "native epub leak"
+                  },
+                  nativePdfKit: {
+                    status: "upserted",
+                    supported: true,
+                    nativeId: "smartreader:annotation-1",
+                    managedCopyPath: "/tmp/managed.pdf",
+                    dirty: true,
+                    pendingOperation: "upsert",
+                    lastSyncError: "native write failed",
+                    failedAt: 132,
+                    syncedAt: 130,
+                    rawText: "native leak"
+                  },
                   hidden: false,
                   createdAt: 130,
                   updatedAt: 131,
@@ -255,8 +399,117 @@ describe("smart reader cache", () => {
     expect(exported).not.toContain("pdfProxy");
     expect(exported).not.toContain("parser leak");
     expect(exported).not.toContain("rawPayload");
+    expect(exported).not.toContain("anchor leak");
+    expect(exported).not.toContain("rect leak");
+    expect(exported).not.toContain("native epub leak");
+    expect(exported).not.toContain("native leak");
     expect(exported).toContain("\"annotations\":[");
     expect(exported).toContain("\"tag\":\"重点\"");
+    expect(exported).toContain("\"anchorOccurrenceIndex\":1");
+    expect(exported).toContain("\"anchorHash\":\"fnv1a64:anchor\"");
+    expect(exported).toContain("\"rects\":[");
+    expect(exported).toContain("\"nativeEpub\":{\"supported\":false");
+    expect(exported).toContain("\"nativeId\":\"smartreader:annotation-1\"");
+    expect(exported).toContain("\"dirty\":true");
+    expect(exported).toContain("\"pendingOperation\":\"upsert\"");
+    expect(exported).toContain("\"lastSyncError\":\"native write failed\"");
+    expect(exported).not.toContain("\"managedCopyPath\"");
+    expect(exported).not.toContain("/tmp/managed.pdf");
+  });
+
+  it("drops hostile imported PDFKit managed copy paths before cache reuse", () => {
+    const imported = importSmartReaderCache(
+      JSON.stringify({
+        schemaVersion: 1,
+        appVersion: "0.1.0",
+        savedAt: "2026-05-23T00:00:00.000Z",
+        settings: preferences,
+        recentFiles: [recentFile],
+        readingProgress: [progress],
+        session: {
+          ...session,
+          tabs: [
+            {
+              ...session.tabs[0],
+              annotations: [
+                {
+                  id: "annotation-1",
+                  type: "area",
+                  tag: "重点",
+                  color: "#ffe28a",
+                  thickness: 2,
+                  location: { kind: "page", page: 7 },
+                  area: {
+                    page: 7,
+                    left: 24,
+                    top: 48,
+                    width: 160,
+                    height: 20,
+                    viewportHeight: 900,
+                    viewportScale: 1.25
+                  },
+                  nativePdfKit: {
+                    supported: true,
+                    status: "upserted",
+                    nativeId: "smartreader:annotation-1",
+                    writePath: "/.../legacy-write.pdf",
+                    managedCopyPath: "/.../victim.pdf",
+                    syncedAt: 130
+                  },
+                  createdAt: 130,
+                  updatedAt: 131
+                }
+              ],
+              pendingDeletedAnnotations: [
+                {
+                  id: "annotation-delete",
+                  type: "area",
+                  tag: "重点",
+                  color: "#ffe28a",
+                  thickness: 2,
+                  location: { kind: "page", page: 7 },
+                  area: {
+                    page: 7,
+                    left: 24,
+                    top: 48,
+                    width: 160,
+                    height: 20,
+                    viewportHeight: 900,
+                    viewportScale: 1.25
+                  },
+                  nativePdfKit: {
+                    supported: false,
+                    status: "sync-failed",
+                    writePath: "/.../legacy-delete.pdf",
+                    managedCopyPath: "/.../victim.pdf",
+                    dirty: true,
+                    pendingOperation: "delete",
+                    lastSyncError: "native delete failed",
+                    failedAt: 132
+                  },
+                  createdAt: 130,
+                  updatedAt: 131
+                }
+              ]
+            }
+          ]
+        },
+        adapterCache: adapter
+      })
+    );
+
+    expect(imported).toBeDefined();
+    expect(imported?.session.tabs[0].annotations[0].nativePdfKit).not.toHaveProperty("managedCopyPath");
+    expect(imported?.session.tabs[0].annotations[0].nativePdfKit).not.toHaveProperty("writePath");
+    expect(imported?.session.tabs[0].pendingDeletedAnnotations?.[0].nativePdfKit).not.toHaveProperty("managedCopyPath");
+    expect(imported?.session.tabs[0].pendingDeletedAnnotations?.[0].nativePdfKit).not.toHaveProperty("writePath");
+
+    const exported = exportSmartReaderCache(imported!);
+
+    expect(exported).not.toContain("/.../victim.pdf");
+    expect(exported).not.toContain("/.../legacy-write.pdf");
+    expect(exported).not.toContain("\"managedCopyPath\"");
+    expect(exported).not.toContain("\"writePath\"");
   });
 
   it("rejects imported annotation styles outside the supported palette contract", () => {

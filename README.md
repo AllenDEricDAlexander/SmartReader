@@ -7,18 +7,18 @@ SmartReader is a macOS-first local reader MVP for PDF and EPUB files. The curren
 - Desktop utility-style layout with tabs, compact toolbar, collapsible sidebar, and document-first reader surface.
 - Warm paper-inspired macOS utility styling with compact chrome, subtle document shadows, responsive sidebar behavior, and narrow-window toolbar simplification.
 - Local PDF and EPUB open entry points through browser file selection, drag/drop, and Tauri native file dialog.
-- PDF reader path backed by the PDF.js legacy build for older macOS WebView compatibility, lazy-loaded behind the reader boundary, with an experimental macOS PDFKit raster path available behind a preference flag for desktop-path PDFs.
-- Desktop PDF open validation, page-count metadata, outline extraction, and unbounded path-backed search are backed by Rust/Tauri commands.
+- PDF reader path backed by EmbedPDF/PDFium through blob URLs, with desktop-path bytes read through the Tauri fs plugin and a validated Rust read fallback.
+- Desktop PDF open validation, page-count metadata, and outline extraction are backed by Rust/Tauri commands; PDF search opens the EmbedPDF search surface for both browser-file and desktop-path PDFs.
 - EPUB reader path backed by Rust lazy metadata/chapter commands for Tauri desktop files, with NCX fallback, resource metadata, and legal DRM/encryption detection. JSZip remains the browser-file EPUB fallback.
-- Sidebar modes for contents, windowed PDF thumbnails, bookmarks, annotations, and windowed search results.
-- Find bar with current/total result feedback, next/previous result commands, clickable result rows, no-result feedback, clear behavior, page/location controls, zoom controls, PDF fit modes, bookmark toggling, and preferences dialog.
-- Search feedback highlights matching PDF text regions, including phrase matches split across adjacent PDF.js text items, and marks the current EPUB match while keeping EPUB highlighting bounded to one current match.
-- Back/Forward navigation now uses a real per-tab reading history for explicit jumps such as page input, outline clicks, thumbnail clicks, search result navigation, and EPUB chapter controls. Ordinary scroll, zoom, typing in the find bar, and preference changes do not create history entries.
-- PDF continuous scrolling now treats ordinary wheel and trackpad scroll as reading-progress updates only; explicit page controls, shortcuts, page input, thumbnails, and outline title clicks remain hard navigation actions.
-- The PDF reader supports trackpad pinch-style zoom through the reader viewport, keeps zoom controls in sync, and clamps zoom through the existing reader zoom range.
-- The contents sidebar supports hierarchical outline expansion and collapse, with separate expand controls, title jump actions, EPUB anchor-fragment jumps, parent-before-child ordering, and windowed rendering for large outlines.
-- Annotation MVP supports PDF page annotations and EPUB text annotations for highlight, underline, strikethrough, and text-note workflows, with color, thickness, academic tags, per-annotation visibility, filter/search management, Markdown export, and durable persistence.
-- Preferences manage session restore, reading defaults, cache storage location, cache export/import, editable shortcuts, WASM search runtime status, and the experimental PDFKit renderer toggle.
+- Sidebar modes for EPUB contents, bookmarks, annotations, and windowed search results. PDF outline and thumbnail navigation are handled inside EmbedPDF so SmartReader does not render a parallel PDF navigation pane.
+- EPUB Find bar with current/total result feedback, next/previous result commands, clickable result rows, no-result feedback, and clear behavior. PDF search, page entry, zoom, fit, outline, thumbnails, selection, and annotation tools are delegated to EmbedPDF so SmartReader does not render a second PDF control layer.
+- Search feedback uses the EmbedPDF PDF search state for visible PDF matches and marks the current EPUB match while keeping EPUB highlighting bounded to one current match.
+- Back/Forward navigation now uses a real per-tab reading history for explicit jumps such as SmartReader page shortcuts, EPUB search result navigation, bookmarks, and EPUB chapter controls. Ordinary scroll, zoom, typing in the find bar, and preference changes do not create history entries.
+- PDF continuous scrolling now treats ordinary wheel and trackpad scroll as reading-progress updates only; explicit SmartReader shortcuts, history/bookmark jumps, and EmbedPDF navigation remain hard navigation actions.
+- The PDF reader supports trackpad pinch-style zoom through the reader viewport, syncs the requested zoom into EmbedPDF, and clamps zoom through the existing reader zoom range.
+- The EPUB contents sidebar supports hierarchical outline expansion and collapse, with separate expand controls, title jump actions, anchor-fragment jumps, parent-before-child ordering, and windowed rendering for large outlines.
+- Annotation MVP supports native EmbedPDF PDF annotations and EPUB text annotations for highlight, underline, strikethrough, wavy underline, red-text, text-note, and area workflows, with color, thickness, note font settings, academic tags, per-annotation visibility, filter/search management, automatic session/cache persistence, JSON export/import for native PDF annotations, Markdown export for SmartReader-managed notes, and supported macOS PDFKit managed-copy sync.
+- Preferences manage session restore, reading defaults, cache storage location, cache export/import, editable shortcuts, WASM search runtime status, and the native PDFKit annotation-copy toggle.
 - Recent files persist lightweight resume metadata; reopening a desktop recent item restores its saved PDF page or EPUB chapter/scroll position, and already-open desktop paths are focused instead of duplicated.
 - App-session restore for desktop-path tabs, active tab, sidebar state, preferences, bookmarks, annotations, zoom, and per-document reading position, including EPUB chapter scroll position.
 - Independent per-tab progress tracking so switching between open files keeps the last PDF page or EPUB chapter and chapter scroll position.
@@ -26,10 +26,10 @@ SmartReader is a macOS-first local reader MVP for PDF and EPUB files. The curren
 - EPUB HTML sanitization before chapter rendering.
 - PDF outline entries resolve PDF destinations when available, keep the full resolved outline, and skip malformed entries.
 - Tauri desktop host with native app window, native file dialog, PDF/EPUB file associations, Open With event handling, and path-backed recent-file reopen attempts.
-- Runtime reader caching for open tabs, lazy PDF page rendering, debounced cache persistence, and async Rust document reads to reduce repeat loading and keep large files more responsive.
+- Runtime reader caching for open tabs, EmbedPDF blob URLs, debounced cache persistence, and async desktop document reads to reduce repeat loading and keep large files more responsive.
 - Rust-backed desktop EPUB search scans every chapter and returns every match without requiring React to load every chapter into memory.
-- Browser-file PDF and EPUB fallback search also returns every same-page or same-chapter match without a hard result cap. Browser EPUB search can use the bundled WASM worker search runtime when indexed chapter text is available, with the JavaScript fallback kept active on failure.
-- Desktop-path PDF thumbnails use the existing bounded PDFKit raster command for visible sidebar rows. Browser-file PDFs keep page-number thumbnail placeholders.
+- Browser EPUB fallback search also returns every same-chapter match without a hard result cap and can use the bundled WASM worker search runtime when indexed chapter text is available, with the JavaScript fallback kept active on failure.
+- EmbedPDF now owns the PDF toolbar/sidebar navigation surface, and its light/dark theme is configured to match SmartReader's warm utility colors.
 - Reader usability polish includes clearer tab progress, toolbar status, EPUB chapter progress, recent-file metadata, loading states, and narrow-window layout behavior.
 
 ## Tech Stack
@@ -38,10 +38,10 @@ SmartReader is a macOS-first local reader MVP for PDF and EPUB files. The curren
 - TypeScript
 - Vite
 - Vitest
-- PDF.js via `pdfjs-dist` legacy build for desktop WebView compatibility
+- EmbedPDF React viewer with bundled PDFium runtime for PDF rendering, selection, search state, scroll, and zoom
 - JSZip for browser-file EPUB fallback parsing
 - A bundled minimal WebAssembly search runtime loaded through a Vite module worker
-- Tauri 2 desktop shell with dialog plugin, validated Rust document-read commands, Rust PDF metadata/outline/search/PDFKit-raster commands, Rust EPUB metadata/chapter/search commands, and Rust cache import/export/location commands
+- Tauri 2 desktop shell with dialog and fs plugins, validated Rust document-read fallback commands, Rust PDF metadata/outline/PDFKit-annotation commands, Rust EPUB metadata/chapter/search commands, and Rust cache import/export/location commands
 - Bun for frontend dependency installation, script execution, tests, web builds, and Tauri command entry points
 - CSS modules are not used; styling is in `src/styles.css`
 
@@ -124,44 +124,45 @@ For the shared local desktop packaging entry point:
 
 `build-desktop.sh` uses the project Tauri CLI through Bun and prints the generated artifact paths. `dmg` must run on macOS, `win` builds Windows `nsis` and `msi` installers on Windows, and `linux` builds `deb` and `rpm` packages on Linux with the required system packaging tools. `all` only builds targets supported by the current host OS and skips the other operating systems with an explicit message.
 
-Tauri runs the same Vite frontend and uses Rust commands for validated PDF/EPUB document reads instead of exposing broad renderer filesystem permissions.
+Tauri runs the same Vite frontend and reads desktop PDF/EPUB bytes through the scoped Tauri fs plugin, with validated Rust read commands retained as the fallback path.
 
 ## Shared TypeScript Adapter Boundary
 
 - Browser file input, Tauri path access, future React Native file URIs, and WASM-backed reader candidates are represented as file-source boundaries rather than renderer internals.
 - `DocumentSession` remains the UI state contract for opened files, including durable bookmarks and annotations.
 - `AppSessionSnapshot` stores only durable desktop-path session state and excludes runtime-heavy data such as browser `File` objects, object URLs, PDF proxies, parsed EPUB chapters, outlines, search results, and rendered annotation overlays.
-- `RendererAdapter` and related adapter factory types in `src/reader/adapterBoundary.ts` are the extension point for PDF.js, the current EPUB reader, the experimental PDFKit raster bridge, future React Native renderers, and WASM parser/search adapters.
+- `RendererAdapter` and related adapter factory types in `src/reader/adapterBoundary.ts` are the extension point for EmbedPDF, the current EPUB reader, future native/React Native renderers, and WASM parser/search adapters.
+- Annotation UI, PDF viewer integration, EPUB anchor synchronization, PDFKit annotation synchronization, list windowing, and export helpers are split into focused components, hooks, and reader utilities so `App.tsx` remains the orchestration layer instead of owning every reader detail.
 - `src/lib/wasmAdapter.ts`, `src/workers/searchRuntime.worker.ts`, and `src/wasm/search_runtime.wasm` provide the current WASM search runtime boundary with explicit loading, ready, fallback, unavailable, and error states.
-- Tauri-specific APIs are isolated in `src/platform/tauriBridge.ts`, with native document reads plus desktop PDF and EPUB metadata/search routed through Rust validation instead of broad renderer filesystem permissions.
+- Tauri-specific APIs are isolated in `src/platform/tauriBridge.ts`, with scoped fs-plugin document reads, validated Rust read fallback, Rust desktop PDF metadata/outline validation, and desktop EPUB metadata/search routed through Rust validation.
 
 ## Session Restore And Performance Notes
 
 - Desktop-path tabs are restored on app startup when `Reopen last session` is enabled. Browser-only file sessions are not restored because browser `File` handles cannot be reopened after restart.
 - Reading progress is saved through session snapshots and recent-file metadata. Reopened desktop documents resume from their last saved PDF page or EPUB chapter/location, including EPUB chapter scroll position, when the file path remains accessible.
 - Recent desktop documents that are already open are focused instead of duplicated. Closed recent desktop documents are access-checked, then reopened with the saved recent location.
-- Open PDF and EPUB tabs keep an in-memory reader cache during the current app session. Switching back to an already-open tab reuses loaded PDF proxies or parsed EPUB chapters instead of re-reading and re-parsing the file.
+- Open PDF and EPUB tabs keep an in-memory reader cache during the current app session. Switching back to an already-open tab reuses PDF viewer blob URLs, Rust metadata, or parsed EPUB chapters instead of re-reading and re-parsing the file.
 - Back/Forward history is scoped per tab, capped at 100 entries, and cleaned up when the tab closes. Only explicit navigation actions enter the history stack.
-- Search result rows update the current match selection before jumping, so PDF page navigation and EPUB chapter navigation keep Find next/previous state aligned.
-- PDF continuous mode renders visible and near-visible pages first through `IntersectionObserver`, leaving offscreen pages as placeholders until they approach the viewport.
-- Visible-page tracking in PDF continuous mode updates the current page without snapping the viewport. Hard page jumps are reserved for explicit navigation commands such as previous/next shortcuts, page input, thumbnail clicks, and outline title clicks.
-- PDF zoom changes from toolbar controls and trackpad pinch-style gestures share the same zoom state and `0.5` to `3` clamp. Pinch wheel events are coalesced per animation frame to avoid repeated full-page rerenders while the gesture is still moving.
-- PDF page rendering cancels stale PDF.js render tasks during zoom, scroll, and unmount transitions so cancelled work does not surface as a user-facing page render failure.
-- PDF search highlight overlays cache PDF.js `textContent` per PDF/page during the current session and reuse the same item-level range map for split text-item phrase matches. The overlay is text-item box based, not a native selection layer.
-- Contents outline folding is isolated per open document and tolerates jumped outline levels so malformed or partially resolved outlines remain readable instead of disappearing behind a neighboring collapsed row.
-- Large contents outlines are window-rendered in React so the sidebar only mounts rows near the current scroll viewport. Profiling showed DOM volume, not Rust outline extraction or WASM data processing, was the primary bottleneck for large directories.
-- Large search result lists, annotation lists, and PDF thumbnail lists are also window-rendered so the sidebar mounts only rows near the current scroll viewport. Search results and annotations remain unlimited at the data level; the UI avoids mounting all rows at once.
-- Annotation hide/show/delete actions avoid no-op state writes, imported annotation styles are sanitized, and Markdown export escapes document and user-provided text.
+- Search result rows update the current match selection before jumping for EPUB chapter navigation. PDF find next/previous and result navigation stay inside the EmbedPDF search UI.
+- PDF continuous mode is handled by EmbedPDF scroll/layout state, while SmartReader records page changes without snapping ordinary scroll gestures.
+- Visible-page tracking in PDF continuous mode updates the current page without snapping the viewport. Hard page jumps are reserved for explicit SmartReader navigation commands such as previous/next shortcuts, Back/Forward, bookmark jumps, and EmbedPDF navigation actions.
+- PDF zoom changes from SmartReader shortcuts and trackpad pinch-style gestures share the same zoom state and `0.5` to `3` clamp. Pinch wheel events are coalesced per animation frame, then applied to the active EmbedPDF document through its zoom plugin.
+- PDF text selection, copy, search highlighting, annotation creation, annotation selection/editing, automatic native annotation snapshot restore, and native annotation JSON export/import are handled through EmbedPDF plugins. SmartReader persists EmbedPDF annotation snapshots in the session/cache model and re-imports them when the PDF viewer is ready, but it no longer renders PDF annotation overlays for the default PDF path.
+- EPUB contents outline folding is isolated per open document and tolerates jumped outline levels so malformed or partially resolved outlines remain readable instead of disappearing behind a neighboring collapsed row.
+- Large EPUB contents outlines are window-rendered in React so the sidebar only mounts rows near the current scroll viewport. Profiling showed DOM volume, not Rust outline extraction or WASM data processing, was the primary bottleneck for large directories.
+- Large search result lists and annotation lists are also window-rendered so the sidebar mounts only rows near the current scroll viewport. Search results and annotations remain unlimited at the data level; the UI avoids mounting all rows at once.
+- Annotation select/cancel/edit/hide/show/delete actions avoid no-op state writes, imported annotation styles and PDFKit viewport metadata are sanitized, imported native-copy paths are dropped before reuse, EmbedPDF native annotation snapshots are JSON-sanitized before cache reuse, and Markdown export escapes document and user-provided text.
+- EPUB text annotation anchors store chapter href, selected text, occurrence context, offsets, surrounding text, and hashes. Native anchor create/resolve/rebind failures persist explicit fallback metadata instead of silently hiding the fallback path.
 - EPUB chapter scroll updates are debounced during ordinary scrolling and flushed when changing chapters or unmounting, reducing high-frequency session/recent/cache writes while preserving the latest chapter position.
-- Desktop PDF opening validates the path and reads page-count/outline metadata in Rust before React renders pages. The default renderer still uses PDF.js canvas output for visible page painting.
-- SmartReader loads the PDF.js legacy build and legacy worker so packaged Tauri apps keep PDF page rendering compatible with older macOS WKWebView runtimes.
-- The experimental macOS PDFKit renderer can rasterize desktop-path PDF pages through a bounded Rust/Tauri command. It is opt-in, macOS-only, and falls back to PDF.js if the command is unavailable or fails.
-- Desktop-path PDF thumbnail previews reuse the bounded macOS PDFKit raster command for individual visible pages, with per-page failure placeholders so one failed thumbnail does not affect the main reader.
-- Desktop PDF search uses a Rust command that returns all matching pages for path-backed desktop PDFs, so React does not scan page text for those files.
-- Tauri document reads run through an async Rust command that validates PDF/EPUB paths and performs blocking filesystem reads off the async command executor.
+- Desktop PDF opening validates the path and reads page-count/outline metadata in Rust before React renders through EmbedPDF.
+- Desktop-path PDF bytes are read with `@tauri-apps/plugin-fs` and converted to a Blob URL for EmbedPDF. If the fs plugin scope rejects a path, SmartReader falls back to the existing validated Rust `read_document` command.
+- Desktop-path PDF annotations can still request an experimental macOS PDFKit managed copy through validated Rust/Tauri commands when the PDFKit copy preference is enabled. Supported PDFKit writeback covers area, note, highlight, underline, strikethrough, and multi-rect text markup; wavy underline and red-text are native EmbedPDF tools in the default PDF path but are not written to the PDFKit managed copy. The original PDF is not overwritten, managed copies are app-owned and document-level, unsafe imported paths are ignored, and native sync is serialized per document to avoid concurrent PDFKit write races.
+- PDF outline and thumbnail navigation is delegated to EmbedPDF; SmartReader no longer renders a second PDF contents or thumbnail sidebar outside the viewer.
+- PDF search is fully delegated to EmbedPDF for both desktop-path and browser-file PDFs. SmartReader opens the package search surface and does not build parallel PDF search rows, page-result state, or highlight overlays.
+- Tauri document reads prefer the fs plugin for direct bytes and retain an async Rust command fallback that validates PDF/EPUB paths and performs blocking filesystem reads off the async command executor.
 - Desktop EPUB opening uses Rust to read package/spine/nav or NCX metadata first, then loads the active chapter on demand. This avoids transferring and parsing the full book in React before first render.
 - Desktop EPUB search uses a Rust command that scans chapters sequentially and returns all matches, skipping unreadable chapter entries instead of failing the entire document search.
-- Browser-file PDF and EPUB search use the shared fallback search adapter and collect every match within each page or chapter. Browser EPUB text payloads can be indexed by the bundled WASM worker search runtime; fallback remains active when WASM is unavailable or errors. EPUB browser/WASM results carry match occurrence metadata so Find next/previous can move the current mark within a chapter.
+- Browser-file EPUB search uses the shared fallback adapter and collects every match within each chapter. Browser EPUB text payloads can be indexed by the bundled WASM worker search runtime; fallback remains active when WASM is unavailable or errors. EPUB browser/WASM results carry match occurrence metadata so Find next/previous can move the current mark within a chapter.
 - Desktop EPUB parsing now detects `META-INF/rights.xml`, `META-INF/encryption.xml`, and encrypted spine/navigation/chapter resources. SmartReader reports encrypted/DRM books as unsupported encrypted documents and does not decrypt or bypass protection.
 - Desktop EPUB metadata includes manifest resource entries, preserved EPUB nav/NCX anchor fragments, and parent-before-child outline ordering, which lets the UI expose safe resource availability and reliable chapter jumps without injecting raw resource URLs or unsanitized HTML.
 - SmartReader cache data can stay in the default app state directory or move to a custom directory from Preferences. Cache export/import uses a schema-v1 JSON archive containing settings, recent-file metadata, reading progress, durable session state, and adapter metadata only.
@@ -174,27 +175,27 @@ Tauri runs the same Vite frontend and uses Rust commands for validated PDF/EPUB 
 
 - The current visual direction follows the latest local UI prototype in `/Users/mario/Downloads/app.html`: warm neutral chrome, paper-like reader surfaces, restrained brown accent states, and low-noise utility controls.
 - The CSS implementation keeps the existing React structure and Tauri desktop shell behavior intact. The tab strip still preserves desktop drag regions while interactive tab, toolbar, and new-tab controls remain non-drag regions.
-- Reader interaction checks cover continuous PDF scrolling without automatic page snapping, explicit previous/next page jumps, Back/Forward history, search next/previous, clickable search-result jumps, current PDF/EPUB search highlights, split PDF text-item phrase highlighting, pinch-style zoom coalescing, stale PDF.js render cancellation, debounced cache persistence, EPUB chapter scroll restore, EPUB anchor-fragment outline jumps, PDF thumbnail windowing, search-result windowing, annotation list windowing, contents outline expand/collapse behavior, and synthetic 10k-row outline windowing.
-- Annotation checks cover create, filter, hide/show, jump, delete with confirmation, Markdown export escaping, cache persistence, session restore, and large-list rendering behavior.
+- Reader interaction checks cover continuous PDF scrolling without automatic page snapping, explicit previous/next page jumps, Back/Forward history, EPUB search next/previous, clickable EPUB search-result jumps, EPUB current-match highlighting, EmbedPDF selection/search/navigation integration, pinch-style zoom coalescing, debounced cache persistence, EPUB chapter scroll restore, EPUB anchor-fragment outline jumps, search-result windowing, annotation list windowing, EPUB contents outline expand/collapse behavior, and synthetic 10k-row outline windowing.
+- Annotation checks cover quick-menu creation, selected-state cancel/edit flows, rename, font settings, filter, hide/show, jump, delete with confirmation, Markdown export escaping, cache persistence, session restore, PDFKit native-copy status, failed sync retry, managed-copy path safety, serialized document sync, and large-list rendering behavior.
 - Responsive checks cover wide desktop, 900px sidebar overlay behavior, 760px toolbar simplification, and 720px narrow-window overflow handling.
 - The latest UI review passed shell, preferences, sidebar, recent-file, empty-state, reader interaction, build, and test checks. Real PDF/EPUB document visual QA and macOS trackpad pinch QA should still be repeated manually in the Tauri app before a signed release.
 
 ## Roadmap Notes
 
-React Native/mobile remains a future platform track. Current roadmap work is frozen around desktop reading-loop stability until normal PDF/EPUB opening, scrolling, zooming, outlines, search, basic annotations, and page rendering stay reliable on real documents. Near-term work should stay focused on Tauri macOS reading hardening, real-document QA, annotation anchoring quality, and export polish. Signing, notarization, broader PDFKit work, deeper parser/runtime expansion, Rust-side outline indexing, and full PDF/EPUB parsing in WASM remain later work unless profiling shows React-side windowing is no longer the dominant fix.
+React Native/mobile remains a future platform track. Current roadmap work is frozen around desktop reading-loop stability until normal PDF/EPUB opening, scrolling, zooming, outlines, search, annotations, and page rendering stay reliable on real documents. Near-term work should stay focused on Tauri macOS reading hardening, real-document QA, annotation anchoring quality, and export polish. Signing, notarization, deeper PDFKit editing/printing work, deeper parser/runtime expansion, Rust-side outline indexing, and full PDF/EPUB parsing in WASM remain later work unless profiling shows React-side windowing is no longer the dominant fix.
 
 ## Current Limitations
 
 - The Tauri shell is present, but release signing/notarization is not configured.
 - DMG packaging is available through `bun run desktop:build:dmg` and `./scripts/build-desktop.sh dmg`, but it is not enabled in the default `desktop:build` target. The default desktop build still produces the macOS `.app` bundle.
 - Windows and Linux installer packaging is exposed through `./scripts/build-desktop.sh`, but those targets still require matching host operating systems and their native packaging toolchains.
-- PDFKit support is experimental, macOS-only, page-raster based, and opt-in. PDF.js remains the default renderer and fallback; native PDFKit view embedding, selection, native PDFKit annotations, and printing are not implemented.
-- EPUB support now includes EPUB3 nav plus NCX fallback, anchor-fragment outline jumps, resource metadata, legal DRM/encryption detection, and basic text annotations. It still does not provide full EPUB3 fixed-layout/media-overlay/advanced CSS fidelity, DRM provider integration, decryption, full EPUB CFI-grade annotation anchoring, or advanced layout fidelity.
-- Basic annotation creation, management, Markdown export, and persistence are implemented. Advanced annotation editing, wavy underline, red text override, box/area annotations, font-customized notes, printing, and multi-window behavior are deferred.
+- PDFKit support is limited to experimental macOS managed-copy annotation sync. Native PDFKit view embedding, native PDFKit text selection, direct in-PDF annotation editing UI, page raster rendering, and printing are not implemented. Native PDFKit annotation sync writes only to an app-owned managed copy and never overwrites the source PDF.
+- EPUB support now includes EPUB3 nav plus NCX fallback, anchor-fragment outline jumps, resource metadata, legal DRM/encryption detection, and CFI-style front-end text annotation anchors with occurrence and context metadata. It still does not provide full EPUB3 fixed-layout/media-overlay/advanced CSS fidelity, DRM provider integration, decryption, full EPUB CFI spec interoperability, or advanced layout fidelity.
+- Annotation creation, selected-state editing, rename, Markdown export, persistence, wavy underline, red text override, box/area annotations, font-customized notes, visibility/filter management, and supported native PDFKit managed-copy sync are implemented. Printing, multi-window behavior, native writeback for wavy/red-text styles, and direct native PDFKit edit UI remain deferred.
 - Browser-only recent entries may still require choosing the file again. Tauri recent entries store paths and attempt direct reopen.
-- Browser-file PDF thumbnail rows use page-number placeholders because the image preview path currently depends on the desktop PDFKit raster command.
-- PDF thumbnail raster calls are windowed by visible sidebar rows but are not globally cancellable; fast scrubbing through very large PDFs may still queue native raster work.
+- Browser-file PDF annotations work in the current open tab, but automatic session/cache restore applies only to restorable desktop-path PDF sessions; browser `File` handles still cannot be reopened after restart.
+- Browser-file and desktop-path PDFs render, select, annotate, and search through EmbedPDF. Desktop-path PDFs still add Rust page-count and outline metadata before the viewer renders.
 - Desktop EPUB search results currently provide per-chapter occurrence ordering rather than exact Rust-side character offsets, so current-match highlighting is occurrence-based until a richer Rust search contract is added.
-- PDF annotations are page-anchored markers in this MVP. EPUB text annotations are restored by matching selected text in the chapter HTML, which can be ambiguous when the same text appears repeatedly.
+- Default PDF annotations are native EmbedPDF annotations with automatic session/cache snapshot restore plus JSON export/import through the PDF annotation toolbar actions. EPUB text annotations store a CFI-style front-end anchor with occurrence/context data and still rebind against chapter content, so heavily duplicated text with identical surrounding context can still require fallback handling.
 - Mobile clients are not implemented.
 - A minimal bundled WASM worker search runtime is implemented for indexed text payloads. Full PDF/EPUB parser/search runtimes in WASM are not implemented yet.
