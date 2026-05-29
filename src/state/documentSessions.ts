@@ -83,6 +83,7 @@ export function createSessionFromRecentFile(recent: RecentFile): DocumentSession
 
   return {
     ...session,
+    protection: recent.protection,
     location: recent.location,
     lastLocation: recent.location,
     updatedAt: Date.now()

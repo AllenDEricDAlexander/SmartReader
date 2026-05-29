@@ -2,11 +2,16 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import JSZip from "jszip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { enableCategoryEncryption } from "./state/recentLibraryEncryption";
+import { saveRecentFiles } from "./state/recentFiles";
+import { saveRecentLibraryMetadata } from "./state/recentLibrary";
+import type { RecentLibraryMetadata } from "./state/recentLibrary";
 import { validateSmartReaderCacheEnvelope } from "./state/smartReaderCache";
 import type {
   AppSessionSnapshot,
   DocumentSession,
   EpubResourceMetadata,
+  RecentFile,
   SmartReaderCacheEnvelope
 } from "./types/reader";
 import type { SearchWorkerDocument } from "./lib/wasmAdapter";
@@ -1108,9 +1113,698 @@ describe("App desktop open delivery", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByText("spec.pdf"));
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
 
     await screen.findByText("Page 9");
     expect(screen.getByLabelText("spec.pdf reader")).toBeInTheDocument();
+  });
+
+  it("keeps recent file paths hidden until the delayed hover card is shown", async () => {
+    tauriMocks.setPendingPaths([]);
+    localStorage.setItem(
+      "smartreader.recentFiles.v1",
+      JSON.stringify([
+        {
+          id: "/Users/mario/Books/spec.pdf",
+          title: "spec.pdf",
+          path: "/Users/mario/Books/spec.pdf",
+          parentPath: "/Users/mario/Books",
+          format: "pdf",
+          access: "desktop-path",
+          lastOpenedAt: 1,
+          resumeLabel: "Page 9",
+          location: { kind: "page", page: 9 }
+        }
+      ])
+    );
+
+    render(<App />);
+
+    const card = await screen.findByRole("button", { name: "spec.pdf details" });
+    expect(screen.queryByText("/Users/mario/Books/spec.pdf")).not.toBeInTheDocument();
+    expect(screen.queryByText("/Users/mario/Books")).not.toBeInTheDocument();
+
+    vi.useFakeTimers();
+    try {
+      expect(screen.queryByText("/Users/mario/Books/spec.pdf")).not.toBeInTheDocument();
+
+      fireEvent.mouseEnter(card, { clientX: 220, clientY: 180 });
+      await act(async () => {
+        vi.advanceTimersByTime(999);
+      });
+      expect(screen.queryByText("/Users/mario/Books/spec.pdf")).not.toBeInTheDocument();
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.getByText("/Users/mario/Books/spec.pdf")).toBeInTheDocument();
+
+      fireEvent.mouseLeave(card);
+      expect(screen.queryByText("/Users/mario/Books/spec.pdf")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows recent cards with progress, position, and content metadata", async () => {
+    tauriMocks.setPendingPaths([]);
+    localStorage.setItem(
+      "smartreader.recentFiles.v1",
+      JSON.stringify([
+        {
+          id: "/Users/mario/Books/spec.pdf",
+          title: "spec.pdf",
+          path: "/Users/mario/Books/spec.pdf",
+          parentPath: "/Users/mario/Books",
+          format: "pdf",
+          access: "desktop-path",
+          lastOpenedAt: 2,
+          resumeLabel: "Page 9",
+          location: { kind: "page", page: 9 },
+          readingProgress: {
+            progressLabel: "75% read",
+            positionLabel: "Page 9 of 12",
+            contentLabel: "PDF content"
+          }
+        },
+        {
+          id: "/Users/mario/Books/story.epub",
+          title: "story.epub",
+          path: "/Users/mario/Books/story.epub",
+          parentPath: "/Users/mario/Books",
+          format: "epub",
+          access: "desktop-path",
+          lastOpenedAt: 1,
+          resumeLabel: "Results",
+          location: {
+            kind: "epub",
+            chapterHref: "OPS/chapter-2.xhtml",
+            chapterLabel: "Results",
+            progress: 0.5
+          },
+          readingProgress: {
+            progressLabel: "50% read",
+            positionLabel: "Chapter 2 of 2",
+            contentLabel: "Results"
+          }
+        }
+      ])
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText("75% read")).toBeInTheDocument();
+    expect(screen.getByText("Page 9 of 12")).toBeInTheDocument();
+    expect(screen.getByText("PDF content")).toBeInTheDocument();
+    expect(screen.getByText("50% read")).toBeInTheDocument();
+    expect(screen.getByText("Chapter 2 of 2")).toBeInTheDocument();
+    expect(screen.getByText("Results")).toBeInTheDocument();
+  });
+
+  it("hides encrypted category and private tag names before unlock", async () => {
+    tauriMocks.setPendingPaths([]);
+    localStorage.setItem(
+      "smartreader.recentLibrary.v1",
+      JSON.stringify({
+        categories: [{ id: "category-secret", name: "Secret Methods" }],
+        tags: [{ id: "tag-private-reviewer", name: "Reviewer Eyes Only", color: "#9e432e", group: "Private" }],
+        documents: {},
+        encryptedFolders: {
+          "category-secret": {
+            categoryId: "category-secret",
+            pathHashes: ["hash-1"],
+            salt: "salt",
+            verifierIv: "verifier-iv",
+            verifierData: "verifier-data",
+            payloadIv: "payload-iv",
+            payloadData: "payload-data",
+            lockedAt: 1,
+            categoryIds: ["category-secret"],
+            tagIds: ["tag-private-reviewer"]
+          }
+        }
+      })
+    );
+    localStorage.setItem(
+      "smartreader.recentFiles.v1",
+      JSON.stringify([
+        {
+          id: "locked:category-secret:hash-1",
+          title: "Locked document",
+          path: "smartreader-locked://category-secret/hash-1",
+          parentPath: "Encrypted folder",
+          format: "pdf",
+          access: "desktop-path",
+          lastOpenedAt: 1,
+          resumeLabel: "Locked",
+          location: { kind: "none" }
+        }
+      ])
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText("Locked document")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Locked category" })).toBeInTheDocument();
+    expect(screen.queryByText("Secret Methods")).not.toBeInTheDocument();
+    expect(screen.queryByText("Reviewer Eyes Only")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Locked document details" }));
+
+    expect(screen.getByRole("heading", { name: "Locked category" })).toBeInTheDocument();
+    expect(screen.queryByText("Secret Methods")).not.toBeInTheDocument();
+    expect(screen.queryByText("Reviewer Eyes Only")).not.toBeInTheDocument();
+  });
+
+  it("prunes encrypted folder state when recent retention evicts the last locked placeholder on restore", async () => {
+    tauriMocks.setPendingPaths([]);
+    localStorage.setItem(
+      "smartreader.recentLibrary.v1",
+      JSON.stringify({
+        categories: [{ id: "protected-folder-test", name: "Locked category" }],
+        tags: [],
+        documents: {},
+        encryptedFolders: {
+          "protected-folder-test": {
+            categoryId: "protected-folder-test",
+            pathHashes: ["hash-1"],
+            salt: "salt",
+            verifierIv: "verifier-iv",
+            verifierData: "verifier-data",
+            payloadIv: "payload-iv",
+            payloadData: "payload-data",
+            lockedAt: 1
+          }
+        }
+      })
+    );
+    localStorage.setItem(
+      "smartreader.recentFiles.v1",
+      JSON.stringify([
+        {
+          id: "locked:protected-folder-test:hash-1",
+          title: "Locked document",
+          path: "smartreader-locked://protected-folder-test/hash-1",
+          parentPath: "Encrypted folder",
+          format: "pdf",
+          access: "desktop-path",
+          lastOpenedAt: 1,
+          resumeLabel: "Locked",
+          location: { kind: "none" }
+        }
+      ])
+    );
+    const snapshot = createSnapshot("restored-doc", 7);
+    snapshot.preferences.recentRetention = 1;
+    snapshot.sessions = [createSnapshotSession("restored-doc", "/Users/mario/Books/restored.pdf", 7)];
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    await waitFor(() => {
+      const persistedRecentFiles = JSON.parse(localStorage.getItem("smartreader.recentFiles.v1") ?? "[]") as RecentFile[];
+
+      expect(persistedRecentFiles).toHaveLength(1);
+      expect(persistedRecentFiles[0].path).toBe("/Users/mario/Books/restored.pdf");
+    });
+
+    const persistedLibrary = JSON.parse(localStorage.getItem("smartreader.recentLibrary.v1") ?? "{}") as {
+      encryptedFolders?: Record<string, unknown>;
+    };
+
+    expect(persistedLibrary.encryptedFolders?.["protected-folder-test"]).toBeUndefined();
+  });
+
+  it("prunes encrypted folder state when recent retention evicts an unlocked protected recent", async () => {
+    const protectedPath = "/Users/mario/Books/protected.pdf";
+    const protectedRecent: RecentFile = {
+      id: protectedPath,
+      title: "protected.pdf",
+      path: protectedPath,
+      parentPath: "/Users/mario/Books",
+      format: "pdf",
+      access: "desktop-path",
+      lastOpenedAt: 1,
+      resumeLabel: "Page 7",
+      location: { kind: "page", page: 7 }
+    };
+    const protectedLibrary: RecentLibraryMetadata = {
+      categories: [{ id: "category-methods", name: "Secret Methods" }],
+      tags: [
+        { id: "tag-high-value", name: "高价值文献", color: "#9e432e", group: "Academic", builtIn: true },
+        { id: "tag-private-reviewer", name: "Reviewer Eyes Only", color: "#9e432e", group: "Private" }
+      ],
+      documents: {
+        [protectedPath]: {
+          categoryIds: ["category-methods"],
+          tagIds: ["tag-private-reviewer"],
+          pinned: true,
+          favorite: false
+        }
+      },
+      encryptedFolders: {}
+    };
+    const encrypted = await enableCategoryEncryption({
+      library: protectedLibrary,
+      categoryId: "category-methods",
+      password: "correct horse battery staple",
+      recentFiles: [protectedRecent],
+      storage: localStorage
+    });
+    const protectedCategoryId = encrypted.recentFiles[0].path.replace("smartreader-locked://", "").split("/")[0];
+    const snapshot = createSnapshot("unused-restored-session", 1);
+
+    tauriMocks.setPendingPaths([]);
+    saveRecentLibraryMetadata(encrypted.library);
+    saveRecentFiles(encrypted.recentFiles);
+    snapshot.preferences.reopenLastSession = false;
+    snapshot.preferences.recentRetention = 1;
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Locked document details" }));
+    fireEvent.change(screen.getByLabelText("Folder password"), {
+      target: { value: "correct horse battery staple" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Unlock folder" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "protected.pdf details" })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      tauriMocks.emitDesktopOpen("/Users/mario/Books/restored.pdf");
+    });
+
+    await waitFor(() => {
+      const persistedRecentFiles = JSON.parse(localStorage.getItem("smartreader.recentFiles.v1") ?? "[]") as RecentFile[];
+
+      expect(persistedRecentFiles).toHaveLength(1);
+      expect(persistedRecentFiles[0].path).toBe("/Users/mario/Books/restored.pdf");
+    });
+
+    const persistedLibrary = JSON.parse(localStorage.getItem("smartreader.recentLibrary.v1") ?? "{}") as RecentLibraryMetadata;
+    const persisted = [
+      localStorage.getItem("smartreader.recentLibrary.v1"),
+      localStorage.getItem("smartreader.recentFiles.v1")
+    ].join("\n");
+
+    expect(persistedLibrary.encryptedFolders?.[protectedCategoryId]).toBeUndefined();
+    expect(persisted).not.toContain(protectedPath);
+    expect(persisted).not.toContain("protected.pdf");
+    expect(persisted).not.toContain("Secret Methods");
+    expect(persisted).not.toContain("Reviewer Eyes Only");
+    expect(persisted).not.toContain("tag-private-reviewer");
+    expect(persisted).not.toContain("protection");
+  });
+
+  it("prunes encrypted folder state when removing an inaccessible unlocked protected recent from the error page", async () => {
+    const protectedPath = "/Users/mario/Books/protected.pdf";
+    const protectedRecent: RecentFile = {
+      id: protectedPath,
+      title: "protected.pdf",
+      path: protectedPath,
+      parentPath: "/Users/mario/Books",
+      format: "pdf",
+      access: "desktop-path",
+      lastOpenedAt: 1,
+      resumeLabel: "Page 7",
+      location: { kind: "page", page: 7 }
+    };
+    const protectedLibrary: RecentLibraryMetadata = {
+      categories: [{ id: "category-methods", name: "Secret Methods" }],
+      tags: [{ id: "tag-private-reviewer", name: "Reviewer Eyes Only", color: "#9e432e", group: "Private" }],
+      documents: {
+        [protectedPath]: {
+          categoryIds: ["category-methods"],
+          tagIds: ["tag-private-reviewer"],
+          pinned: true,
+          favorite: false
+        }
+      },
+      encryptedFolders: {}
+    };
+    const encrypted = await enableCategoryEncryption({
+      library: protectedLibrary,
+      categoryId: "category-methods",
+      password: "correct horse battery staple",
+      recentFiles: [protectedRecent],
+      storage: localStorage
+    });
+    const protectedCategoryId = encrypted.recentFiles[0].path.replace("smartreader-locked://", "").split("/")[0];
+    const snapshot = createSnapshot("unused-protected-error-session", 1);
+
+    tauriMocks.setPendingPaths([]);
+    saveRecentLibraryMetadata(encrypted.library);
+    saveRecentFiles(encrypted.recentFiles);
+    snapshot.preferences.reopenLastSession = false;
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Locked document details" }));
+    fireEvent.change(screen.getByLabelText("Folder password"), {
+      target: { value: "correct horse battery staple" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Unlock folder" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "protected.pdf details" })).toBeInTheDocument();
+    });
+
+    tauriMocks.createDesktopSession.mockResolvedValueOnce(createDesktopErrorSession(protectedPath, "missing-file"));
+    fireEvent.click(screen.getByRole("button", { name: "protected.pdf details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+
+    expect(await screen.findByRole("button", { name: "Remove from Recent" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove from Recent" }));
+
+    const persistedLibrary = JSON.parse(localStorage.getItem("smartreader.recentLibrary.v1") ?? "{}") as RecentLibraryMetadata;
+    const persistedRecentFiles = JSON.parse(localStorage.getItem("smartreader.recentFiles.v1") ?? "[]") as RecentFile[];
+
+    expect(persistedRecentFiles).toEqual([]);
+    expect(persistedLibrary.encryptedFolders?.[protectedCategoryId]).toBeUndefined();
+  });
+
+  it("keeps unprotected library metadata when removing an inaccessible normal recent from the error page", async () => {
+    const recentPath = "/Users/mario/Books/public.pdf";
+    const recent: RecentFile = {
+      id: recentPath,
+      title: "public.pdf",
+      path: recentPath,
+      parentPath: "/Users/mario/Books",
+      format: "pdf",
+      access: "desktop-path",
+      lastOpenedAt: 1,
+      resumeLabel: "Page 3",
+      location: { kind: "page", page: 3 }
+    };
+    const library: RecentLibraryMetadata = {
+      categories: [{ id: "category-public", name: "Public papers" }],
+      tags: [{ id: "tag-private-existing", name: "Existing private tag", color: "#9e432e", group: "Private" }],
+      documents: {
+        [recentPath]: {
+          categoryIds: ["category-public"],
+          tagIds: ["tag-private-existing"],
+          pinned: false,
+          favorite: true
+        }
+      },
+      encryptedFolders: {
+        "protected-folder-existing": {
+          categoryId: "protected-folder-existing",
+          pathHashes: ["hash-locked"],
+          salt: "salt",
+          verifierIv: "verifier-iv",
+          verifierData: "verifier-data",
+          payloadIv: "payload-iv",
+          payloadData: "payload-data",
+          lockedAt: 1
+        }
+      }
+    };
+    const snapshot = createSnapshot("unused-public-error-session", 1);
+
+    tauriMocks.setPendingPaths([]);
+    saveRecentLibraryMetadata(library);
+    saveRecentFiles([recent]);
+    snapshot.preferences.reopenLastSession = false;
+    localStorage.setItem("smartreader.appSession.v1", JSON.stringify(snapshot));
+
+    render(<App />);
+
+    tauriMocks.createDesktopSession.mockResolvedValueOnce(createDesktopErrorSession(recentPath, "access-denied"));
+    fireEvent.click(await screen.findByRole("button", { name: "public.pdf details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+
+    expect(await screen.findByRole("button", { name: "Remove from Recent" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove from Recent" }));
+
+    const persistedLibrary = JSON.parse(localStorage.getItem("smartreader.recentLibrary.v1") ?? "{}") as RecentLibraryMetadata;
+    const persistedRecentFiles = JSON.parse(localStorage.getItem("smartreader.recentFiles.v1") ?? "[]") as RecentFile[];
+
+    expect(persistedRecentFiles).toEqual([]);
+    expect(persistedLibrary.documents[recentPath]).toEqual(library.documents[recentPath]);
+    expect(persistedLibrary.encryptedFolders?.["protected-folder-existing"]).toBeDefined();
+  });
+
+  it("filters recent papers by tag without exposing locked placeholders through tag filters", async () => {
+    tauriMocks.setPendingPaths([]);
+    localStorage.setItem(
+      "smartreader.recentLibrary.v1",
+      JSON.stringify({
+        categories: [{ id: "protected-folder-test", name: "Locked category" }],
+        tags: [{ id: "tag-private-visible", name: "Reviewer Eyes Only", color: "#9e432e", group: "Private" }],
+        documents: {
+          "/Users/mario/Books/spec.pdf": {
+            categoryIds: [],
+            tagIds: ["tag-high-value"],
+            pinned: false,
+            favorite: false
+          },
+          "/Users/mario/Books/story.epub": {
+            categoryIds: [],
+            tagIds: ["tag-private-visible"],
+            pinned: false,
+            favorite: false
+          }
+        },
+        encryptedFolders: {
+          "protected-folder-test": {
+            categoryId: "protected-folder-test",
+            pathHashes: ["hash-1"],
+            salt: "salt",
+            verifierIv: "verifier-iv",
+            verifierData: "verifier-data",
+            payloadIv: "payload-iv",
+            payloadData: "payload-data",
+            lockedAt: 1
+          }
+        }
+      })
+    );
+    localStorage.setItem(
+      "smartreader.recentFiles.v1",
+      JSON.stringify([
+        {
+          id: "/Users/mario/Books/spec.pdf",
+          title: "spec.pdf",
+          path: "/Users/mario/Books/spec.pdf",
+          parentPath: "/Users/mario/Books",
+          format: "pdf",
+          access: "desktop-path",
+          lastOpenedAt: 3,
+          resumeLabel: "Page 9",
+          location: { kind: "page", page: 9 }
+        },
+        {
+          id: "/Users/mario/Books/story.epub",
+          title: "story.epub",
+          path: "/Users/mario/Books/story.epub",
+          parentPath: "/Users/mario/Books",
+          format: "epub",
+          access: "desktop-path",
+          lastOpenedAt: 2,
+          resumeLabel: "Chapter 1",
+          location: { kind: "epub", chapterHref: "OPS/chapter-1.xhtml", chapterLabel: "Chapter 1", progress: 0.2 }
+        },
+        {
+          id: "locked:protected-folder-test:hash-1",
+          title: "Locked document",
+          path: "smartreader-locked://protected-folder-test/hash-1",
+          parentPath: "Encrypted folder",
+          format: "pdf",
+          access: "desktop-path",
+          lastOpenedAt: 1,
+          resumeLabel: "Locked",
+          location: { kind: "none" }
+        }
+      ])
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText("spec.pdf")).toBeInTheDocument();
+    expect(screen.getByText("story.epub")).toBeInTheDocument();
+    expect(screen.getByText("Locked document")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "高价值文献" }));
+
+    expect(screen.getByText("spec.pdf")).toBeInTheDocument();
+    expect(screen.queryByText("story.epub")).not.toBeInTheDocument();
+    expect(screen.queryByText("Locked document")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reviewer Eyes Only" }));
+
+    expect(screen.queryByText("spec.pdf")).not.toBeInTheDocument();
+    expect(screen.getByText("story.epub")).toBeInTheDocument();
+    expect(screen.queryByText("Locked document")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "待精读" }));
+
+    expect(screen.queryByText("spec.pdf")).not.toBeInTheDocument();
+    expect(screen.queryByText("story.epub")).not.toBeInTheDocument();
+    expect(screen.queryByText("Locked document")).not.toBeInTheDocument();
+  });
+
+  it("persists UI-generated encrypted category and private tag ids only inside the encrypted payload", async () => {
+    tauriMocks.setPendingPaths([]);
+    localStorage.setItem(
+      "smartreader.recentFiles.v1",
+      JSON.stringify([
+        {
+          id: "/Users/mario/Books/spec.pdf",
+          title: "spec.pdf",
+          path: "/Users/mario/Books/spec.pdf",
+          parentPath: "/Users/mario/Books",
+          format: "pdf",
+          access: "desktop-path",
+          lastOpenedAt: 1,
+          resumeLabel: "Page 9",
+          location: { kind: "page", page: 9 }
+        }
+      ])
+    );
+
+    render(<App />);
+
+    fireEvent.change(await screen.findByLabelText("New category name"), {
+      target: { value: "Secret Methods" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create category" }));
+    fireEvent.change(screen.getByLabelText("New private tag"), {
+      target: { value: "Reviewer Eyes Only" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create tag" }));
+    fireEvent.click(screen.getByRole("button", { name: "spec.pdf details" }));
+    fireEvent.click(screen.getByLabelText("Secret Methods"));
+    fireEvent.click(screen.getByLabelText("Reviewer Eyes Only"));
+    await waitFor(() => {
+      const raw = localStorage.getItem("smartreader.recentLibrary.v1") ?? "";
+
+      expect(raw).toContain("category-secret-methods");
+      expect(raw).toContain("tag-private-reviewer-eyes-only");
+    });
+    fireEvent.change(screen.getByLabelText("Category"), {
+      target: { value: "category-secret-methods" }
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "correct horse battery staple" }
+    });
+    fireEvent.change(screen.getByLabelText("Confirm password"), {
+      target: { value: "correct horse battery staple" }
+    });
+    const encryptButton = screen.getByRole("button", { name: "Encrypt folder" });
+
+    expect(encryptButton).not.toBeDisabled();
+    fireEvent.click(encryptButton);
+
+    await waitFor(() => {
+      expect(localStorage.getItem("smartreader.recentFiles.v1") ?? "").toContain("smartreader-locked://");
+    }, { timeout: 3000 });
+
+    const persisted = [
+      localStorage.getItem("smartreader.recentLibrary.v1"),
+      localStorage.getItem("smartreader.recentFiles.v1")
+    ].join("\n");
+
+    expect(persisted).not.toContain("Secret Methods");
+    expect(persisted).not.toContain("secret-methods");
+    expect(persisted).not.toContain("category-secret-methods");
+    expect(persisted).not.toContain("Reviewer Eyes Only");
+    expect(persisted).not.toContain("reviewer-eyes-only");
+    expect(persisted).not.toContain("tag-private-reviewer-eyes-only");
+  });
+
+  it("selects recent files for paper details before explicitly opening them", async () => {
+    tauriMocks.setPendingPaths([]);
+    localStorage.setItem(
+      "smartreader.recentFiles.v1",
+      JSON.stringify([
+        {
+          id: "/Users/mario/Books/spec.pdf",
+          title: "spec.pdf",
+          path: "/Users/mario/Books/spec.pdf",
+          parentPath: "/Users/mario/Books",
+          format: "pdf",
+          access: "desktop-path",
+          lastOpenedAt: 1,
+          resumeLabel: "Page 9",
+          location: { kind: "page", page: 9 }
+        }
+      ])
+    );
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "spec.pdf details" }));
+
+    expect(screen.getByRole("heading", { name: "Paper information" })).toBeInTheDocument();
+    expect(screen.getAllByText("spec.pdf").length).toBeGreaterThan(1);
+    expect(screen.getByText("Folder encryption")).toBeInTheDocument();
+    expect(screen.queryByText("Folder encryption is not implemented in this phase.")).not.toBeInTheDocument();
+    expect(tauriMocks.createDesktopSession).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+
+    await screen.findByText("Page 9");
+    expect(screen.getByLabelText("spec.pdf reader")).toBeInTheDocument();
+  });
+
+  it("persists multi-category and multi-tag bindings for the same recent paper", async () => {
+    tauriMocks.setPendingPaths([]);
+    localStorage.setItem(
+      "smartreader.recentFiles.v1",
+      JSON.stringify([
+        {
+          id: "/Users/mario/Books/spec.pdf",
+          title: "spec.pdf",
+          path: "/Users/mario/Books/spec.pdf",
+          parentPath: "/Users/mario/Books",
+          format: "pdf",
+          access: "desktop-path",
+          lastOpenedAt: 1,
+          resumeLabel: "Page 9",
+          location: { kind: "page", page: 9 }
+        }
+      ])
+    );
+
+    render(<App />);
+
+    fireEvent.change(await screen.findByLabelText("New category name"), {
+      target: { value: "Methods" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create category" }));
+    fireEvent.change(screen.getByLabelText("New category name"), {
+      target: { value: "Qualitative" }
+    });
+    fireEvent.change(screen.getByLabelText("Parent category"), {
+      target: { value: "category-methods" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create category" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "spec.pdf details" }));
+    fireEvent.click(screen.getByLabelText("Methods"));
+    fireEvent.click(screen.getByLabelText("Qualitative"));
+    fireEvent.click(screen.getByLabelText("高价值文献"));
+    fireEvent.click(screen.getByLabelText("待精读"));
+
+    const raw = localStorage.getItem("smartreader.recentLibrary.v1");
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw ?? "{}") as {
+      documents: Record<string, { categoryIds: string[]; tagIds: string[] }>;
+    };
+
+    expect(parsed.documents["/Users/mario/Books/spec.pdf"].categoryIds).toEqual([
+      "category-methods",
+      "category-qualitative"
+    ]);
+    expect(parsed.documents["/Users/mario/Books/spec.pdf"].tagIds).toEqual([
+      "tag-high-value",
+      "tag-to-read"
+    ]);
   });
 
   it("uses toolbar Back and Forward for explicit PDF navigation history", async () => {
@@ -1775,6 +2469,19 @@ describe("App desktop open delivery", () => {
     expect(workspace?.style.gridTemplateColumns).toBe("");
     expect(workspace?.style.getPropertyValue("--sidebar-width")).toBe("");
     expect(workspace?.children).toHaveLength(1);
+  });
+
+  it("marks empty workspaces for narrow sidebar overlay handling", async () => {
+    tauriMocks.setPendingPaths([]);
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "Open File" })).toBeInTheDocument();
+    const workspace = document.querySelector<HTMLElement>(".reader-workspace");
+    expect(workspace).toHaveClass("with-sidebar");
+    expect(workspace).toHaveClass("empty-workspace");
+    expect(workspace?.children[0]).toHaveClass("reader-sidebar");
+    expect(workspace?.children[2]).toHaveClass("empty-state");
   });
 
   it("keeps PDF annotation viewport metadata when sanitizing imported cache data", () => {
@@ -3587,5 +4294,40 @@ function createSnapshotSession(id: string, path: string, page: number): AppSessi
     },
     openedAt: 1,
     updatedAt: 2
+  };
+}
+
+function createDesktopErrorSession(path: string, kind: "access-denied" | "missing-file"): DocumentSession {
+  const title = path.split("/").pop() ?? path;
+
+  return {
+    id: `error-${kind}`,
+    title,
+    filePath: path,
+    fileSource: { kind: "desktop-path", path },
+    format: path.toLowerCase().endsWith(".epub") ? "epub" : "pdf",
+    status: "error",
+    error: {
+      kind,
+      title: kind === "missing-file" ? "File missing" : "File access needed",
+      message: kind === "missing-file"
+        ? "SmartReader cannot find this file path."
+        : "SmartReader cannot access this file path. Choose the file again to reopen it."
+    },
+    location: { kind: "page", page: 1 },
+    lastLocation: { kind: "page", page: 1 },
+    zoom: 1,
+    fitMode: "continuous",
+    sidebarMode: "contents",
+    outline: [],
+    searchResults: [],
+    bookmarks: [],
+    annotations: [],
+    epubSettings: {
+      fontSize: 18,
+      theme: "system"
+    },
+    openedAt: 1,
+    updatedAt: 1
   };
 }

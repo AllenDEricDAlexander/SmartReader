@@ -176,6 +176,7 @@ export interface DocumentSession {
   title: string;
   filePath?: string;
   fileSource: ReaderFileSource | { kind: "empty" };
+  protection?: ReaderManagedProtection;
   source?: File;
   objectUrl?: string;
   format: DocumentFormat;
@@ -206,9 +207,22 @@ export interface RecentFile {
   parentPath: string;
   format: Exclude<DocumentFormat, "empty" | "unsupported">;
   access: "browser-file" | "desktop-path";
+  protection?: ReaderManagedProtection;
   lastOpenedAt: number;
   resumeLabel: string;
   location: ReaderLocation;
+  readingProgress?: RecentReadingProgressSummary;
+}
+
+export interface RecentReadingProgressSummary {
+  progressLabel: string;
+  positionLabel: string;
+  contentLabel: string;
+}
+
+export interface ReaderManagedProtection {
+  encryptedCategoryId: string;
+  pathHash: string;
 }
 
 export interface RendererAdapter {
@@ -306,6 +320,7 @@ export interface PersistedDocumentSession {
   title: string;
   filePath?: string;
   fileSource: PersistedReaderFileSource;
+  protection?: ReaderManagedProtection;
   format: DocumentFormat;
   status: DocumentSession["status"];
   error?: ReaderError;

@@ -115,6 +115,10 @@ function persistDocumentSession(
     return undefined;
   }
 
+  if (session.protection) {
+    return undefined;
+  }
+
   const location = preferences.rememberPosition ? session.location : initialLocationForSession(session);
 
   return {

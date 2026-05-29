@@ -48,6 +48,15 @@ import {
   saveRecentFiles
 } from "./state/recentFiles";
 import {
+  isLockedRecentFile,
+  redactProtectedRecentFilesForStorage,
+  removeRecentLibraryEntriesForDeletedFiles
+} from "./state/recentLibraryEncryption";
+import {
+  loadRecentLibraryMetadata,
+  saveRecentLibraryMetadata
+} from "./state/recentLibrary";
+import {
   createAppSessionSnapshot,
   loadAppSessionSnapshot,
   restoreAppSessionSnapshot,
@@ -100,6 +109,7 @@ import type { DesktopEpubDocument, DesktopPdfDocument } from "./platform/tauriBr
 import { createAccessErrorSession, isTauriRuntime } from "./platform/fileSources";
 import { PreferencesDialog as PreferencesPanel } from "./components/PreferencesDialog";
 import type { CacheInfo, CacheStatus, ShortcutConflict, ShortcutPreference } from "./components/PreferencesDialog";
+import { RecentLibraryPanel } from "./components/RecentLibraryPanel";
 import { AnnotationBar } from "./components/AnnotationBar";
 import type { AnnotationDraft } from "./components/AnnotationBar";
 import { AnnotationQuickMenu } from "./components/AnnotationQuickMenu";
@@ -380,7 +390,7 @@ export function App() {
     if (session.status === "ready") {
       setRecentFiles((current) => {
         const next = recordRecentFile(current, session, preferences.recentRetention);
-        saveRecentFiles(next);
+        saveRecentFilesWithRetentionPruning(current, next);
         return next;
       });
     }
@@ -424,8 +434,8 @@ export function App() {
     return createSmartReaderCacheEnvelope({
       appVersion: "0.1.0",
       settings: preferences,
-      recentFiles,
-      readingProgress: recentFiles.map((file) => ({
+      recentFiles: redactProtectedRecentFilesForStorage(recentFiles),
+      readingProgress: recentFiles.filter((file) => !file.protection).map((file) => ({
         documentId: file.id,
         title: file.title,
         path: file.path,
@@ -505,6 +515,11 @@ export function App() {
   openDesktopPathRef.current = openDesktopPath;
 
   const openRecentFile = useCallback(async (recent: RecentFile) => {
+    if (isLockedRecentFile(recent)) {
+      showHud("Unlock the folder first");
+      return;
+    }
+
     if (recent.access === "desktop-path" && isDesktop) {
       const existing = sessions.find((session) => session.filePath === recent.path && session.status !== "empty");
       if (existing) {
@@ -518,7 +533,7 @@ export function App() {
     }
 
     addSession(createAccessErrorSession(recent.path));
-  }, [addSession, isDesktop, sessions]);
+  }, [addSession, isDesktop, sessions, showHud]);
 
   const openFilePicker = useCallback(async () => {
     if (isDesktop) {
@@ -1551,10 +1566,10 @@ export function App() {
 
     setRecentFiles((current) => {
       const next = recordRecentFile(current, activeSession, preferences.recentRetention);
-      saveRecentFiles(next);
+      saveRecentFilesWithRetentionPruning(current, next);
       return next;
     });
-  }, [activeLocationKey, activeSession?.id, preferences.recentRetention]);
+  }, [activeLocationKey, activeSession?.id, activeSession?.outline, activeSession?.pageCount, preferences.recentRetention]);
 
   useEffect(() => {
     const onMenuCommand = (event: Event) => {
@@ -1725,10 +1740,10 @@ export function App() {
       ) : null}
 
       <section
-        className={`reader-workspace ${showSmartReaderSidebar ? "with-sidebar" : ""}`}
-        style={showSmartReaderSidebar ? ({ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties) : undefined}
+        className={`reader-workspace ${showSmartReaderSidebar && activeSession?.status === "ready" ? "with-sidebar" : ""}${!activeSession || activeSession.status === "empty" ? " empty-workspace" : ""}`}
+        style={showSmartReaderSidebar && activeSession?.status === "ready" ? ({ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties) : undefined}
       >
-        {showSmartReaderSidebar ? (
+        {showSmartReaderSidebar && activeSession?.status === "ready" ? (
           <ReaderSidebar
             session={activeSession}
             onModeChange={(mode) => updateActiveSession((session) => updateSessionSidebarMode(session, mode))}
@@ -1746,7 +1761,7 @@ export function App() {
             onDeleteAnnotation={deleteAnnotation}
           />
         ) : null}
-        {showSmartReaderSidebar ? (
+        {showSmartReaderSidebar && activeSession?.status === "ready" ? (
           <SidebarResizeHandle
             width={sidebarWidth}
             onChange={setSidebarWidth}
@@ -1761,15 +1776,56 @@ export function App() {
           scrollRevision={pdfScrollRevision}
           onOpen={openFilePicker}
           onOpenRecent={openRecentFile}
-          onRemoveRecent={(path) => {
-            const next = recentFiles.filter((recent) => recent.path !== path);
+          onRecentFilesChange={(next) => {
             saveRecentFiles(next);
             setRecentFiles(next);
           }}
+          onProtectedPathsLocked={(paths) => {
+            const protectedPathSet = new Set(paths);
+            setSessions((current) => {
+              const next = current.filter((session) => !session.filePath || !protectedPathSet.has(session.filePath));
+
+              if (next.length > 0) {
+                if (!next.some((session) => session.id === activeTabId)) {
+                  setActiveTabId(next[0].id);
+                }
+                return next;
+              }
+
+              const empty = createEmptySession();
+              setActiveTabId(empty.id);
+              return [empty];
+            });
+          }}
+          onRemoveRecent={(path) => {
+            setRecentFiles((current) => {
+              const removedRecentFiles = current.filter((recent) => recent.path === path);
+              const next = current.filter((recent) => recent.path !== path);
+              const nextLibrary = removeRecentLibraryEntriesForDeletedFiles({
+                library: loadRecentLibraryMetadata(),
+                removedRecentFiles,
+                remainingRecentFiles: next,
+                pruneDocuments: false
+              });
+
+              saveRecentLibraryMetadata(nextLibrary);
+              saveRecentFiles(next);
+              return next;
+            });
+          }}
           onClearRecent={() => {
-            const next = clearRecentFiles();
-            saveRecentFiles(next);
-            setRecentFiles(next);
+            setRecentFiles((current) => {
+              const next = clearRecentFiles();
+              const nextLibrary = removeRecentLibraryEntriesForDeletedFiles({
+                library: loadRecentLibraryMetadata(),
+                removedRecentFiles: current,
+                remainingRecentFiles: next
+              });
+
+              saveRecentLibraryMetadata(nextLibrary);
+              saveRecentFiles(next);
+              return next;
+            });
           }}
           onLocationChange={handleLocationChange}
           onNavigate={jumpToLocation}
@@ -1803,9 +1859,18 @@ export function App() {
           onChange={setPreferences}
           onClose={() => setPreferencesOpen(false)}
           onClearRecent={() => {
-            const next = clearRecentFiles();
-            saveRecentFiles(next);
-            setRecentFiles(next);
+            setRecentFiles((current) => {
+              const next = clearRecentFiles();
+              const nextLibrary = removeRecentLibraryEntriesForDeletedFiles({
+                library: loadRecentLibraryMetadata(),
+                removedRecentFiles: current,
+                remainingRecentFiles: next
+              });
+
+              saveRecentLibraryMetadata(nextLibrary);
+              saveRecentFiles(next);
+              return next;
+            });
           }}
           cacheInfo={cacheInfo}
           cacheStatus={cacheStatus}
@@ -2563,6 +2628,8 @@ function ReaderViewport(props: {
   scrollRevision: number;
   onOpen: () => void;
   onOpenRecent: (recent: RecentFile) => void;
+  onRecentFilesChange: (recentFiles: RecentFile[]) => void;
+  onProtectedPathsLocked: (paths: string[]) => void;
   onRemoveRecent: (path: string) => void;
   onClearRecent: () => void;
   onLocationChange: (location: ReaderLocation) => void;
@@ -2591,17 +2658,26 @@ function ReaderViewport(props: {
 
   if (!session || session.status === "empty") {
     return (
-      <EmptyState
-        recentFiles={props.recentFiles}
-        onOpen={props.onOpen}
-        onOpenRecent={props.onOpenRecent}
-        onClearRecent={props.onClearRecent}
-      />
+      <section className="reader-viewport">
+        <EmptyState
+          recentFiles={props.recentFiles}
+          onOpen={props.onOpen}
+          onOpenRecent={props.onOpenRecent}
+          onRecentFilesChange={props.onRecentFilesChange}
+          onProtectedPathsLocked={props.onProtectedPathsLocked}
+          onRemoveRecent={props.onRemoveRecent}
+          onClearRecent={props.onClearRecent}
+        />
+      </section>
     );
   }
 
   if (session.status === "error") {
-    return <ErrorState session={session} onOpen={props.onOpen} onRemoveRecent={props.onRemoveRecent} />;
+    return (
+      <section className="reader-viewport">
+        <ErrorState session={session} onOpen={props.onOpen} onRemoveRecent={props.onRemoveRecent} />
+      </section>
+    );
   }
 
   return (
@@ -2668,6 +2744,9 @@ function EmptyState(props: {
   recentFiles: RecentFile[];
   onOpen: () => void;
   onOpenRecent: (recent: RecentFile) => void;
+  onRecentFilesChange: (recentFiles: RecentFile[]) => void;
+  onProtectedPathsLocked: (paths: string[]) => void;
+  onRemoveRecent: (path: string) => void;
   onClearRecent: () => void;
 }) {
   return (
@@ -2683,28 +2762,14 @@ function EmptyState(props: {
           Open File
         </button>
       </div>
-      <div className="recent-panel">
-        <div className="recent-header">
-          <h2>Recent</h2>
-          <button type="button" onClick={props.onClearRecent} disabled={props.recentFiles.length === 0}>
-            Clear
-          </button>
-        </div>
-        {props.recentFiles.length === 0 ? (
-          <p className="empty-note">Recent files appear after you open a document.</p>
-        ) : (
-          props.recentFiles.map((file) => (
-            <button key={file.id} className="recent-row" type="button" onClick={() => props.onOpenRecent(file)}>
-              <span className={`recent-format ${file.format}`}>{file.format.toUpperCase()}</span>
-              <span className="recent-copy">
-                <span className="recent-title">{file.title}</span>
-                <span className="recent-meta">{file.parentPath}</span>
-              </span>
-              <span className="recent-progress">{file.resumeLabel}</span>
-            </button>
-          ))
-        )}
-      </div>
+      <RecentLibraryPanel
+        recentFiles={props.recentFiles}
+        onOpenRecent={props.onOpenRecent}
+        onRecentFilesChange={props.onRecentFilesChange}
+        onProtectedPathsLocked={props.onProtectedPathsLocked}
+        onRemoveRecent={props.onRemoveRecent}
+        onClearRecent={props.onClearRecent}
+      />
     </section>
   );
 }
@@ -3570,6 +3635,25 @@ function applyEpubPreferencesToSession(session: DocumentSession, preferences: Pr
   }
 
   return session;
+}
+
+function saveRecentFilesWithRetentionPruning(current: RecentFile[], next: RecentFile[]): void {
+  const nextPaths = new Set(next.map((file) => file.path));
+  const removedProtectedFiles = current.filter((file) =>
+    (isLockedRecentFile(file) || Boolean(file.protection)) && !nextPaths.has(file.path)
+  );
+
+  if (removedProtectedFiles.length > 0) {
+    const nextLibrary = removeRecentLibraryEntriesForDeletedFiles({
+      library: loadRecentLibraryMetadata(),
+      removedRecentFiles: removedProtectedFiles,
+      remainingRecentFiles: next
+    });
+
+    saveRecentLibraryMetadata(nextLibrary);
+  }
+
+  saveRecentFiles(next);
 }
 
 function disposeLoadedReaderDocument(document?: LoadedReaderDocument) {

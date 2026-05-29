@@ -243,9 +243,46 @@ function sanitizeRecentFile(file: unknown): RecentFile | undefined {
     parentPath: file.parentPath,
     format: file.format,
     access: file.access,
+    protection: sanitizeManagedProtection(file.protection),
     lastOpenedAt: file.lastOpenedAt,
     resumeLabel: file.resumeLabel,
-    location
+    location,
+    readingProgress: sanitizeRecentReadingProgress(file.readingProgress)
+  };
+}
+
+function sanitizeRecentReadingProgress(value: unknown): RecentFile["readingProgress"] | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (
+    typeof value.progressLabel !== "string" ||
+    typeof value.positionLabel !== "string" ||
+    typeof value.contentLabel !== "string"
+  ) {
+    return undefined;
+  }
+
+  return {
+    progressLabel: value.progressLabel,
+    positionLabel: value.positionLabel,
+    contentLabel: value.contentLabel
+  };
+}
+
+function sanitizeManagedProtection(value: unknown): RecentFile["protection"] | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (typeof value.encryptedCategoryId !== "string" || typeof value.pathHash !== "string") {
+    return undefined;
+  }
+
+  return {
+    encryptedCategoryId: value.encryptedCategoryId,
+    pathHash: value.pathHash
   };
 }
 
