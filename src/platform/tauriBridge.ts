@@ -266,9 +266,7 @@ export async function readDesktopFile(path: string): Promise<Uint8Array> {
 
 export async function createDesktopSession(path: string): Promise<DocumentSession> {
   try {
-    if (path.toLowerCase().endsWith(".pdf")) {
-      await openPdfDocument(path);
-    } else if (!path.toLowerCase().endsWith(".epub")) {
+    if (!path.toLowerCase().endsWith(".pdf") && !path.toLowerCase().endsWith(".epub")) {
       await readDesktopFile(path);
     }
     return createSessionFromFile(createDesktopPathFile(path));

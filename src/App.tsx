@@ -510,8 +510,9 @@ export function App() {
 
   const openDesktopPath = useCallback(async (path: string) => {
     const session = await createDesktopSession(path);
-    addSession(session);
-  }, [addSession]);
+    const recent = recentFiles.find((file) => file.path === path && !isLockedRecentFile(file));
+    addSession(session.status === "ready" && recent ? createSessionFromRecentFile(recent) : session);
+  }, [addSession, recentFiles]);
   openDesktopPathRef.current = openDesktopPath;
 
   const openRecentFile = useCallback(async (recent: RecentFile) => {
@@ -1740,10 +1741,10 @@ export function App() {
       ) : null}
 
       <section
-        className={`reader-workspace ${showSmartReaderSidebar && activeSession?.status === "ready" ? "with-sidebar" : ""}${!activeSession || activeSession.status === "empty" ? " empty-workspace" : ""}`}
-        style={showSmartReaderSidebar && activeSession?.status === "ready" ? ({ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties) : undefined}
+        className={`reader-workspace ${showSmartReaderSidebar ? "with-sidebar" : ""}${!activeSession || activeSession.status === "empty" ? " empty-workspace" : ""}`}
+        style={showSmartReaderSidebar ? ({ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties) : undefined}
       >
-        {showSmartReaderSidebar && activeSession?.status === "ready" ? (
+        {showSmartReaderSidebar ? (
           <ReaderSidebar
             session={activeSession}
             onModeChange={(mode) => updateActiveSession((session) => updateSessionSidebarMode(session, mode))}
@@ -1761,7 +1762,7 @@ export function App() {
             onDeleteAnnotation={deleteAnnotation}
           />
         ) : null}
-        {showSmartReaderSidebar && activeSession?.status === "ready" ? (
+        {showSmartReaderSidebar ? (
           <SidebarResizeHandle
             width={sidebarWidth}
             onChange={setSidebarWidth}
@@ -2658,25 +2659,21 @@ function ReaderViewport(props: {
 
   if (!session || session.status === "empty") {
     return (
-      <section className="reader-viewport">
-        <EmptyState
-          recentFiles={props.recentFiles}
-          onOpen={props.onOpen}
-          onOpenRecent={props.onOpenRecent}
-          onRecentFilesChange={props.onRecentFilesChange}
-          onProtectedPathsLocked={props.onProtectedPathsLocked}
-          onRemoveRecent={props.onRemoveRecent}
-          onClearRecent={props.onClearRecent}
-        />
-      </section>
+      <EmptyState
+        recentFiles={props.recentFiles}
+        onOpen={props.onOpen}
+        onOpenRecent={props.onOpenRecent}
+        onRecentFilesChange={props.onRecentFilesChange}
+        onProtectedPathsLocked={props.onProtectedPathsLocked}
+        onRemoveRecent={props.onRemoveRecent}
+        onClearRecent={props.onClearRecent}
+      />
     );
   }
 
   if (session.status === "error") {
     return (
-      <section className="reader-viewport">
-        <ErrorState session={session} onOpen={props.onOpen} onRemoveRecent={props.onRemoveRecent} />
-      </section>
+      <ErrorState session={session} onOpen={props.onOpen} onRemoveRecent={props.onRemoveRecent} />
     );
   }
 
@@ -2703,6 +2700,7 @@ function ReaderViewport(props: {
       ) : null}
       {session.format === "pdf" ? (
         <PdfReader
+          key={session.id}
           session={session}
           preferences={props.preferences}
           documentCache={props.documentCache}

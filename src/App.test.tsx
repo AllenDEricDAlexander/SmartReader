@@ -654,10 +654,35 @@ describe("App desktop open delivery", () => {
     await waitFor(() => {
       expect(screen.queryByText("Opening start.pdf")).not.toBeInTheDocument();
     });
-    const readFileSourceCalls = tauriMocks.readFileSource.mock.calls as unknown as [{ path?: string }][];
+    const sourceCalls = tauriMocks.readFileSource.mock.calls as unknown as [{ path?: string }][];
     expect(
-      readFileSourceCalls.filter(([source]) => source.path === "/Users/mario/Books/start.pdf")
+      sourceCalls.filter(([source]) => source.path === "/Users/mario/Books/start.pdf")
     ).toHaveLength(1);
+  });
+
+  it("does not hand a stale PDF source URL to EmbedPDF while switching documents", async () => {
+    vi.mocked(URL.createObjectURL)
+      .mockReturnValueOnce("blob:smartreader-start")
+      .mockReturnValueOnce("blob:smartreader-second");
+    tauriMocks.setPendingPaths(["/Users/mario/Books/start.pdf"]);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(embedPdfMocks.PDFViewer.mock.calls.at(-1)?.[0].config.src).toBe("blob:smartreader-start");
+    });
+
+    embedPdfMocks.PDFViewer.mockClear();
+    await act(async () => {
+      tauriMocks.emitDesktopOpen("/Users/mario/Books/second.pdf");
+    });
+
+    await waitFor(() => {
+      expect(embedPdfMocks.PDFViewer.mock.calls.at(-1)?.[0].config.src).toBe("blob:smartreader-second");
+    });
+    expect(embedPdfMocks.PDFViewer.mock.calls.map(([props]) => props.config.src)).not.toContain(
+      "blob:smartreader-start"
+    );
   });
 
   it("lets EmbedPDF own PDF contents navigation after desktop metadata loads", async () => {
@@ -1022,6 +1047,44 @@ describe("App desktop open delivery", () => {
 
     expect(await screen.findByText("spec.pdf")).toBeInTheDocument();
     expect(screen.getByText("Page 9")).toBeInTheDocument();
+  });
+
+  it("keeps recent PDF reading progress when the same desktop path is opened directly", async () => {
+    tauriMocks.setPendingPaths(["/Users/mario/Books/spec.pdf"]);
+    localStorage.setItem(
+      "smartreader.recentFiles.v1",
+      JSON.stringify([
+        {
+          id: "/Users/mario/Books/spec.pdf",
+          title: "spec.pdf",
+          path: "/Users/mario/Books/spec.pdf",
+          parentPath: "/Users/mario/Books",
+          format: "pdf",
+          access: "desktop-path",
+          lastOpenedAt: 1,
+          resumeLabel: "Page 9",
+          location: { kind: "page", page: 9 },
+          readingProgress: {
+            progressLabel: "75% read",
+            positionLabel: "Page 9 of 12",
+            contentLabel: "PDF content"
+          }
+        }
+      ])
+    );
+    tauriMocks.openPdfDocument.mockResolvedValueOnce({
+      id: "/Users/mario/Books/spec.pdf",
+      pageCount: 12,
+      outline: []
+    });
+
+    render(<App />);
+
+    await screen.findByLabelText("spec.pdf reader");
+    expect(screen.getByText("Page 9")).toBeInTheDocument();
+    const recentFiles = JSON.parse(localStorage.getItem("smartreader.recentFiles.v1") ?? "[]") as RecentFile[];
+    expect(recentFiles[0].location).toEqual({ kind: "page", page: 9 });
+    expect(recentFiles[0].readingProgress?.positionLabel).toBe("Page 9");
   });
 
   it("keeps each tab reading progress while switching open documents", async () => {

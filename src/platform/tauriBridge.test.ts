@@ -36,6 +36,13 @@ describe("tauriBridge", () => {
   it("converts supported file URL open events to desktop paths", () => {
     expect(desktopOpenPayloadToPath("file:///Users/mario/Books/Guide.pdf")).toBe("/Users/mario/Books/Guide.pdf");
     expect(desktopOpenPayloadToPath("/Users/mario/Books/Story.epub")).toBe("/Users/mario/Books/Story.epub");
+    expect(
+      desktopOpenPayloadToPath(
+        "file:///Users/mario/book/%E7%BC%96%E7%A8%8B%E4%B9%A6%E7%B1%8D&%E5%90%8E%E5%8F%B0%E5%BC%80%E5%8F%91/DevOpsAndOS/vSphere/vmware_vsphere_7_0%E8%99%9A%E6%8B%9F%E5%8C%96%E6%9E%B6%E6%9E%84%E5%AE%9E%E6%88%98%E6%8C%87%E5%8D%97_%E6%93%8D%E4%BD%9C%E7%B3%BB%E7%BB%9F_%E4%BD%95%E5%9D%A4%E6%BA%90_Z_Library.pdf"
+      )
+    ).toBe(
+      "/Users/mario/book/编程书籍&后台开发/DevOpsAndOS/vSphere/vmware_vsphere_7_0虚拟化架构实战指南_操作系统_何坤源_Z_Library.pdf"
+    );
   });
 
   it("rejects unsafe or unsupported desktop open event payloads", () => {
@@ -44,18 +51,10 @@ describe("tauriBridge", () => {
     expect(desktopOpenPayloadToPath("https://example.com/Guide.pdf")).toBeUndefined();
   });
 
-  it("creates desktop PDF sessions through metadata validation instead of reading full bytes", async () => {
-    coreMocks.invoke.mockResolvedValueOnce({
-      id: "/Users/mario/Books/Guide.pdf",
-      pageCount: 5,
-      outline: []
-    });
-
+  it("creates desktop PDF sessions without blocking on metadata parsing", async () => {
     const session = await createDesktopSession("/Users/mario/Books/Guide.pdf");
 
-    expect(coreMocks.invoke).toHaveBeenCalledWith("open_pdf_document", {
-      path: "/Users/mario/Books/Guide.pdf"
-    });
+    expect(coreMocks.invoke).not.toHaveBeenCalledWith("open_pdf_document", expect.anything());
     expect(coreMocks.invoke).not.toHaveBeenCalledWith("read_document", expect.anything());
     expect(session.status).toBe("ready");
     expect(session.format).toBe("pdf");
