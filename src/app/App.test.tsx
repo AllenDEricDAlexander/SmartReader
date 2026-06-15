@@ -81,4 +81,30 @@ describe('App', () => {
       expect(screen.getByRole('tab', { name: 'drop.pdf' })).toBeInTheDocument();
     });
   });
+
+  it('runs viewer zoom shortcuts', () => {
+    const viewerController = {
+      jumpToPage: vi.fn(),
+      searchNext: vi.fn(),
+      searchPrevious: vi.fn(),
+      zoomIn: vi.fn().mockReturnValue(true),
+      zoomOut: vi.fn().mockReturnValue(true),
+      fitWidth: vi.fn(),
+      fitPage: vi.fn(),
+    };
+
+    render(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        viewerController={viewerController}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: '=', metaKey: true });
+    fireEvent.keyDown(window, { key: '-', metaKey: true });
+
+    expect(viewerController.zoomIn).toHaveBeenCalledTimes(1);
+    expect(viewerController.zoomOut).toHaveBeenCalledTimes(1);
+  });
 });

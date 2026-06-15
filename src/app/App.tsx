@@ -1,6 +1,8 @@
 import { FileText, FolderOpen, PanelLeftClose, Search, ZoomIn, ZoomOut } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BlobUrlCache } from '../cache/blobUrlCache';
+import { CommandRegistry, defaultShortcuts } from '../commands/commandRegistry';
+import { handleShortcutEvent } from '../commands/shortcutController';
 import {
   addDocumentSession,
   closeDocumentSession,
@@ -11,12 +13,12 @@ import { getPdfFilesFromDrop } from '../platform/dropZone';
 import { getDocumentKey, type FileSource } from '../platform/fileSource';
 import { createTauriBridge, type TauriBridge } from '../platform/tauriBridge';
 import { PdfViewerBridge, type PdfRenderer } from '../viewer/PdfViewerBridge';
-import { ViewerController } from '../viewer/viewerController';
+import { ViewerController, type ViewerActions } from '../viewer/viewerController';
 import type { ViewerSource } from '../viewer/viewerTypes';
 
 type AppProps = {
   bridge?: TauriBridge;
-  viewerController?: ViewerController;
+  viewerController?: ViewerActions;
   viewerRenderer?: PdfRenderer;
 };
 
@@ -27,6 +29,10 @@ export function App({ bridge = createTauriBridge(), viewerController, viewerRend
   const blobUrlCache = useMemo(() => new BlobUrlCache(), []);
   const defaultViewerController = useMemo(() => new ViewerController(), []);
   const activeViewerController = viewerController ?? defaultViewerController;
+  const bridgeViewerController =
+    activeViewerController instanceof ViewerController
+      ? activeViewerController
+      : defaultViewerController;
 
   const activeSession =
     documents.sessions.find((session) => session.id === documents.activeSessionId) ?? null;
@@ -56,6 +62,96 @@ export function App({ bridge = createTauriBridge(), viewerController, viewerRend
     openBytes(opened.source, opened.bytes);
   };
 
+  const closeActiveTab = () => {
+    if (!activeSession) {
+      return;
+    }
+
+    blobUrlCache.revokeForSession(activeSession.id);
+    setDocuments((current) => closeDocumentSession(current, activeSession.id));
+    setViewerSource(null);
+  };
+
+  const commandRegistry = useMemo(() => {
+    const registry = new CommandRegistry();
+    registry.register({
+      id: 'file.open',
+      label: 'Open File',
+      shortcut: defaultShortcuts.openFile,
+      run: () => void openPdf(),
+    });
+    registry.register({
+      id: 'tab.close',
+      label: 'Close Tab',
+      shortcut: defaultShortcuts.closeTab,
+      run: closeActiveTab,
+    });
+    registry.register({
+      id: 'find.next',
+      label: 'Find Next',
+      shortcut: defaultShortcuts.findNext,
+      run: () => activeViewerController.searchNext(),
+    });
+    registry.register({
+      id: 'find.previous',
+      label: 'Find Previous',
+      shortcut: defaultShortcuts.findPrevious,
+      run: () => activeViewerController.searchPrevious(),
+    });
+    registry.register({
+      id: 'sidebar.toggle',
+      label: 'Toggle Sidebar',
+      shortcut: defaultShortcuts.toggleSidebar,
+      run: () => setSidebarOpen((open) => !open),
+    });
+    registry.register({
+      id: 'zoom.in',
+      label: 'Zoom In',
+      shortcut: defaultShortcuts.zoomIn,
+      run: () => activeViewerController.zoomIn(),
+    });
+    registry.register({
+      id: 'zoom.out',
+      label: 'Zoom Out',
+      shortcut: defaultShortcuts.zoomOut,
+      run: () => activeViewerController.zoomOut(),
+    });
+    registry.register({
+      id: 'history.back',
+      label: 'History Back',
+      shortcut: defaultShortcuts.historyBack,
+      run: () => undefined,
+    });
+    registry.register({
+      id: 'history.forward',
+      label: 'History Forward',
+      shortcut: defaultShortcuts.historyForward,
+      run: () => undefined,
+    });
+    registry.register({
+      id: 'tab.next',
+      label: 'Next Tab',
+      shortcut: defaultShortcuts.nextTab,
+      run: () => undefined,
+    });
+    registry.register({
+      id: 'tab.previous',
+      label: 'Previous Tab',
+      shortcut: defaultShortcuts.previousTab,
+      run: () => undefined,
+    });
+    return registry;
+  }, [activeViewerController, activeSession, bridge, blobUrlCache]);
+
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      handleShortcutEvent(event, commandRegistry);
+    };
+
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, [commandRegistry]);
+
   const handleDrop = async (event: React.DragEvent<HTMLElement>) => {
     event.preventDefault();
     const [file] = getPdfFilesFromDrop(event.dataTransfer.files);
@@ -72,16 +168,6 @@ export function App({ bridge = createTauriBridge(), viewerController, viewerRend
       },
       new Uint8Array(await file.arrayBuffer()),
     );
-  };
-
-  const closeActiveTab = () => {
-    if (!activeSession) {
-      return;
-    }
-
-    blobUrlCache.revokeForSession(activeSession.id);
-    setDocuments((current) => closeDocumentSession(current, activeSession.id));
-    setViewerSource(null);
   };
 
   return (
@@ -159,7 +245,7 @@ export function App({ bridge = createTauriBridge(), viewerController, viewerRend
           {activeSession ? (
             <PdfViewerBridge
               source={viewerSource}
-              controller={activeViewerController}
+              controller={bridgeViewerController}
               renderer={viewerRenderer}
               onProgressChange={(progress) => {
                 setDocuments((current) =>
