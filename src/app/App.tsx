@@ -7,22 +7,30 @@ import {
   addDocumentSession,
   closeDocumentSession,
   createEmptyDocumentState,
+  restoreDocumentSessions,
   updateSessionProgress,
 } from '../documents/documentSessionStore';
 import { getPdfFilesFromDrop } from '../platform/dropZone';
 import { getDocumentKey, type FileSource } from '../platform/fileSource';
 import { createTauriBridge, type TauriBridge } from '../platform/tauriBridge';
+import { createPersistenceApi, type PersistenceApi } from '../persistence/persistenceApi';
 import { PdfViewerBridge, type PdfRenderer } from '../viewer/PdfViewerBridge';
 import { ViewerController, type ViewerActions } from '../viewer/viewerController';
 import type { ViewerSource } from '../viewer/viewerTypes';
 
 type AppProps = {
   bridge?: TauriBridge;
+  persistence?: PersistenceApi;
   viewerController?: ViewerActions;
   viewerRenderer?: PdfRenderer;
 };
 
-export function App({ bridge = createTauriBridge(), viewerController, viewerRenderer }: AppProps) {
+export function App({
+  bridge = createTauriBridge(),
+  persistence = createPersistenceApi(),
+  viewerController,
+  viewerRenderer,
+}: AppProps) {
   const [documents, setDocuments] = useState(createEmptyDocumentState);
   const [viewerSource, setViewerSource] = useState<ViewerSource | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -36,6 +44,27 @@ export function App({ bridge = createTauriBridge(), viewerController, viewerRend
 
   const activeSession =
     documents.sessions.find((session) => session.id === documents.activeSessionId) ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    persistence
+      .listRecentDocuments()
+      .then((restoredDocuments) => {
+        if (!cancelled && restoredDocuments.length > 0) {
+          setDocuments(restoreDocumentSessions(restoredDocuments));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDocuments(createEmptyDocumentState());
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [persistence]);
 
   const openBytes = (source: FileSource, bytes: Uint8Array) => {
     setDocuments((current) => {

@@ -4,6 +4,7 @@ import {
   addDocumentSession,
   closeDocumentSession,
   createEmptyDocumentState,
+  restoreDocumentSessions,
   updateSessionProgress,
 } from './documentSessionStore';
 
@@ -60,5 +61,33 @@ describe('documentSessionStore', () => {
     expect(next.sessions).toHaveLength(1);
     expect(next.sessions[0].title).toBe('a.pdf');
     expect(next.activeSessionId).toBe(next.sessions[0].id);
+  });
+});
+
+describe('restoreDocumentSessions', () => {
+  it('restores desktop path sessions with saved progress', () => {
+    const state = restoreDocumentSessions([
+      {
+        documentKey: 'desktop:/tmp/book.pdf',
+        path: '/tmp/book.pdf',
+        displayName: 'book.pdf',
+        fileSize: 100,
+        modifiedAt: '2026-06-15T00:00:00Z',
+        pageCount: 20,
+        lastPage: 6,
+        progress: 0.3,
+        missing: false,
+      },
+    ]);
+
+    expect(state.sessions).toHaveLength(1);
+    expect(state.activeSessionId).toBe(state.sessions[0].id);
+    expect(state.sessions[0]).toMatchObject({
+      documentKey: 'desktop:/tmp/book.pdf',
+      page: 6,
+      totalPages: 20,
+      progress: 0.3,
+      status: 'ready',
+    });
   });
 });

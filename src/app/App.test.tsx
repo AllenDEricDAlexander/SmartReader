@@ -5,6 +5,13 @@ import { App } from './App';
 
 const testViewerRenderer: PdfRenderer = ({ fileUrl }) => <div>PDF {fileUrl}</div>;
 
+function createEmptyPersistence() {
+  return {
+    saveDocument: vi.fn(),
+    listRecentDocuments: vi.fn().mockResolvedValue([]),
+  };
+}
+
 describe('App', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -23,6 +30,7 @@ describe('App', () => {
     render(
       <App
         bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
         viewerRenderer={testViewerRenderer}
       />,
     );
@@ -47,6 +55,7 @@ describe('App', () => {
     render(
       <App
         bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
         viewerRenderer={testViewerRenderer}
       />,
     );
@@ -67,6 +76,7 @@ describe('App', () => {
     render(
       <App
         bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
         viewerRenderer={testViewerRenderer}
       />,
     );
@@ -96,6 +106,7 @@ describe('App', () => {
     render(
       <App
         bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
         viewerController={viewerController}
         viewerRenderer={testViewerRenderer}
       />,
@@ -106,5 +117,36 @@ describe('App', () => {
 
     expect(viewerController.zoomIn).toHaveBeenCalledTimes(1);
     expect(viewerController.zoomOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores recent desktop sessions on startup', async () => {
+    const persistence = {
+      saveDocument: vi.fn(),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/book.pdf',
+          path: '/tmp/book.pdf',
+          displayName: 'book.pdf',
+          fileSize: 100,
+          modifiedAt: '2026-06-15T00:00:00Z',
+          pageCount: 20,
+          lastPage: 6,
+          progress: 0.3,
+          missing: false,
+        },
+      ]),
+    };
+
+    render(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
+    });
   });
 });

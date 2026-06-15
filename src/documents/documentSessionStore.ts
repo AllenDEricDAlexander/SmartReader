@@ -1,4 +1,5 @@
 import { getDocumentKey, getFileSourceName, type FileSource } from '../platform/fileSource';
+import type { PersistedDocument } from '../persistence/persistenceApi';
 import type { DocumentSession, DocumentState, ProgressUpdate } from './documentModels';
 
 export function createEmptyDocumentState(): DocumentState {
@@ -82,6 +83,37 @@ export function closeDocumentSession(state: DocumentState, sessionId: string): D
   return {
     sessions,
     activeSessionId,
+  };
+}
+
+export function restoreDocumentSessions(documents: PersistedDocument[]): DocumentState {
+  const sessions = documents
+    .filter((document) => document.path)
+    .map((document) => {
+      const source: FileSource = {
+        kind: 'desktop-path',
+        path: document.path!,
+        name: document.displayName,
+      };
+
+      return {
+        id: createSessionId(document.documentKey),
+        documentKey: document.documentKey,
+        title: document.displayName,
+        source,
+        page: document.lastPage,
+        totalPages: document.pageCount,
+        progress: document.progress,
+        zoom: 1,
+        status: document.missing ? 'error' : 'ready',
+        errorMessage: document.missing ? 'File is missing' : null,
+        updatedAt: new Date().toISOString(),
+      } satisfies DocumentSession;
+    });
+
+  return {
+    sessions,
+    activeSessionId: sessions[0]?.id ?? null,
   };
 }
 
