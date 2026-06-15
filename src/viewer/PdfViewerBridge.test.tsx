@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { PdfViewerBridge, type PdfRenderer } from './PdfViewerBridge';
+import { ViewerController } from './viewerController';
 
 describe('PdfViewerBridge', () => {
   it('shows an empty message without a source', () => {
@@ -39,5 +40,24 @@ describe('PdfViewerBridge', () => {
       totalPages: 10,
       zoom: 1.25,
     });
+  });
+
+  it('binds and clears a provided viewer controller', () => {
+    const renderer: PdfRenderer = () => <div>Rendered PDF</div>;
+    const controller = new ViewerController();
+    const { unmount } = render(
+      <PdfViewerBridge
+        source={{ sessionId: 'session-a', url: 'blob:book' }}
+        renderer={renderer}
+        controller={controller}
+        onProgressChange={vi.fn()}
+      />,
+    );
+
+    expect(controller.fitPage()).toBe(true);
+
+    unmount();
+
+    expect(controller.fitPage()).toBe(false);
   });
 });
