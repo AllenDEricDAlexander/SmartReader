@@ -1,6 +1,6 @@
 import { SpecialZoomLevel, Worker, Viewer } from '@react-pdf-viewer/core';
 import { toolbarPlugin } from '@react-pdf-viewer/toolbar';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import '@react-pdf-viewer/core/lib/styles/index.css';
 import '@react-pdf-viewer/page-navigation/lib/styles/index.css';
 import '@react-pdf-viewer/search/lib/styles/index.css';
@@ -123,15 +123,11 @@ function ReactPdfViewer({
   onZoomChange,
 }: PdfRendererProps & { controller?: ViewerController }) {
   const scaleRef = useRef(1);
-  const toolbarPluginInstance = useMemo(
-    () =>
-      toolbarPlugin({
-        pageNavigationPlugin: { enableShortcuts: false },
-        searchPlugin: { enableShortcuts: false },
-        zoomPlugin: { enableShortcuts: false },
-      }),
-    [],
-  );
+  const toolbarPluginInstance = toolbarPlugin({
+    pageNavigationPlugin: { enableShortcuts: false },
+    searchPlugin: { enableShortcuts: false },
+    zoomPlugin: { enableShortcuts: false },
+  });
   const {
     pageNavigationPluginInstance,
     searchPluginInstance,

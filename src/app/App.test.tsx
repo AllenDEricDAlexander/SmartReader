@@ -1,12 +1,61 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { PdfRenderer } from '../viewer/PdfViewerBridge';
 import { App } from './App';
 
-describe('App', () => {
-  it('renders the empty reader shell', () => {
-    render(<App />);
+const testViewerRenderer: PdfRenderer = ({ fileUrl }) => <div>PDF {fileUrl}</div>;
 
-    expect(screen.getByRole('main')).toBeInTheDocument();
-    expect(screen.getByText('Open a PDF to start reading')).toBeInTheDocument();
+describe('App', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('opens a PDF from the native dialog and displays a tab', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:book');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/book.pdf', name: 'book.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-15T00:00:00Z',
+    });
+
+    render(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
+    });
+  });
+
+  it('does not create a duplicate tab for the same path', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:book');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/book.pdf', name: 'book.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-15T00:00:00Z',
+    });
+
+    render(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab', { name: 'book.pdf' })).toHaveLength(1);
+    });
   });
 });
