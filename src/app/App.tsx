@@ -7,7 +7,8 @@ import {
   createEmptyDocumentState,
   updateSessionProgress,
 } from '../documents/documentSessionStore';
-import { getDocumentKey } from '../platform/fileSource';
+import { getPdfFilesFromDrop } from '../platform/dropZone';
+import { getDocumentKey, type FileSource } from '../platform/fileSource';
 import { createTauriBridge, type TauriBridge } from '../platform/tauriBridge';
 import { PdfViewerBridge, type PdfRenderer } from '../viewer/PdfViewerBridge';
 import { ViewerController } from '../viewer/viewerController';
@@ -30,6 +31,21 @@ export function App({ bridge = createTauriBridge(), viewerController, viewerRend
   const activeSession =
     documents.sessions.find((session) => session.id === documents.activeSessionId) ?? null;
 
+  const openBytes = (source: FileSource, bytes: Uint8Array) => {
+    setDocuments((current) => {
+      const next = addDocumentSession(current, source);
+      const documentKey = getDocumentKey(source);
+      const session = next.sessions.find((candidate) => candidate.documentKey === documentKey);
+
+      if (session) {
+        const url = blobUrlCache.createForSession(session.id, bytes);
+        setViewerSource({ sessionId: session.id, url });
+      }
+
+      return next;
+    });
+  };
+
   const openPdf = async () => {
     const opened = await bridge.openNativePdf();
 
@@ -37,18 +53,25 @@ export function App({ bridge = createTauriBridge(), viewerController, viewerRend
       return;
     }
 
-    setDocuments((current) => {
-      const next = addDocumentSession(current, opened.source);
-      const documentKey = getDocumentKey(opened.source);
-      const session = next.sessions.find((candidate) => candidate.documentKey === documentKey);
+    openBytes(opened.source, opened.bytes);
+  };
 
-      if (session) {
-        const url = blobUrlCache.createForSession(session.id, opened.bytes);
-        setViewerSource({ sessionId: session.id, url });
-      }
+  const handleDrop = async (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    const [file] = getPdfFilesFromDrop(event.dataTransfer.files);
 
-      return next;
-    });
+    if (!file) {
+      return;
+    }
+
+    openBytes(
+      {
+        kind: 'browser-file',
+        file,
+        name: file.name,
+      },
+      new Uint8Array(await file.arrayBuffer()),
+    );
   };
 
   const closeActiveTab = () => {
@@ -62,7 +85,12 @@ export function App({ bridge = createTauriBridge(), viewerController, viewerRend
   };
 
   return (
-    <main className="app-shell">
+    <main
+      className="app-shell"
+      aria-label="Reader workspace"
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={handleDrop}
+    >
       <header className="tab-strip" aria-label="Open documents">
         {documents.sessions.map((session) => (
           <button

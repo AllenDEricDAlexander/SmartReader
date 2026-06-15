@@ -58,4 +58,27 @@ describe('App', () => {
       expect(screen.getAllByRole('tab', { name: 'book.pdf' })).toHaveLength(1);
     });
   });
+
+  it('opens a dropped browser PDF file', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:drop');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const file = new File(['%PDF-1.7'], 'drop.pdf', { type: 'application/pdf' });
+
+    render(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.drop(screen.getByLabelText('Reader workspace'), {
+      dataTransfer: {
+        files: [file],
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'drop.pdf' })).toBeInTheDocument();
+    });
+  });
 });
