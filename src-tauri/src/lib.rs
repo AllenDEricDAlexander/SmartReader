@@ -1,4 +1,5 @@
 mod db;
+mod file_commands;
 
 use tauri::Manager;
 
@@ -14,6 +15,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             db::save_document,
             db::list_recent_documents,
+            file_commands::read_desktop_pdf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SmartReader");
