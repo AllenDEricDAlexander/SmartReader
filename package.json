@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "mkdir -p public && cp node_modules/pdfjs-dist/build/pdf.worker.min.js public/pdf.worker.min.js",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
@@ -36,6 +37,7 @@
     "@types/react": "18.3.31",
     "@types/react-dom": "18.3.7",
     "@vitejs/plugin-react": "6.0.2",
+    "esbuild": "0.28.0",
     "jsdom": "29.1.1",
     "typescript": "6.0.3",
     "vite": "8.0.16",
