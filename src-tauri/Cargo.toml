@@ -1,0 +1,23 @@
+[package]
+name = "smartreader"
+version = "0.1.0"
+description = "SmartReader desktop PDF reader"
+authors = ["SmartReader"]
+edition = "2021"
+
+[lib]
+name = "smartreader_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.1", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.2", features = [] }
+tauri-plugin-dialog = "2.7.1"
+tauri-plugin-fs = "2.5.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+rusqlite = { version = "0.37.0", features = ["bundled"] }
+time = { version = "0.3", features = ["formatting", "macros"] }
