@@ -8,7 +8,7 @@ describe('recentFiles', () => {
         documentKey: 'desktop:/tmp/book.pdf',
         path: '/tmp/book.pdf',
         displayName: 'book.pdf',
-        fileSize: 100,
+        fileSize: 102400,
         modifiedAt: '2026-06-15T00:00:00Z',
         pageCount: 10,
         lastPage: 5,
@@ -24,6 +24,37 @@ describe('recentFiles', () => {
         path: '/tmp/book.pdf',
         progressLabel: '50%',
         lastPageLabel: 'Page 5',
+        fileSizeLabel: '100 KB',
+        modifiedAtLabel: '2026-06-15T00:00:00Z',
+        missing: false,
+      },
+    ]);
+  });
+
+  it('maps rich recent file details', () => {
+    expect(
+      mapDocumentsToRecentFiles([
+        {
+          documentKey: 'desktop:/tmp/book.pdf',
+          path: '/tmp/book.pdf',
+          displayName: 'book.pdf',
+          fileSize: 2048,
+          modifiedAt: '2026-06-16T00:00:00Z',
+          pageCount: 20,
+          lastPage: 5,
+          progress: 0.25,
+          missing: false,
+        },
+      ]),
+    ).toEqual([
+      {
+        documentKey: 'desktop:/tmp/book.pdf',
+        title: 'book.pdf',
+        path: '/tmp/book.pdf',
+        progressLabel: '25%',
+        lastPageLabel: 'Page 5',
+        fileSizeLabel: '2 KB',
+        modifiedAtLabel: '2026-06-16T00:00:00Z',
         missing: false,
       },
     ]);
@@ -37,6 +68,8 @@ describe('recentFiles', () => {
         path: '/tmp/missing.pdf',
         progressLabel: '0%',
         lastPageLabel: 'Page 1',
+        fileSizeLabel: 'Unknown size',
+        modifiedAtLabel: 'Unknown modified time',
         missing: true,
       },
       {
@@ -45,6 +78,8 @@ describe('recentFiles', () => {
         path: '/tmp/ok.pdf',
         progressLabel: '20%',
         lastPageLabel: 'Page 2',
+        fileSizeLabel: 'Unknown size',
+        modifiedAtLabel: 'Unknown modified time',
         missing: false,
       },
     ]);

@@ -4,7 +4,13 @@ import {
   addDocumentSession,
   closeDocumentSession,
   createEmptyDocumentState,
+  markSessionError,
+  recordHardNavigation,
   restoreDocumentSessions,
+  selectNextSession,
+  selectPreviousSession,
+  stepSessionHistoryBack,
+  stepSessionHistoryForward,
   updateSessionProgress,
 } from './documentSessionStore';
 
@@ -62,23 +68,71 @@ describe('documentSessionStore', () => {
     expect(next.sessions[0].title).toBe('a.pdf');
     expect(next.activeSessionId).toBe(next.sessions[0].id);
   });
+
+  it('moves active tab forward and backward', () => {
+    const first = addDocumentSession(createEmptyDocumentState(), {
+      kind: 'desktop-path',
+      path: '/tmp/a.pdf',
+      name: 'a.pdf',
+    });
+    const second = addDocumentSession(first, {
+      kind: 'desktop-path',
+      path: '/tmp/b.pdf',
+      name: 'b.pdf',
+    });
+
+    expect(selectNextSession(second).activeSessionId).toBe(first.sessions[0].id);
+    expect(selectPreviousSession(second).activeSessionId).toBe(first.sessions[0].id);
+  });
+
+  it('records hard navigation and steps through history', () => {
+    const state = addDocumentSession(createEmptyDocumentState(), {
+      kind: 'desktop-path',
+      path: '/tmp/a.pdf',
+      name: 'a.pdf',
+    });
+    const sessionId = state.activeSessionId!;
+
+    const jumped = recordHardNavigation(state, sessionId, 5);
+    const backed = stepSessionHistoryBack(jumped, sessionId);
+    const forwarded = stepSessionHistoryForward(backed, sessionId);
+
+    expect(jumped.sessions[0].history).toMatchObject({ currentPage: 5, backStack: [1] });
+    expect(backed.sessions[0].page).toBe(1);
+    expect(forwarded.sessions[0].page).toBe(5);
+  });
 });
 
 describe('restoreDocumentSessions', () => {
   it('restores desktop path sessions with saved progress', () => {
-    const state = restoreDocumentSessions([
+    const state = restoreDocumentSessions(
+      [
+        {
+          documentKey: 'desktop:/tmp/book.pdf',
+          path: '/tmp/book.pdf',
+          displayName: 'book.pdf',
+          fileSize: 100,
+          modifiedAt: '2026-06-15T00:00:00Z',
+          pageCount: 20,
+          lastPage: 6,
+          progress: 0.3,
+          missing: false,
+        },
+      ],
       {
-        documentKey: 'desktop:/tmp/book.pdf',
-        path: '/tmp/book.pdf',
-        displayName: 'book.pdf',
-        fileSize: 100,
-        modifiedAt: '2026-06-15T00:00:00Z',
-        pageCount: 20,
-        lastPage: 6,
-        progress: 0.3,
-        missing: false,
+        activeDocumentKey: 'desktop:/tmp/book.pdf',
+        sidebarOpen: true,
+        tabs: [
+          {
+            documentKey: 'desktop:/tmp/book.pdf',
+            tabOrder: 0,
+            page: 6,
+            zoom: 1,
+            history: { currentPage: 6, backStack: [], forwardStack: [] },
+          },
+        ],
       },
-    ]);
+    );
 
     expect(state.sessions).toHaveLength(1);
     expect(state.activeSessionId).toBe(state.sessions[0].id);
@@ -88,6 +142,46 @@ describe('restoreDocumentSessions', () => {
       totalPages: 20,
       progress: 0.3,
       status: 'ready',
+    });
+  });
+
+  it('marks restored missing files as recoverable errors', () => {
+    const state = markSessionError(
+      restoreDocumentSessions(
+        [
+          {
+            documentKey: 'desktop:/tmp/missing.pdf',
+            path: '/tmp/missing.pdf',
+            displayName: 'missing.pdf',
+            fileSize: 100,
+            modifiedAt: '2026-06-16T00:00:00Z',
+            pageCount: 10,
+            lastPage: 2,
+            progress: 0.2,
+            missing: false,
+          },
+        ],
+        {
+          activeDocumentKey: 'desktop:/tmp/missing.pdf',
+          sidebarOpen: true,
+          tabs: [
+            {
+              documentKey: 'desktop:/tmp/missing.pdf',
+              tabOrder: 0,
+              page: 2,
+              zoom: 1,
+              history: { currentPage: 2, backStack: [], forwardStack: [] },
+            },
+          ],
+        },
+      ),
+      'session-ZGVza3RvcDovdG1wL21pc3NpbmcucGRm',
+      'file does not exist',
+    );
+
+    expect(state.sessions[0]).toMatchObject({
+      status: 'error',
+      errorMessage: 'file does not exist',
     });
   });
 });

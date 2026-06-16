@@ -17,5 +17,12 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/.worktrees/**',
+      '**/src-tauri/target/**',
+      '**/src-tauri/gen/**',
+    ],
   },
 });

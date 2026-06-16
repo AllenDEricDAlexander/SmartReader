@@ -7,11 +7,18 @@ export type CommandId =
   | 'sidebar.toggle'
   | 'zoom.in'
   | 'zoom.out'
+  | 'zoom.fitWidth'
+  | 'zoom.fitPage'
   | 'page.focus'
   | 'history.back'
   | 'history.forward'
   | 'tab.next'
-  | 'tab.previous';
+  | 'tab.previous'
+  | 'bookmark.add'
+  | 'annotation.note'
+  | 'preferences.open'
+  | 'annotation.export'
+  | 'annotation.import';
 
 export type Command = {
   id: CommandId;
@@ -34,11 +41,18 @@ export const defaultShortcuts = {
   toggleSidebar: 'Meta+B',
   zoomIn: 'Meta+=',
   zoomOut: 'Meta+-',
+  fitWidth: 'Meta+0',
+  fitPage: 'Meta+9',
   focusPage: 'Meta+L',
   historyBack: 'Meta+[',
   historyForward: 'Meta+]',
   nextTab: 'Control+Tab',
   previousTab: 'Shift+Control+Tab',
+  addBookmark: 'Meta+D',
+  addNote: 'Shift+Meta+N',
+  openPreferences: 'Meta+,',
+  exportAnnotations: null,
+  importAnnotations: null,
 } as const;
 
 export class CommandRegistry {

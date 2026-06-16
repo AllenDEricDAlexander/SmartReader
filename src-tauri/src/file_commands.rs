@@ -34,6 +34,13 @@ pub struct DesktopPdfFile {
     pub modified_at: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedPdfFile {
+    pub cache_path: String,
+    pub bytes: Vec<u8>,
+}
+
 #[tauri::command]
 pub fn read_desktop_pdf(path: String) -> Result<DesktopPdfFile, FileCommandError> {
     let path_ref = Path::new(&path);
@@ -69,12 +76,30 @@ pub fn read_desktop_pdf(path: String) -> Result<DesktopPdfFile, FileCommandError
     })
 }
 
+#[tauri::command]
+pub fn read_cached_pdf(cache_path: String) -> Result<CachedPdfFile, FileCommandError> {
+    let bytes = fs::read(&cache_path)?;
+    validate_pdf_bytes(&bytes)?;
+    Ok(CachedPdfFile { cache_path, bytes })
+}
+
 pub fn validate_pdf_bytes(bytes: &[u8]) -> Result<(), FileCommandError> {
     if bytes.starts_with(b"%PDF-") {
         Ok(())
     } else {
         Err(FileCommandError::InvalidPdf)
     }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn cache_file_name(document_key: &str) -> String {
+    let mut name = String::new();
+
+    for byte in document_key.as_bytes() {
+        name.push_str(&format!("{byte:02x}"));
+    }
+
+    format!("{name}.pdf")
 }
 
 #[cfg(test)]
@@ -90,5 +115,14 @@ mod tests {
     fn rejects_non_pdf_header() {
         let error = validate_pdf_bytes(b"not a pdf").expect_err("invalid");
         assert!(matches!(error, FileCommandError::InvalidPdf));
+    }
+
+    #[test]
+    fn cache_file_name_is_stable() {
+        let name = cache_file_name("desktop:/tmp/book.pdf");
+        assert!(name.ends_with(".pdf"));
+        assert!(name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.'));
     }
 }

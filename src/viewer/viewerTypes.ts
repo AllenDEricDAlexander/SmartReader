@@ -9,3 +9,17 @@ export type ViewerProgress = {
   totalPages: number | null;
   zoom: number;
 };
+
+export type ViewerHighlightArea = {
+  pageIndex: number;
+  top: number;
+  left: number;
+  height: number;
+  width: number;
+};
+
+export type ViewerHighlightSelection = {
+  selectedText: string;
+  page: number;
+  areas: ViewerHighlightArea[];
+};

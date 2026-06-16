@@ -33,9 +33,21 @@ describe('CommandRegistry', () => {
       openFile: 'Meta+O',
       closeTab: 'Meta+W',
       find: 'Meta+F',
+      findNext: 'Meta+G',
+      findPrevious: 'Shift+Meta+G',
       zoomIn: 'Meta+=',
       zoomOut: 'Meta+-',
+      fitWidth: 'Meta+0',
+      fitPage: 'Meta+9',
       toggleSidebar: 'Meta+B',
+      focusPage: 'Meta+L',
+      historyBack: 'Meta+[',
+      historyForward: 'Meta+]',
+      nextTab: 'Control+Tab',
+      previousTab: 'Shift+Control+Tab',
+      addBookmark: 'Meta+D',
+      addNote: 'Shift+Meta+N',
+      openPreferences: 'Meta+,',
     });
   });
 });

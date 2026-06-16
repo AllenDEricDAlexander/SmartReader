@@ -1,5 +1,7 @@
 export type ViewerActions = {
   jumpToPage(page: number): void;
+  openSearch(): void;
+  search(keyword: string): void;
   searchNext(): void;
   searchPrevious(): void;
   zoomIn(): void;
@@ -21,6 +23,14 @@ export class ViewerController {
 
   jumpToPage(page: number): boolean {
     return this.run((actions) => actions.jumpToPage(page));
+  }
+
+  openSearch(): boolean {
+    return this.run((actions) => actions.openSearch());
+  }
+
+  search(keyword: string): boolean {
+    return this.run((actions) => actions.search(keyword));
   }
 
   searchNext(): boolean {

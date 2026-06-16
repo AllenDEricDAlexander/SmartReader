@@ -24,11 +24,13 @@ body,
 }
 
 button,
-input {
+input,
+.file-picker-button {
   font: inherit;
 }
 
-button {
+button,
+.file-picker-button {
   border: 1px solid rgba(93, 79, 61, 0.16);
   border-radius: 7px;
   background: rgba(255, 252, 246, 0.92);
@@ -96,10 +98,45 @@ button:disabled {
   padding: 0 10px;
 }
 
+.file-picker-button {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+}
+
+.file-picker-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .toolbar-status {
   margin-left: auto;
   color: #6b6258;
   font-size: 13px;
+}
+
+.toolbar-input,
+.page-input {
+  height: 30px;
+  min-width: 0;
+  border: 1px solid rgba(93, 79, 61, 0.16);
+  border-radius: 7px;
+  background: rgba(255, 252, 246, 0.92);
+  color: #332d26;
+  padding: 0 8px;
+}
+
+.toolbar-input {
+  width: 150px;
+}
+
+.page-input {
+  width: 74px;
 }
 
 .reader-grid {
@@ -132,6 +169,47 @@ button:disabled {
   font-size: 13px;
 }
 
+.side-section {
+  margin-top: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.side-section h3 {
+  margin: 0;
+  color: #3f382f;
+  font-size: 13px;
+}
+
+.side-list-item {
+  width: 100%;
+  min-height: 30px;
+  text-align: left;
+}
+
+.side-list-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.annotation-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.annotation-import {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border: 1px solid rgba(93, 79, 61, 0.16);
+  border-radius: 7px;
+  background: rgba(255, 252, 246, 0.92);
+  color: #332d26;
+  font: inherit;
+  font-size: 12px;
+}
+
 .viewer-pane {
   min-width: 0;
   min-height: 0;
@@ -144,6 +222,26 @@ button:disabled {
   display: grid;
   place-items: center;
   color: #6b6258;
+}
+
+.reader-error {
+  align-self: center;
+  justify-self: center;
+  width: min(420px, calc(100vw - 48px));
+  padding: 24px;
+  border: 1px solid rgba(154, 64, 43, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 250, 246, 0.94);
+}
+
+.reader-error h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.reader-error p {
+  margin: 0 0 16px;
+  color: #7a5144;
 }
 
 .empty-reader {
@@ -175,6 +273,58 @@ button:disabled {
   margin: 14px 0 0;
   color: #6b6258;
   line-height: 1.6;
+}
+
+.recent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.recent-card {
+  min-height: 96px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 10px;
+  text-align: left;
+}
+
+.recent-card span {
+  color: #6b6258;
+  font-size: 12px;
+}
+
+.recent-card.missing {
+  border-color: rgba(180, 83, 9, 0.45);
+}
+
+.preferences-panel {
+  position: fixed;
+  z-index: 20;
+  inset: 80px auto auto 50%;
+  width: min(420px, calc(100vw - 32px));
+  display: grid;
+  gap: 14px;
+  transform: translateX(-50%);
+  padding: 16px;
+  border: 1px solid rgba(93, 79, 61, 0.18);
+  border-radius: 8px;
+  background: #fffaf0;
+  box-shadow: 0 24px 60px rgba(76, 62, 42, 0.2);
+}
+
+.preferences-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.preferences-panel h2,
+.preferences-panel h3 {
+  margin: 0;
 }
 
 @media (max-width: 720px) {

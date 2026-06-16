@@ -13,6 +13,8 @@ describe('ViewerController', () => {
   it('delegates commands to bound viewer actions', () => {
     const actions = {
       jumpToPage: vi.fn(),
+      openSearch: vi.fn(),
+      search: vi.fn(),
       searchNext: vi.fn(),
       searchPrevious: vi.fn(),
       zoomIn: vi.fn(),
@@ -25,6 +27,8 @@ describe('ViewerController', () => {
     controller.bind(actions);
 
     expect(controller.jumpToPage(5)).toBe(true);
+    expect(controller.openSearch()).toBe(true);
+    expect(controller.search('method')).toBe(true);
     expect(controller.searchNext()).toBe(true);
     expect(controller.searchPrevious()).toBe(true);
     expect(controller.zoomIn()).toBe(true);
@@ -32,12 +36,16 @@ describe('ViewerController', () => {
     expect(controller.fitWidth()).toBe(true);
     expect(controller.fitPage()).toBe(true);
     expect(actions.jumpToPage).toHaveBeenCalledWith(5);
+    expect(actions.openSearch).toHaveBeenCalledTimes(1);
+    expect(actions.search).toHaveBeenCalledWith('method');
   });
 
   it('clears viewer actions when a document unmounts', () => {
     const controller = new ViewerController();
     controller.bind({
       jumpToPage: vi.fn(),
+      openSearch: vi.fn(),
+      search: vi.fn(),
       searchNext: vi.fn(),
       searchPrevious: vi.fn(),
       zoomIn: vi.fn(),
