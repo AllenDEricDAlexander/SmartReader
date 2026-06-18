@@ -52,6 +52,18 @@ describe('App', () => {
     vi.restoreAllMocks();
   });
 
+  it('renders the ReaderApp through the thin App entry', () => {
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    expect(screen.getByLabelText('SmartReader workbench')).toBeInTheDocument();
+  });
+
   it('opens a PDF from the native dialog and displays a tab', async () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:book');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
@@ -116,7 +128,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.drop(screen.getByLabelText('Reader workspace'), {
+    fireEvent.drop(screen.getByLabelText('SmartReader workbench'), {
       dataTransfer: {
         files: [file],
       },
@@ -267,7 +279,7 @@ describe('App', () => {
       />,
     );
 
-    expect(screen.getAllByLabelText('Reader workspace')).toHaveLength(1);
+    expect(screen.getAllByLabelText('SmartReader workbench')).toHaveLength(1);
   });
 
   it('opens a PDF from the browser file picker', async () => {
