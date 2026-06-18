@@ -29,6 +29,29 @@ export function removeAnnotation(annotations: ReaderAnnotation[], id: number): R
   return annotations.filter((annotation) => annotation.id !== id);
 }
 
+export function setAnnotationTag(
+  annotations: ReaderAnnotation[],
+  annotationId: number,
+  tagId: number,
+  selected: boolean,
+): ReaderAnnotation[] {
+  return annotations.map((annotation) => {
+    if (annotation.id !== annotationId) {
+      return annotation;
+    }
+
+    const currentTagIds = annotation.tagIds ?? [];
+    const nextTagIds = selected
+      ? Array.from(new Set([...currentTagIds, tagId]))
+      : currentTagIds.filter((currentTagId) => currentTagId !== tagId);
+
+    return {
+      ...annotation,
+      tagIds: nextTagIds,
+    };
+  });
+}
+
 export function exportAnnotations(annotations: ReaderAnnotation[]): string {
   return JSON.stringify({ version: 1, annotations }, null, 2);
 }

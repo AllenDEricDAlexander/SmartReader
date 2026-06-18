@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BlobUrlCache } from '../cache/blobUrlCache';
 import { PdfByteCache } from '../cache/pdfByteCache';
 import {
@@ -6,10 +6,13 @@ import {
   markSessionError,
   updateSessionProgress,
 } from '../documents/documentSessionStore';
+import type { DocumentSession } from '../documents/documentModels';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import { HomeDashboard } from '../home/HomeDashboard';
 import type { PersistedDocument } from '../persistence/persistenceApi';
 import { defaultReaderPreferences } from '../preferences/preferencesStore';
+import type { Tag } from '../tags/tagModels';
+import type { ReaderAnnotation } from '../annotations/annotationModels';
 import { ReaderEmptyState } from '../reader/ReaderEmptyState';
 import { ReaderErrorState } from '../reader/ReaderErrorState';
 import { useDocumentOpening } from '../reader/hooks/useDocumentOpening';
@@ -29,6 +32,23 @@ import { ViewerController } from '../viewer/viewerController';
 import type { ViewerSource } from '../viewer/viewerTypes';
 import type { ReaderAppProps } from './appTypes';
 
+function mapSessionToPersistedDocument(session: DocumentSession): PersistedDocument {
+  return {
+    documentKey: session.documentKey,
+    path: session.source.kind === 'desktop-path' ? session.source.path : null,
+    displayName: session.title,
+    fileSize: session.source.kind === 'browser-file' ? session.source.file.size : null,
+    modifiedAt:
+      session.source.kind === 'browser-file'
+        ? new Date(session.source.file.lastModified).toISOString()
+        : null,
+    pageCount: session.totalPages,
+    lastPage: session.page,
+    progress: session.progress,
+    missing: false,
+  };
+}
+
 export function ReaderApp({
   bridge: providedBridge,
   persistence: providedPersistence,
@@ -43,11 +63,14 @@ export function ReaderApp({
   const [viewerSource, setViewerSource] = useState<ViewerSource | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchText, setSearchText] = useState('');
+  const [lastSearchCommand, setLastSearchCommand] = useState('');
   const [pageInput, setPageInput] = useState('');
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [readerPreferences, setReaderPreferences] = useState(defaultReaderPreferences);
   const [recentDocuments, setRecentDocuments] = useState<PersistedDocument[]>([]);
   const [favoriteDocuments, setFavoriteDocuments] = useState<FavoriteDocument[]>([]);
+  const [availableTags, setAvailableTags] = useState<Tag[]>([]);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<number | null>(null);
   const blobUrlCache = useMemo(() => new BlobUrlCache(), []);
   const pdfByteCache = useMemo(() => new PdfByteCache(), []);
   const defaultViewerController = useMemo(() => new ViewerController(), []);
@@ -69,6 +92,8 @@ export function ReaderApp({
     importAnnotationsForDocument,
     loadDocumentDecorations,
     saveAnnotationForActiveDocument,
+    toggleAnnotationTagForDocument,
+    updateAnnotationForDocument,
   } = useReaderDecorations({ activeSession, persistence });
 
   useSessionRestore({
@@ -95,10 +120,23 @@ export function ReaderApp({
       })
       .catch(() => undefined);
 
+    persistence
+      .listTags()
+      .then((tags) => {
+        if (!cancelled) {
+          setAvailableTags(tags);
+        }
+      })
+      .catch(() => undefined);
+
     return () => {
       cancelled = true;
     };
   }, [persistence]);
+
+  useEffect(() => {
+    setSelectedAnnotationId(null);
+  }, [activeSession?.documentKey]);
 
   useEffect(() => {
     if (documents.sessions.length === 0) {
@@ -186,6 +224,111 @@ export function ReaderApp({
   const activeAnnotations = activeSession
     ? (annotationsByDocument[activeSession.documentKey] ?? [])
     : [];
+  const favoriteDocumentKeys = useMemo(
+    () => new Set(favoriteDocuments.map((document) => document.documentKey)),
+    [favoriteDocuments],
+  );
+  const activeSessionIsFavorite = activeSession
+    ? favoriteDocumentKeys.has(activeSession.documentKey)
+    : false;
+  const selectedAnnotation =
+    activeAnnotations.find(
+      (annotation) => annotation.id !== null && annotation.id === selectedAnnotationId,
+    ) ??
+    activeAnnotations[0] ??
+    null;
+
+  const handleToggleFavorite = useCallback(
+    async (documentKey: string, favorite: boolean) => {
+      try {
+        const session = documents.sessions.find(
+          (candidate) => candidate.documentKey === documentKey,
+        );
+        const recent = recentDocuments.find((document) => document.documentKey === documentKey);
+
+        if (favorite && session?.source.kind === 'browser-file') {
+          await persistence.saveDocument(mapSessionToPersistedDocument(session));
+        }
+
+        await persistence.setDocumentFavorite(documentKey, favorite);
+
+        setFavoriteDocuments((current) => {
+          if (!favorite) {
+            return current.filter((document) => document.documentKey !== documentKey);
+          }
+
+          const nextFavorite: FavoriteDocument = session
+            ? {
+                documentKey: session.documentKey,
+                displayName: session.title,
+                path: session.source.kind === 'desktop-path' ? session.source.path : null,
+                lastPage: session.page,
+                progress: session.progress,
+              }
+            : {
+                documentKey,
+                displayName: recent?.displayName ?? documentKey,
+                path: recent?.path ?? null,
+                lastPage: recent?.lastPage ?? 1,
+                progress: recent?.progress ?? 0,
+              };
+
+          return [
+            ...current.filter((document) => document.documentKey !== documentKey),
+            nextFavorite,
+          ].sort((left, right) => left.displayName.localeCompare(right.displayName));
+        });
+      } catch {
+        return;
+      }
+    },
+    [documents.sessions, persistence, recentDocuments],
+  );
+
+  const handleToggleActiveFavorite = useCallback(() => {
+    if (!activeSession) {
+      return;
+    }
+
+    return handleToggleFavorite(activeSession.documentKey, !activeSessionIsFavorite);
+  }, [activeSession, activeSessionIsFavorite, handleToggleFavorite]);
+
+  const handleToggleAnnotationTag = useCallback(
+    (annotation: ReaderAnnotation, tag: Tag, selected: boolean) => {
+      if (!activeSession || annotation.id === null) {
+        return;
+      }
+
+      return toggleAnnotationTagForDocument(
+        activeSession.documentKey,
+        annotation.id,
+        tag.id,
+        selected,
+      );
+    },
+    [activeSession, toggleAnnotationTagForDocument],
+  );
+  const handleSaveAnnotationNote = useCallback(
+    async (annotation: ReaderAnnotation, text: string) => {
+      if (!activeSession || annotation.id === null || annotation.type !== 'note') {
+        return;
+      }
+
+      await updateAnnotationForDocument(activeSession.documentKey, annotation, { text });
+    },
+    [activeSession, updateAnnotationForDocument],
+  );
+  const runSearch = useCallback(
+    (keyword: string) => {
+      activeViewerController.search(keyword);
+      setLastSearchCommand(keyword.trim() ? `Searched "${keyword.trim()}"` : 'Cleared search');
+    },
+    [activeViewerController],
+  );
+  const clearSearch = useCallback(() => {
+    setSearchText('');
+    runSearch('');
+  }, [runSearch]);
   const viewerContent = activeSession ? (
     activeSession.status === 'error' ? (
       <ReaderErrorState
@@ -257,7 +400,7 @@ export function ReaderApp({
               onSearchTextChange={setSearchText}
               onPageInputChange={setPageInput}
               onOpenSearch={() => activeViewerController.openSearch()}
-              onSearch={() => activeViewerController.search(searchText)}
+              onSearch={() => runSearch(searchText)}
               onJumpToPage={() => jumpToPage(Number(pageInput))}
               onFitWidth={() => activeViewerController.fitWidth()}
               onFitPage={() => activeViewerController.fitPage()}
@@ -269,6 +412,8 @@ export function ReaderApp({
               onHistoryForward={stepHistoryForward}
               onAddBookmark={addBookmarkForActivePage}
               onAddNote={addPageNote}
+              isFavorite={activeSessionIsFavorite}
+              onToggleFavorite={handleToggleActiveFavorite}
               onOpenPreferences={() => setPreferencesOpen(true)}
             />
           }
@@ -278,25 +423,49 @@ export function ReaderApp({
               recentDocuments={recentDocuments}
               bookmarks={activeBookmarks}
               annotations={activeAnnotations}
+              selectedAnnotationId={selectedAnnotation?.id ?? null}
+              searchText={searchText}
+              lastSearchCommand={lastSearchCommand}
               onJumpToPage={jumpToActiveDocumentPage}
               onReopenRecentDocument={reopenRecentDocument}
               onAddBookmark={addBookmarkForActivePage}
+              onAddNote={addPageNote}
+              onSelectAnnotation={(annotation) => setSelectedAnnotationId(annotation.id)}
               onDeleteAnnotation={(annotationId) =>
                 deleteAnnotationForDocument(activeSession.documentKey, annotationId)
               }
               onImportAnnotations={(json) =>
                 importAnnotationsForDocument(activeSession.documentKey, json)
               }
+              onSearchTextChange={setSearchText}
+              onOpenSearch={() => activeViewerController.openSearch()}
+              onSearch={() => runSearch(searchText)}
             />
           }
           viewer={<div onWheel={handleViewerWheel}>{viewerContent}</div>}
           rightPanel={
             <ReaderRightPanel
               activeSession={activeSession}
+              selectedAnnotation={selectedAnnotation}
+              tags={availableTags}
               searchText={searchText}
+              lastSearchCommand={lastSearchCommand}
+              isFavorite={activeSessionIsFavorite}
               onSearchTextChange={setSearchText}
               onOpenSearch={() => activeViewerController.openSearch()}
-              onSearch={() => activeViewerController.search(searchText)}
+              onSearch={() => runSearch(searchText)}
+              onClearSearch={clearSearch}
+              onSearchNext={() => activeViewerController.searchNext()}
+              onSearchPrevious={() => activeViewerController.searchPrevious()}
+              onJumpToPage={jumpToActiveDocumentPage}
+              onFitWidth={() => activeViewerController.fitWidth()}
+              onFitPage={() => activeViewerController.fitPage()}
+              onToggleFavorite={handleToggleActiveFavorite}
+              onDeleteAnnotation={(annotationId) =>
+                deleteAnnotationForDocument(activeSession.documentKey, annotationId)
+              }
+              onSaveAnnotationNote={handleSaveAnnotationNote}
+              onToggleAnnotationTag={handleToggleAnnotationTag}
             />
           }
           statusBar={<ReaderStatusBar activeSession={activeSession} />}
@@ -308,6 +477,7 @@ export function ReaderApp({
           onOpenPdf={openPdf}
           onBrowserFileChange={handleBrowserFileChange}
           onReopenRecentDocument={reopenRecentDocument}
+          onToggleFavorite={handleToggleFavorite}
         />
       )}
       {preferencesOpen ? (

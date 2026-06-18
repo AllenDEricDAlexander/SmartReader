@@ -1,20 +1,29 @@
-import { BookMarked, Clock3, FileSearch, Images, StickyNote } from 'lucide-react';
+import { BookMarked, Clock3, Images } from 'lucide-react';
 import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
-import { exportAnnotations } from '../annotations/annotationStore';
 import type { DocumentSession } from '../documents/documentModels';
 import { mapDocumentsToRecentFiles } from '../library/recentFiles';
 import type { PersistedDocument } from '../persistence/persistenceApi';
+import { AnnotationPanel } from './annotations/AnnotationPanel';
+import { SearchPanel } from './search/SearchPanel';
 
 type ReaderLeftPanelProps = {
   activeSession: DocumentSession | null;
   recentDocuments: PersistedDocument[];
   bookmarks: Bookmark[];
   annotations: ReaderAnnotation[];
+  selectedAnnotationId: number | null;
+  searchText: string;
+  lastSearchCommand: string;
   onJumpToPage(page: number): void;
   onReopenRecentDocument(document: PersistedDocument): void | Promise<void>;
   onAddBookmark(): void | Promise<void>;
+  onAddNote(): void | Promise<void>;
+  onSelectAnnotation(annotation: ReaderAnnotation): void;
   onDeleteAnnotation(annotationId: number): void;
   onImportAnnotations(json: string): void;
+  onSearchTextChange(value: string): void;
+  onOpenSearch(): void;
+  onSearch(): void;
 };
 
 export function ReaderLeftPanel({
@@ -22,11 +31,19 @@ export function ReaderLeftPanel({
   recentDocuments,
   bookmarks,
   annotations,
+  selectedAnnotationId,
+  searchText,
+  lastSearchCommand,
   onJumpToPage,
   onReopenRecentDocument,
   onAddBookmark,
+  onAddNote,
+  onSelectAnnotation,
   onDeleteAnnotation,
   onImportAnnotations,
+  onSearchTextChange,
+  onOpenSearch,
+  onSearch,
 }: ReaderLeftPanelProps) {
   const recentFiles = mapDocumentsToRecentFiles(recentDocuments).slice(0, 4);
 
@@ -83,91 +100,24 @@ export function ReaderLeftPanel({
           页面缩略图
         </button>
       </section>
-      <section className="panel-section">
-        <div className="panel-title">
-          <FileSearch size={16} />
-          <h3>Search</h3>
-        </div>
-        <button type="button" className="ghost-row" disabled aria-disabled="true">
-          搜索结果
-        </button>
-      </section>
-      <section className="panel-section">
-        <div className="panel-title">
-          <BookMarked size={16} />
-          <h3>Bookmarks</h3>
-        </div>
-        {bookmarks.length > 0 ? (
-          bookmarks.map((bookmark) => (
-            <button
-              key={bookmark.id ?? `${bookmark.page}-${bookmark.title}`}
-              type="button"
-              className="side-list-item"
-              onClick={() => onJumpToPage(bookmark.page)}
-            >
-              {bookmark.title}
-            </button>
-          ))
-        ) : (
-          <p className="muted-copy">No bookmarks yet</p>
-        )}
-        <button type="button" onClick={() => void onAddBookmark()}>
-          Add bookmark
-        </button>
-      </section>
-      <section className="panel-section">
-        <div className="panel-title">
-          <StickyNote size={16} />
-          <h3>Annotations</h3>
-        </div>
-        <div className="annotation-actions">
-          <button
-            type="button"
-            onClick={() => {
-              const json = exportAnnotations(annotations);
-              void navigator.clipboard?.writeText(json);
-            }}
-          >
-            Export annotations
-          </button>
-        </div>
-        {annotations.length > 0 ? (
-          annotations.map((annotation) => (
-            <div
-              key={annotation.id ?? `${annotation.page}-${annotation.createdAt}`}
-              className="side-list-row"
-            >
-              <button
-                type="button"
-                className="side-list-item"
-                onClick={() => onJumpToPage(annotation.page)}
-              >
-                Page {annotation.page}: {annotation.quote ?? annotation.text ?? annotation.type}
-              </button>
-              {annotation.id ? (
-                <button
-                  type="button"
-                  aria-label="Delete annotation"
-                  onClick={() => onDeleteAnnotation(annotation.id!)}
-                >
-                  Delete
-                </button>
-              ) : null}
-            </div>
-          ))
-        ) : (
-          <p className="muted-copy">No annotations yet</p>
-        )}
-        <textarea
-          aria-label="Annotation import JSON"
-          className="annotation-import"
-          onBlur={(event) => {
-            if (event.target.value.trim()) {
-              onImportAnnotations(event.target.value);
-            }
-          }}
-        />
-      </section>
+      <SearchPanel
+        searchText={searchText}
+        lastSearchCommand={lastSearchCommand}
+        onSearchTextChange={onSearchTextChange}
+        onOpenSearch={onOpenSearch}
+        onSearch={onSearch}
+      />
+      <AnnotationPanel
+        bookmarks={bookmarks}
+        annotations={annotations}
+        selectedAnnotationId={selectedAnnotationId}
+        onSelectAnnotation={onSelectAnnotation}
+        onJumpToPage={onJumpToPage}
+        onAddBookmark={onAddBookmark}
+        onAddNote={onAddNote}
+        onDeleteAnnotation={onDeleteAnnotation}
+        onImportAnnotations={onImportAnnotations}
+      />
     </aside>
   );
 }

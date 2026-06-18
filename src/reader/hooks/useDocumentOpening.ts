@@ -195,7 +195,10 @@ export function useDocumentOpening({
         return;
       }
 
-      openBytes(fileToBrowserSource(file), new Uint8Array(await file.arrayBuffer()));
+      openBytes(fileToBrowserSource(file), new Uint8Array(await file.arrayBuffer()), {
+        fileSize: file.size,
+        modifiedAt: new Date(file.lastModified).toISOString(),
+      });
     },
     [openBytes],
   );
@@ -208,7 +211,10 @@ export function useDocumentOpening({
         return;
       }
 
-      openBytes(fileToBrowserSource(file), new Uint8Array(await file.arrayBuffer()));
+      openBytes(fileToBrowserSource(file), new Uint8Array(await file.arrayBuffer()), {
+        fileSize: file.size,
+        modifiedAt: new Date(file.lastModified).toISOString(),
+      });
       event.target.value = '';
     },
     [openBytes],

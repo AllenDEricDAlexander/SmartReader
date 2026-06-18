@@ -325,11 +325,12 @@ describe('App', () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:picker');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
     const file = new File(['%PDF-1.7'], 'picker.pdf', { type: 'application/pdf' });
+    const persistence = createEmptyPersistence();
 
     renderApp(
       <App
         bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
-        persistence={createEmptyPersistence()}
+        persistence={persistence}
         viewerRenderer={testViewerRenderer}
       />,
     );
@@ -341,6 +342,7 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: 'picker.pdf' })).toBeInTheDocument();
     });
+    expect(persistence.saveDocument).not.toHaveBeenCalled();
   });
 
   it('marks the active session as failed when the viewer reports a load error', async () => {
@@ -412,6 +414,47 @@ describe('App', () => {
     });
   });
 
+  it('does not overwrite desktop metadata when favoriting an opened desktop document', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:desktop-favorite');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const persistence = createEmptyPersistence();
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/book.pdf', name: 'book.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-16T00:00:00Z',
+    });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+
+    await waitFor(() => {
+      expect(persistence.saveDocument).toHaveBeenCalledTimes(1);
+    });
+    expect(persistence.saveDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentKey: 'desktop:/tmp/book.pdf',
+        path: '/tmp/book.pdf',
+        fileSize: 5,
+        modifiedAt: '2026-06-16T00:00:00Z',
+      }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '收藏当前文档' }));
+
+    await waitFor(() => {
+      expect(persistence.setDocumentFavorite).toHaveBeenCalledWith('desktop:/tmp/book.pdf', true);
+    });
+    expect(persistence.saveDocument).toHaveBeenCalledTimes(1);
+  });
+
   it('runs search and page jump commands from the toolbar', async () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:toolbar');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
@@ -449,6 +492,46 @@ describe('App', () => {
 
     expect(viewerController.search).toHaveBeenCalledWith('method');
     expect(viewerController.jumpToPage).toHaveBeenCalledWith(8);
+  });
+
+  it('clears search through the viewer without showing fabricated match counts', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:search-clear');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const viewerController = {
+      jumpToPage: vi.fn().mockReturnValue(true),
+      openSearch: vi.fn().mockReturnValue(true),
+      search: vi.fn().mockReturnValue(true),
+      searchNext: vi.fn().mockReturnValue(true),
+      searchPrevious: vi.fn().mockReturnValue(true),
+      zoomIn: vi.fn().mockReturnValue(true),
+      zoomOut: vi.fn().mockReturnValue(true),
+      fitWidth: vi.fn().mockReturnValue(true),
+      fitPage: vi.fn().mockReturnValue(true),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerController={viewerController}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [new File(['%PDF-1.7'], 'search.pdf', { type: 'application/pdf' })] },
+    });
+
+    await screen.findByRole('tab', { name: 'search.pdf' });
+
+    fireEvent.change(screen.getByLabelText('Search text'), { target: { value: 'method' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+
+    expect(viewerController.search).toHaveBeenNthCalledWith(1, 'method');
+    expect(viewerController.search).toHaveBeenNthCalledWith(2, '');
+    expect(screen.getByLabelText('Search text')).toHaveValue('');
+    expect(screen.queryByText('1 / 1')).not.toBeInTheDocument();
   });
 
   it('runs tab and fit mode shortcuts', () => {
@@ -571,7 +654,217 @@ describe('App', () => {
       );
     });
 
-    expect(screen.getByText('Page 1: Page note')).toBeInTheDocument();
+    expect(screen.getByText('页面笔记')).toBeInTheDocument();
+  });
+
+  it('adds a page note and lets the user tag the annotation', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:tagged-note');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const persistence = {
+      ...createEmptyPersistence(),
+      saveAnnotation: vi.fn().mockImplementation(async (annotation) => ({ ...annotation, id: 3 })),
+      listAnnotations: vi.fn().mockResolvedValue([]),
+      listBookmarks: vi.fn().mockResolvedValue([]),
+      listTags: vi.fn().mockResolvedValue([
+        {
+          id: 1,
+          name: '重点',
+          color: '#2563eb',
+          documentCount: 0,
+          annotationCount: 0,
+          createdAt: '2026-06-18T00:00:00Z',
+          updatedAt: '2026-06-18T00:00:00Z',
+        },
+      ]),
+    };
+    const file = new File(['%PDF-1.7'], 'book.pdf', { type: 'application/pdf' });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [file] },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '新建批注' }));
+
+    expect(await screen.findByText('页面笔记')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '添加标签 重点' }));
+
+    await waitFor(() => {
+      expect(persistence.attachAnnotationTag).toHaveBeenCalledWith(3, 1);
+    });
+  });
+
+  it('edits a persisted page note through the annotation detail', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:edit-note');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const persistence = {
+      ...createEmptyPersistence(),
+      saveAnnotation: vi.fn().mockImplementation(async (annotation) => ({ ...annotation, id: 3 })),
+      listAnnotations: vi.fn().mockResolvedValue([]),
+      listBookmarks: vi.fn().mockResolvedValue([]),
+    };
+    const file = new File(['%PDF-1.7'], 'book.pdf', { type: 'application/pdf' });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [file] },
+    });
+
+    await screen.findByRole('tab', { name: 'book.pdf' });
+    fireEvent.click(screen.getByRole('button', { name: '新建批注' }));
+
+    fireEvent.change(await screen.findByLabelText('Annotation note'), {
+      target: { value: '更新后的笔记' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save note' }));
+
+    await waitFor(() => {
+      expect(persistence.saveAnnotation).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          id: 3,
+          text: '更新后的笔记',
+          quote: null,
+          type: 'note',
+        }),
+      );
+    });
+    expect(vi.mocked(persistence.saveAnnotation).mock.lastCall?.[0]).not.toHaveProperty('tagIds');
+  });
+
+  it('favorites the active reader document from the toolbar', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:favorite');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const persistence = createEmptyPersistence();
+    const file = new File(['%PDF-1.7'], 'favorite.pdf', {
+      type: 'application/pdf',
+      lastModified: 0,
+    });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [file] },
+    });
+
+    await screen.findByRole('tab', { name: 'favorite.pdf' });
+    fireEvent.click(screen.getByRole('button', { name: '收藏当前文档' }));
+
+    await waitFor(() => {
+      expect(persistence.saveDocument).toHaveBeenCalledWith(
+        expect.objectContaining({
+          documentKey: 'browser:favorite.pdf:8:0',
+          path: null,
+          displayName: 'favorite.pdf',
+          fileSize: 8,
+          modifiedAt: '1970-01-01T00:00:00.000Z',
+        }),
+      );
+      expect(persistence.setDocumentFavorite).toHaveBeenCalledWith(
+        'browser:favorite.pdf:8:0',
+        true,
+      );
+    });
+    expect(
+      vi.mocked(persistence.saveDocument).mock.invocationCallOrder[0],
+    ).toBeLessThan(vi.mocked(persistence.setDocumentFavorite).mock.invocationCallOrder[0]);
+    expect(screen.getByRole('button', { name: '取消收藏当前文档' })).toBeInTheDocument();
+  });
+
+  it('does not mark a favorite locally when persistence rejects it', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:favorite-reject');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const persistence = {
+      ...createEmptyPersistence(),
+      setDocumentFavorite: vi.fn().mockRejectedValue(new Error('missing document')),
+    };
+    const file = new File(['%PDF-1.7'], 'favorite.pdf', {
+      type: 'application/pdf',
+      lastModified: 0,
+    });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [file] },
+    });
+
+    await screen.findByRole('tab', { name: 'favorite.pdf' });
+    fireEvent.click(screen.getByRole('button', { name: '收藏当前文档' }));
+
+    await waitFor(() => {
+      expect(persistence.setDocumentFavorite).toHaveBeenCalledWith(
+        'browser:favorite.pdf:8:0',
+        true,
+      );
+    });
+    expect(screen.getByRole('button', { name: '收藏当前文档' })).toBeInTheDocument();
+  });
+
+  it('keeps existing annotations when annotation import JSON is invalid', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:invalid-import');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const persistence = {
+      ...createEmptyPersistence(),
+      saveAnnotation: vi.fn().mockImplementation(async (annotation) => ({ ...annotation, id: 3 })),
+      listAnnotations: vi.fn().mockResolvedValue([]),
+      listBookmarks: vi.fn().mockResolvedValue([]),
+    };
+    const file = new File(['%PDF-1.7'], 'book.pdf', { type: 'application/pdf' });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [file] },
+    });
+
+    await screen.findByRole('tab', { name: 'book.pdf' });
+    fireEvent.click(screen.getByRole('button', { name: '新建批注' }));
+
+    expect(await screen.findByText('页面笔记')).toBeInTheDocument();
+
+    fireEvent.blur(screen.getByLabelText('Annotation import JSON'), {
+      target: { value: '{invalid json' },
+    });
+
+    expect(screen.getByText('页面笔记')).toBeInTheDocument();
+    expect(persistence.saveAnnotation).toHaveBeenCalledTimes(1);
   });
 
   it('shows recent files and reopens one from the empty state', async () => {

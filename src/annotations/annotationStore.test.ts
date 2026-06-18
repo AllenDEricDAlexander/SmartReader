@@ -7,6 +7,7 @@ import {
   importAnnotations,
   removeAnnotation,
   removeBookmark,
+  setAnnotationTag,
 } from './annotationStore';
 
 describe('annotationStore bookmarks', () => {
@@ -80,5 +81,27 @@ describe('annotationStore bookmarks', () => {
 
     const json = exportAnnotations(annotations);
     expect(importAnnotations(json)).toEqual(annotations);
+  });
+
+  it('adds and removes annotation tag ids without duplicating them', () => {
+    const annotation = {
+      id: 4,
+      documentKey: 'desktop:/tmp/book.pdf',
+      page: 3,
+      type: 'note' as const,
+      color: '#38bdf8',
+      text: 'Remember this',
+      quote: null,
+      areas: [],
+      tagIds: [1],
+      createdAt: '2026-06-16T00:00:00Z',
+      updatedAt: '2026-06-16T00:00:00Z',
+    };
+
+    const selected = setAnnotationTag([annotation], 4, 1, true);
+    expect(selected[0].tagIds).toEqual([1]);
+
+    const unselected = setAnnotationTag(selected, 4, 1, false);
+    expect(unselected[0].tagIds).toEqual([]);
   });
 });

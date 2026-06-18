@@ -8,6 +8,7 @@ import {
   MoreHorizontal,
   PanelLeftClose,
   Search,
+  Star,
   StickyNote,
   X,
   ZoomIn,
@@ -37,6 +38,8 @@ type ReaderToolbarProps = {
   onHistoryForward(): void;
   onAddBookmark(): void | Promise<void>;
   onAddNote(): void | Promise<void>;
+  isFavorite: boolean;
+  onToggleFavorite(): void | Promise<void>;
   onOpenPreferences(): void;
 };
 
@@ -61,6 +64,8 @@ export function ReaderToolbar({
   onHistoryForward,
   onAddBookmark,
   onAddNote,
+  isFavorite,
+  onToggleFavorite,
   onOpenPreferences,
 }: ReaderToolbarProps) {
   return (
@@ -136,8 +141,18 @@ export function ReaderToolbar({
         <button type="button" onClick={() => void onAddBookmark()} aria-label="Add bookmark">
           <BookmarkPlus size={16} />
         </button>
-        <button type="button" onClick={() => void onAddNote()} aria-label="Add note">
+        <button type="button" onClick={() => void onAddNote()} aria-label="新建批注">
           <StickyNote size={16} />
+        </button>
+        <button
+          type="button"
+          className={isFavorite ? 'favorite-toggle active' : 'favorite-toggle'}
+          onClick={() => void onToggleFavorite()}
+          disabled={!activeSession}
+          aria-label={isFavorite ? '取消收藏当前文档' : '收藏当前文档'}
+          aria-pressed={isFavorite}
+        >
+          <Star size={16} fill={isFavorite ? 'currentColor' : 'none'} />
         </button>
         <button type="button" disabled aria-disabled="true" aria-label="Recent tools">
           <History size={16} />

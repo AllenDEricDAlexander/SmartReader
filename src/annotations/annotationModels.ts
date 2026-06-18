@@ -15,15 +15,18 @@ export type Bookmark = {
   updatedAt: string;
 };
 
+export type AnnotationKind = 'highlight' | 'underline' | 'note';
+
 export type ReaderAnnotation = {
   id: number | null;
   documentKey: string;
   page: number;
-  type: 'highlight' | 'note';
+  type: AnnotationKind;
   color: string;
   text: string | null;
   quote: string | null;
   areas: HighlightAreaRecord[];
+  tagIds?: number[];
   createdAt: string;
   updatedAt: string;
 };

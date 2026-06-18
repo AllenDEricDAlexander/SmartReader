@@ -5,6 +5,7 @@ import {
   addOrReplaceBookmark,
   importAnnotations,
   removeAnnotation,
+  setAnnotationTag,
 } from '../../annotations/annotationStore';
 import type { DocumentSession } from '../../documents/documentModels';
 import type { PersistenceApi } from '../../persistence/persistenceApi';
@@ -17,7 +18,16 @@ type UseReaderDecorationsInput = {
 type AnnotationInput = Pick<
   ReaderAnnotation,
   'page' | 'type' | 'color' | 'text' | 'quote' | 'areas'
->;
+> & {
+  tagIds?: number[];
+};
+
+function normalizeAnnotation(annotation: ReaderAnnotation): ReaderAnnotation {
+  return {
+    ...annotation,
+    tagIds: annotation.tagIds ?? [],
+  };
+}
 
 export function useReaderDecorations({
   activeSession,
@@ -36,7 +46,10 @@ export function useReaderDecorations({
       ]);
 
       setBookmarksByDocument((current) => ({ ...current, [documentKey]: bookmarks }));
-      setAnnotationsByDocument((current) => ({ ...current, [documentKey]: annotations }));
+      setAnnotationsByDocument((current) => ({
+        ...current,
+        [documentKey]: annotations.map(normalizeAnnotation),
+      }));
     },
     [persistence],
   );
@@ -68,7 +81,7 @@ export function useReaderDecorations({
   const saveAnnotationForActiveDocument = useCallback(
     async (input: AnnotationInput) => {
       if (!activeSession) {
-        return;
+        return undefined;
       }
 
       const now = new Date().toISOString();
@@ -80,28 +93,74 @@ export function useReaderDecorations({
         ...input,
       });
 
+      const normalized = normalizeAnnotation(saved);
+
       setAnnotationsByDocument((current) => ({
         ...current,
         [activeSession.documentKey]: addOrReplaceAnnotation(
           current[activeSession.documentKey] ?? [],
-          saved,
+          normalized,
         ),
       }));
+
+      return normalized;
     },
     [activeSession, persistence],
   );
 
   const addPageNote = useCallback(
-    () =>
-      saveAnnotationForActiveDocument({
+    async () => {
+      await saveAnnotationForActiveDocument({
         page: activeSession?.page ?? 1,
         type: 'note',
         color: '#38bdf8',
-        text: 'Page note',
+        text: '页面笔记',
         quote: null,
         areas: [],
-      }),
+      });
+    },
     [activeSession, saveAnnotationForActiveDocument],
+  );
+
+  const updateAnnotationForDocument = useCallback(
+    async (documentKey: string, annotation: ReaderAnnotation, updates: Partial<ReaderAnnotation>) => {
+      const { tagIds: _tagIds, ...annotationWithoutTags } = annotation;
+      const saved = await persistence.saveAnnotation({
+        ...annotationWithoutTags,
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      });
+      const normalized = normalizeAnnotation(saved);
+
+      setAnnotationsByDocument((current) => ({
+        ...current,
+        [documentKey]: addOrReplaceAnnotation(current[documentKey] ?? [], normalized),
+      }));
+
+      return normalized;
+    },
+    [persistence],
+  );
+
+  const toggleAnnotationTagForDocument = useCallback(
+    async (documentKey: string, annotationId: number, tagId: number, selected: boolean) => {
+      if (selected) {
+        await persistence.detachAnnotationTag(annotationId, tagId);
+      } else {
+        await persistence.attachAnnotationTag(annotationId, tagId);
+      }
+
+      setAnnotationsByDocument((current) => ({
+        ...current,
+        [documentKey]: setAnnotationTag(
+          current[documentKey] ?? [],
+          annotationId,
+          tagId,
+          !selected,
+        ),
+      }));
+    },
+    [persistence],
   );
 
   const deleteAnnotationForDocument = useCallback(
@@ -115,13 +174,44 @@ export function useReaderDecorations({
     [persistence],
   );
 
-  const importAnnotationsForDocument = useCallback((documentKey: string, json: string) => {
-    const imported = importAnnotations(json);
-    setAnnotationsByDocument((current) => ({
-      ...current,
-      [documentKey]: imported,
-    }));
-  }, []);
+  const importAnnotationsForDocument = useCallback(
+    async (documentKey: string, json: string) => {
+      let imported: ReaderAnnotation[];
+
+      try {
+        imported = importAnnotations(json);
+      } catch {
+        return;
+      }
+
+      try {
+        const savedAnnotations = await Promise.all(
+          imported.map((annotation) =>
+            persistence.saveAnnotation({
+              ...annotation,
+              id: null,
+              documentKey,
+              tagIds: annotation.tagIds ?? [],
+              updatedAt: new Date().toISOString(),
+            }),
+          ),
+        );
+
+        setAnnotationsByDocument((current) => ({
+          ...current,
+          [documentKey]: savedAnnotations
+            .map(normalizeAnnotation)
+            .reduce(
+              (annotations, annotation) => addOrReplaceAnnotation(annotations, annotation),
+              current[documentKey] ?? [],
+            ),
+        }));
+      } catch {
+        return;
+      }
+    },
+    [persistence],
+  );
 
   return {
     annotationsByDocument,
@@ -132,5 +222,7 @@ export function useReaderDecorations({
     importAnnotationsForDocument,
     loadDocumentDecorations,
     saveAnnotationForActiveDocument,
+    toggleAnnotationTagForDocument,
+    updateAnnotationForDocument,
   };
 }

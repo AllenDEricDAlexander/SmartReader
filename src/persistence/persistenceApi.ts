@@ -58,11 +58,12 @@ export type PersistedAnnotation = {
   id: number | null;
   documentKey: string;
   page: number;
-  type: 'highlight' | 'note';
+  type: 'highlight' | 'underline' | 'note';
   color: string;
   text: string | null;
   quote: string | null;
   areas: PersistedHighlightArea[];
+  tagIds?: number[];
   createdAt: string;
   updatedAt: string;
 };

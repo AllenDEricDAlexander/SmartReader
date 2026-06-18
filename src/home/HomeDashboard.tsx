@@ -13,6 +13,7 @@ type HomeDashboardProps = {
   onOpenPdf(): void | Promise<void>;
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
   onReopenRecentDocument(document: PersistedDocument): void | Promise<void>;
+  onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
 };
 
 export function HomeDashboard({
@@ -21,6 +22,7 @@ export function HomeDashboard({
   onOpenPdf,
   onBrowserFileChange,
   onReopenRecentDocument,
+  onToggleFavorite,
 }: HomeDashboardProps) {
   return (
     <section className="home-dashboard" aria-label="SmartReader 首页">
@@ -62,7 +64,7 @@ export function HomeDashboard({
               documents={recentDocuments}
               onReopenDocument={onReopenRecentDocument}
             />
-            <HomeFavorites documents={favoriteDocuments} />
+            <HomeFavorites documents={favoriteDocuments} onToggleFavorite={onToggleFavorite} />
           </div>
           <HomeStatusPanel />
         </div>

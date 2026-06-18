@@ -113,6 +113,8 @@ pub struct PersistedAnnotation {
     pub text: Option<String>,
     pub quote: Option<String>,
     pub areas: serde_json::Value,
+    #[serde(default)]
+    pub tag_ids: Option<Vec<i64>>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -550,10 +552,14 @@ pub fn set_document_favorite_tx(
     document_key: &str,
     favorite: bool,
 ) -> Result<(), DbError> {
-    connection.execute(
+    let affected = connection.execute(
         "UPDATE documents SET favorite = ?1 WHERE document_key = ?2",
         params![i64::from(favorite), document_key],
     )?;
+    if affected == 0 {
+        return Err(DbError::Sqlite(rusqlite::Error::QueryReturnedNoRows));
+    }
+
     Ok(())
 }
 
@@ -824,55 +830,82 @@ pub fn upsert_annotation(
     annotation: PersistedAnnotation,
 ) -> Result<PersistedAnnotation, DbError> {
     let areas_json = serde_json::to_string(&annotation.areas)?;
+    let replacement_tag_ids = annotation.tag_ids.clone();
 
-    if let Some(id) = annotation.id {
-        connection.execute(
-            r#"
-            UPDATE annotations
-            SET document_key = ?1, page = ?2, type = ?3, color = ?4, text = ?5,
-                quote = ?6, areas_json = ?7, created_at = ?8, updated_at = ?9
-            WHERE id = ?10
-            "#,
-            params![
-                annotation.document_key,
-                annotation.page,
-                annotation.r#type,
-                annotation.color,
-                annotation.text,
-                annotation.quote,
-                areas_json,
-                annotation.created_at,
-                annotation.updated_at,
-                id,
-            ],
-        )?;
-        return Ok(annotation);
+    connection.execute_batch("BEGIN IMMEDIATE TRANSACTION")?;
+
+    let result = (|| {
+        let id = if let Some(id) = annotation.id {
+            let affected = connection.execute(
+                r#"
+                UPDATE annotations
+                SET document_key = ?1, page = ?2, type = ?3, color = ?4, text = ?5,
+                    quote = ?6, areas_json = ?7, created_at = ?8, updated_at = ?9
+                WHERE id = ?10
+                "#,
+                params![
+                    &annotation.document_key,
+                    annotation.page,
+                    &annotation.r#type,
+                    &annotation.color,
+                    &annotation.text,
+                    &annotation.quote,
+                    &areas_json,
+                    &annotation.created_at,
+                    &annotation.updated_at,
+                    id,
+                ],
+            )?;
+
+            if affected == 0 {
+                return Err(DbError::Sqlite(rusqlite::Error::QueryReturnedNoRows));
+            }
+
+            id
+        } else {
+            connection.execute(
+                r#"
+                INSERT INTO annotations (
+                    document_key, page, type, color, text, quote, areas_json, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                "#,
+                params![
+                    &annotation.document_key,
+                    annotation.page,
+                    &annotation.r#type,
+                    &annotation.color,
+                    &annotation.text,
+                    &annotation.quote,
+                    &areas_json,
+                    &annotation.created_at,
+                    &annotation.updated_at,
+                ],
+            )?;
+            connection.last_insert_rowid()
+        };
+
+        if let Some(tag_ids) = replacement_tag_ids.as_ref() {
+            replace_annotation_tag_ids_tx(connection, id, tag_ids)?;
+        }
+
+        Ok(PersistedAnnotation {
+            id: Some(id),
+            tag_ids: Some(list_annotation_tag_ids_tx(connection, id)?),
+            ..annotation
+        })
+    })();
+
+    match result {
+        Ok(annotation) => {
+            connection.execute_batch("COMMIT")?;
+            Ok(annotation)
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
     }
-
-    connection.execute(
-        r#"
-        INSERT INTO annotations (
-            document_key, page, type, color, text, quote, areas_json, created_at, updated_at
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-        "#,
-        params![
-            annotation.document_key,
-            annotation.page,
-            annotation.r#type,
-            annotation.color,
-            annotation.text,
-            annotation.quote,
-            areas_json,
-            annotation.created_at,
-            annotation.updated_at,
-        ],
-    )?;
-
-    Ok(PersistedAnnotation {
-        id: Some(connection.last_insert_rowid()),
-        ..annotation
-    })
 }
 
 pub fn list_annotations_for_document(
@@ -896,8 +929,9 @@ pub fn list_annotations_for_document(
                 Box::new(error),
             )
         })?;
+        let id = row.get(0)?;
         Ok(PersistedAnnotation {
-            id: Some(row.get(0)?),
+            id: Some(id),
             document_key: row.get(1)?,
             page: row.get(2)?,
             r#type: row.get(3)?,
@@ -905,10 +939,36 @@ pub fn list_annotations_for_document(
             text: row.get(5)?,
             quote: row.get(6)?,
             areas,
+            tag_ids: Some(Vec::new()),
             created_at: row.get(8)?,
             updated_at: row.get(9)?,
         })
     })?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DbError::from)?
+        .into_iter()
+        .map(|mut annotation| {
+            if let Some(id) = annotation.id {
+                annotation.tag_ids = Some(list_annotation_tag_ids_tx(connection, id)?);
+            }
+            Ok(annotation)
+        })
+        .collect()
+}
+
+fn list_annotation_tag_ids_tx(
+    connection: &Connection,
+    annotation_id: i64,
+) -> Result<Vec<i64>, DbError> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT tag_id
+        FROM annotation_tags
+        WHERE annotation_id = ?1
+        ORDER BY tag_id ASC
+        "#,
+    )?;
+    let rows = statement.query_map([annotation_id], |row| row.get(0))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
@@ -1081,6 +1141,34 @@ pub fn attach_annotation_tag_tx(
         "#,
         params![annotation_id, tag_id, now_rfc3339()],
     )?;
+    Ok(())
+}
+
+fn replace_annotation_tag_ids_tx(
+    connection: &Connection,
+    annotation_id: i64,
+    tag_ids: &[i64],
+) -> Result<(), DbError> {
+    require_annotation_id(connection, annotation_id)?;
+    for tag_id in tag_ids {
+        tag_by_id(connection, *tag_id)?;
+    }
+
+    connection.execute(
+        "DELETE FROM annotation_tags WHERE annotation_id = ?1",
+        [annotation_id],
+    )?;
+
+    for tag_id in tag_ids {
+        connection.execute(
+            r#"
+            INSERT OR IGNORE INTO annotation_tags (annotation_id, tag_id, created_at)
+            VALUES (?1, ?2, ?3)
+            "#,
+            params![annotation_id, tag_id, now_rfc3339()],
+        )?;
+    }
+
     Ok(())
 }
 
@@ -1349,6 +1437,18 @@ mod tests {
     }
 
     #[test]
+    fn favoriting_missing_document_key_fails() {
+        let connection = migrated_test_connection();
+
+        let result = set_document_favorite_tx(&connection, "desktop:/tmp/missing.pdf", true);
+
+        assert!(matches!(
+            result,
+            Err(DbError::Sqlite(rusqlite::Error::QueryReturnedNoRows))
+        ));
+    }
+
+    #[test]
     fn merges_tags_and_preserves_document_and_annotation_relations() {
         let connection = Connection::open_in_memory().expect("in-memory database");
         apply_migrations(&connection).expect("schema applies");
@@ -1376,6 +1476,7 @@ mod tests {
                 text: Some("Important".to_string()),
                 quote: Some("quoted text".to_string()),
                 areas: serde_json::json!([]),
+                tag_ids: Some(vec![]),
                 created_at: "2026-06-16T00:00:00Z".to_string(),
                 updated_at: "2026-06-16T00:00:00Z".to_string(),
             },
@@ -1421,6 +1522,196 @@ mod tests {
         assert_eq!(merged.document_count, 1);
         assert_eq!(merged.annotation_count, 1);
         assert_eq!(tags, vec![merged]);
+    }
+
+    #[test]
+    fn list_annotations_returns_attached_tag_ids() {
+        let connection = migrated_test_connection();
+        let document = PersistedDocument {
+            document_key: "desktop:/tmp/book.pdf".to_string(),
+            path: Some("/tmp/book.pdf".to_string()),
+            display_name: "book.pdf".to_string(),
+            file_size: Some(100),
+            modified_at: Some("2026-06-16T00:00:00Z".to_string()),
+            page_count: Some(20),
+            last_page: 4,
+            progress: 0.2,
+            missing: false,
+        };
+        upsert_document(&connection, &document).expect("document");
+        let annotation = upsert_annotation(
+            &connection,
+            PersistedAnnotation {
+                id: None,
+                document_key: document.document_key.clone(),
+                page: 4,
+                r#type: "underline".to_string(),
+                color: "#2563eb".to_string(),
+                text: None,
+                quote: Some("quoted text".to_string()),
+                areas: serde_json::json!([]),
+                tag_ids: Some(vec![]),
+                created_at: "2026-06-16T00:00:00Z".to_string(),
+                updated_at: "2026-06-16T00:00:00Z".to_string(),
+            },
+        )
+        .expect("annotation");
+        let tag = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "重点".to_string(),
+                color: "#2563eb".to_string(),
+            },
+        )
+        .expect("tag");
+
+        attach_annotation_tag_tx(&connection, annotation.id.expect("annotation id"), tag.id)
+            .expect("annotation tag");
+
+        let annotations =
+            list_annotations_for_document(&connection, &document.document_key).expect("list");
+
+        assert_eq!(annotations[0].tag_ids, Some(vec![tag.id]));
+    }
+
+    #[test]
+    fn save_annotation_replaces_tag_ids() {
+        let connection = migrated_test_connection();
+        let document = PersistedDocument {
+            document_key: "desktop:/tmp/book.pdf".to_string(),
+            path: Some("/tmp/book.pdf".to_string()),
+            display_name: "book.pdf".to_string(),
+            file_size: Some(100),
+            modified_at: Some("2026-06-16T00:00:00Z".to_string()),
+            page_count: Some(20),
+            last_page: 4,
+            progress: 0.2,
+            missing: false,
+        };
+        upsert_document(&connection, &document).expect("document");
+        let first = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "重点".to_string(),
+                color: "#2563eb".to_string(),
+            },
+        )
+        .expect("first tag");
+        let second = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "复习".to_string(),
+                color: "#16a34a".to_string(),
+            },
+        )
+        .expect("second tag");
+        let annotation = upsert_annotation(
+            &connection,
+            PersistedAnnotation {
+                id: None,
+                document_key: document.document_key.clone(),
+                page: 4,
+                r#type: "note".to_string(),
+                color: "#38bdf8".to_string(),
+                text: Some("Original".to_string()),
+                quote: None,
+                areas: serde_json::json!([]),
+                tag_ids: Some(vec![first.id]),
+                created_at: "2026-06-16T00:00:00Z".to_string(),
+                updated_at: "2026-06-16T00:00:00Z".to_string(),
+            },
+        )
+        .expect("annotation");
+
+        let replaced = upsert_annotation(
+            &connection,
+            PersistedAnnotation {
+                tag_ids: Some(vec![second.id]),
+                text: Some("Changed".to_string()),
+                ..annotation.clone()
+            },
+        )
+        .expect("replace tags");
+
+        assert_eq!(replaced.tag_ids, Some(vec![second.id]));
+
+        let removed = upsert_annotation(
+            &connection,
+            PersistedAnnotation {
+                tag_ids: Some(vec![]),
+                ..replaced
+            },
+        )
+        .expect("remove tags");
+
+        assert_eq!(removed.tag_ids, Some(Vec::<i64>::new()));
+        assert_eq!(
+            list_annotations_for_document(&connection, &document.document_key).expect("list")[0]
+                .tag_ids,
+            Some(Vec::<i64>::new())
+        );
+    }
+
+    #[test]
+    fn save_annotation_rolls_back_when_replacing_with_invalid_tag_id() {
+        let connection = migrated_test_connection();
+        let document = PersistedDocument {
+            document_key: "desktop:/tmp/book.pdf".to_string(),
+            path: Some("/tmp/book.pdf".to_string()),
+            display_name: "book.pdf".to_string(),
+            file_size: Some(100),
+            modified_at: Some("2026-06-16T00:00:00Z".to_string()),
+            page_count: Some(20),
+            last_page: 4,
+            progress: 0.2,
+            missing: false,
+        };
+        upsert_document(&connection, &document).expect("document");
+        let tag = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "重点".to_string(),
+                color: "#2563eb".to_string(),
+            },
+        )
+        .expect("tag");
+        let annotation = upsert_annotation(
+            &connection,
+            PersistedAnnotation {
+                id: None,
+                document_key: document.document_key.clone(),
+                page: 4,
+                r#type: "note".to_string(),
+                color: "#38bdf8".to_string(),
+                text: Some("Original".to_string()),
+                quote: None,
+                areas: serde_json::json!([]),
+                tag_ids: Some(vec![tag.id]),
+                created_at: "2026-06-16T00:00:00Z".to_string(),
+                updated_at: "2026-06-16T00:00:00Z".to_string(),
+            },
+        )
+        .expect("annotation");
+
+        let result = upsert_annotation(
+            &connection,
+            PersistedAnnotation {
+                text: Some("Changed".to_string()),
+                tag_ids: Some(vec![404]),
+                ..annotation
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(DbError::Sqlite(rusqlite::Error::QueryReturnedNoRows))
+        ));
+
+        let annotations =
+            list_annotations_for_document(&connection, &document.document_key).expect("list");
+
+        assert_eq!(annotations[0].text, Some("Original".to_string()));
+        assert_eq!(annotations[0].tag_ids, Some(vec![tag.id]));
     }
 
     #[test]
@@ -1499,6 +1790,7 @@ mod tests {
                 text: Some("Important".to_string()),
                 quote: Some("quoted text".to_string()),
                 areas: serde_json::json!([]),
+                tag_ids: Some(vec![]),
                 created_at: "2026-06-16T00:00:00Z".to_string(),
                 updated_at: "2026-06-16T00:00:00Z".to_string(),
             },
