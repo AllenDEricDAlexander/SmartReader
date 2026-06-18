@@ -1,5 +1,7 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
+import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { ReaderPreferences } from '../preferences/preferencesModels';
+import type { CreateTagInput, MergeTagsInput, Tag } from '../tags/tagModels';
 
 export type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -65,7 +67,7 @@ export type PersistedAnnotation = {
   updatedAt: string;
 };
 
-export type PersistenceApi = {
+export type CorePersistenceApi = {
   saveDocument(document: PersistedDocument): Promise<void>;
   listRecentDocuments(): Promise<PersistedDocument[]>;
   saveReaderSession(session: PersistedReaderSession): Promise<void>;
@@ -79,6 +81,22 @@ export type PersistenceApi = {
   savePreferences(preferences: ReaderPreferences): Promise<void>;
   loadPreferences(): Promise<ReaderPreferences | null>;
 };
+
+export type FavoritesTagsPersistenceApi = {
+  setDocumentFavorite(documentKey: string, favorite: boolean): Promise<void>;
+  listFavoriteDocuments(): Promise<FavoriteDocument[]>;
+  createTag(input: CreateTagInput): Promise<Tag>;
+  renameTag(id: number, name: string): Promise<Tag>;
+  deleteTag(id: number): Promise<void>;
+  mergeTags(input: MergeTagsInput): Promise<Tag>;
+  listTags(): Promise<Tag[]>;
+  attachDocumentTag(documentKey: string, tagId: number): Promise<void>;
+  detachDocumentTag(documentKey: string, tagId: number): Promise<void>;
+  attachAnnotationTag(annotationId: number, tagId: number): Promise<void>;
+  detachAnnotationTag(annotationId: number, tagId: number): Promise<void>;
+};
+
+export type PersistenceApi = CorePersistenceApi & FavoritesTagsPersistenceApi;
 
 export function createPersistenceApi(invoke: Invoke = tauriInvoke): PersistenceApi {
   return {
@@ -117,6 +135,39 @@ export function createPersistenceApi(invoke: Invoke = tauriInvoke): PersistenceA
     },
     loadPreferences() {
       return invoke<ReaderPreferences | null>('load_preferences');
+    },
+    setDocumentFavorite(documentKey, favorite) {
+      return invoke<void>('set_document_favorite', { documentKey, favorite });
+    },
+    listFavoriteDocuments() {
+      return invoke<FavoriteDocument[]>('list_favorite_documents');
+    },
+    createTag(input) {
+      return invoke<Tag>('create_tag', { input });
+    },
+    renameTag(id, name) {
+      return invoke<Tag>('rename_tag', { id, name });
+    },
+    deleteTag(id) {
+      return invoke<void>('delete_tag', { id });
+    },
+    mergeTags(input) {
+      return invoke<Tag>('merge_tags', { input });
+    },
+    listTags() {
+      return invoke<Tag[]>('list_tags');
+    },
+    attachDocumentTag(documentKey, tagId) {
+      return invoke<void>('attach_document_tag', { documentKey, tagId });
+    },
+    detachDocumentTag(documentKey, tagId) {
+      return invoke<void>('detach_document_tag', { documentKey, tagId });
+    },
+    attachAnnotationTag(annotationId, tagId) {
+      return invoke<void>('attach_annotation_tag', { annotationId, tagId });
+    },
+    detachAnnotationTag(annotationId, tagId) {
+      return invoke<void>('detach_annotation_tag', { annotationId, tagId });
     },
   };
 }

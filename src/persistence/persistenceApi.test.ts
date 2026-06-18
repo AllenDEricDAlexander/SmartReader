@@ -147,4 +147,46 @@ describe('persistenceApi', () => {
     expect(invoke).toHaveBeenCalledWith('save_preferences', { preferences });
     expect(invoke).toHaveBeenCalledWith('load_preferences');
   });
+
+  it('persists favorites and tags through Tauri invoke', async () => {
+    const invoke = vi.fn().mockResolvedValue([]);
+    const api = createPersistenceApi(invoke);
+
+    await api.setDocumentFavorite('desktop:/tmp/book.pdf', true);
+    await api.listFavoriteDocuments();
+    await api.createTag({ name: '机器学习', color: '#2563eb' });
+    await api.renameTag(1, '深度学习');
+    await api.deleteTag(1);
+    await api.mergeTags({ sourceTagId: 1, targetTagId: 2 });
+    await api.listTags();
+    await api.attachDocumentTag('desktop:/tmp/book.pdf', 2);
+    await api.detachDocumentTag('desktop:/tmp/book.pdf', 2);
+    await api.attachAnnotationTag(7, 2);
+    await api.detachAnnotationTag(7, 2);
+
+    expect(invoke).toHaveBeenCalledWith('set_document_favorite', {
+      documentKey: 'desktop:/tmp/book.pdf',
+      favorite: true,
+    });
+    expect(invoke).toHaveBeenCalledWith('list_favorite_documents');
+    expect(invoke).toHaveBeenCalledWith('create_tag', {
+      input: { name: '机器学习', color: '#2563eb' },
+    });
+    expect(invoke).toHaveBeenCalledWith('rename_tag', { id: 1, name: '深度学习' });
+    expect(invoke).toHaveBeenCalledWith('delete_tag', { id: 1 });
+    expect(invoke).toHaveBeenCalledWith('merge_tags', {
+      input: { sourceTagId: 1, targetTagId: 2 },
+    });
+    expect(invoke).toHaveBeenCalledWith('list_tags');
+    expect(invoke).toHaveBeenCalledWith('attach_document_tag', {
+      documentKey: 'desktop:/tmp/book.pdf',
+      tagId: 2,
+    });
+    expect(invoke).toHaveBeenCalledWith('detach_document_tag', {
+      documentKey: 'desktop:/tmp/book.pdf',
+      tagId: 2,
+    });
+    expect(invoke).toHaveBeenCalledWith('attach_annotation_tag', { annotationId: 7, tagId: 2 });
+    expect(invoke).toHaveBeenCalledWith('detach_annotation_tag', { annotationId: 7, tagId: 2 });
+  });
 });

@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { PersistenceApi } from '../persistence/persistenceApi';
 import { renderApp } from '../test/renderApp';
 import type { PdfRenderer } from '../viewer/PdfViewerBridge';
 import { App } from './App';
@@ -17,7 +18,7 @@ vi.mock('../platform/openWithEvents', () => ({
 
 const testViewerRenderer: PdfRenderer = ({ fileUrl }) => <div>PDF {fileUrl}</div>;
 
-function createEmptyPersistence() {
+function createEmptyPersistence(): PersistenceApi {
   return {
     saveDocument: vi.fn(),
     listRecentDocuments: vi.fn().mockResolvedValue([]),
@@ -31,6 +32,17 @@ function createEmptyPersistence() {
     deleteAnnotation: vi.fn(),
     savePreferences: vi.fn(),
     loadPreferences: vi.fn().mockResolvedValue(null),
+    setDocumentFavorite: vi.fn(),
+    listFavoriteDocuments: vi.fn().mockResolvedValue([]),
+    createTag: vi.fn(),
+    renameTag: vi.fn(),
+    deleteTag: vi.fn(),
+    mergeTags: vi.fn(),
+    listTags: vi.fn().mockResolvedValue([]),
+    attachDocumentTag: vi.fn(),
+    detachDocumentTag: vi.fn(),
+    attachAnnotationTag: vi.fn(),
+    detachAnnotationTag: vi.fn(),
   };
 }
 

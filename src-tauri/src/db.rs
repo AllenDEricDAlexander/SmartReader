@@ -117,6 +117,42 @@ pub struct PersistedAnnotation {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FavoriteDocument {
+    pub document_key: String,
+    pub display_name: String,
+    pub path: Option<String>,
+    pub last_page: i64,
+    pub progress: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedTag {
+    pub id: i64,
+    pub name: String,
+    pub color: String,
+    pub document_count: i64,
+    pub annotation_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTagInput {
+    pub name: String,
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeTagsInput {
+    pub source_tag_id: i64,
+    pub target_tag_id: i64,
+}
+
 pub fn setup_database(app: &AppHandle) -> Result<DatabaseState, DbError> {
     let app_data_dir = app
         .path()
@@ -134,6 +170,7 @@ pub fn open_database(path: &Path) -> Result<Connection, DbError> {
     }
 
     let connection = Connection::open(path)?;
+    enable_foreign_keys(&connection)?;
     apply_migrations(&connection)?;
     Ok(connection)
 }
@@ -169,6 +206,11 @@ pub fn apply_migrations(connection: &Connection) -> Result<(), DbError> {
         }
     }
 
+    Ok(())
+}
+
+fn enable_foreign_keys(connection: &Connection) -> Result<(), DbError> {
+    connection.execute_batch("PRAGMA foreign_keys = ON")?;
     Ok(())
 }
 
@@ -337,6 +379,104 @@ pub fn delete_annotation(state: State<'_, DatabaseState>, id: i64) -> Result<(),
     Ok(())
 }
 
+#[tauri::command]
+pub fn set_document_favorite(
+    state: State<'_, DatabaseState>,
+    document_key: String,
+    favorite: bool,
+) -> Result<(), DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    set_document_favorite_tx(&connection, &document_key, favorite)
+}
+
+#[tauri::command]
+pub fn list_favorite_documents(
+    state: State<'_, DatabaseState>,
+) -> Result<Vec<FavoriteDocument>, DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    list_favorite_documents_tx(&connection)
+}
+
+#[tauri::command]
+pub fn create_tag(
+    state: State<'_, DatabaseState>,
+    input: CreateTagInput,
+) -> Result<PersistedTag, DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    create_tag_tx(&connection, input)
+}
+
+#[tauri::command]
+pub fn rename_tag(
+    state: State<'_, DatabaseState>,
+    id: i64,
+    name: String,
+) -> Result<PersistedTag, DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    rename_tag_tx(&connection, id, &name)
+}
+
+#[tauri::command]
+pub fn delete_tag(state: State<'_, DatabaseState>, id: i64) -> Result<(), DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    delete_tag_tx(&connection, id)
+}
+
+#[tauri::command]
+pub fn merge_tags(
+    state: State<'_, DatabaseState>,
+    input: MergeTagsInput,
+) -> Result<PersistedTag, DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    merge_tags_tx(&connection, input)
+}
+
+#[tauri::command]
+pub fn list_tags(state: State<'_, DatabaseState>) -> Result<Vec<PersistedTag>, DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    list_tags_tx(&connection)
+}
+
+#[tauri::command]
+pub fn attach_document_tag(
+    state: State<'_, DatabaseState>,
+    document_key: String,
+    tag_id: i64,
+) -> Result<(), DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    attach_document_tag_tx(&connection, &document_key, tag_id)
+}
+
+#[tauri::command]
+pub fn detach_document_tag(
+    state: State<'_, DatabaseState>,
+    document_key: String,
+    tag_id: i64,
+) -> Result<(), DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    detach_document_tag_tx(&connection, &document_key, tag_id)
+}
+
+#[tauri::command]
+pub fn attach_annotation_tag(
+    state: State<'_, DatabaseState>,
+    annotation_id: i64,
+    tag_id: i64,
+) -> Result<(), DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    attach_annotation_tag_tx(&connection, annotation_id, tag_id)
+}
+
+#[tauri::command]
+pub fn detach_annotation_tag(
+    state: State<'_, DatabaseState>,
+    annotation_id: i64,
+    tag_id: i64,
+) -> Result<(), DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    detach_annotation_tag_tx(&connection, annotation_id, tag_id)
+}
+
 pub fn upsert_document(
     connection: &Connection,
     document: &PersistedDocument,
@@ -399,6 +539,42 @@ pub fn list_documents(connection: &Connection) -> Result<Vec<PersistedDocument>,
             last_page: row.get(6)?,
             progress: row.get(7)?,
             missing: row.get::<_, i64>(8)? == 1,
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+pub fn set_document_favorite_tx(
+    connection: &Connection,
+    document_key: &str,
+    favorite: bool,
+) -> Result<(), DbError> {
+    connection.execute(
+        "UPDATE documents SET favorite = ?1 WHERE document_key = ?2",
+        params![i64::from(favorite), document_key],
+    )?;
+    Ok(())
+}
+
+pub fn list_favorite_documents_tx(
+    connection: &Connection,
+) -> Result<Vec<FavoriteDocument>, DbError> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT document_key, display_name, path, last_page, progress
+        FROM documents
+        WHERE favorite = 1
+        ORDER BY last_opened_at DESC
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(FavoriteDocument {
+            document_key: row.get(0)?,
+            display_name: row.get(1)?,
+            path: row.get(2)?,
+            last_page: row.get(3)?,
+            progress: row.get(4)?,
         })
     })?;
 
@@ -555,6 +731,24 @@ fn document_id_for_key(
     let mut statement = connection.prepare("SELECT id FROM documents WHERE document_key = ?1")?;
     let mut rows = statement.query([document_key])?;
     Ok(rows.next()?.map(|row| row.get(0)).transpose()?)
+}
+
+fn require_document_key(connection: &Connection, document_key: &str) -> Result<(), DbError> {
+    connection.query_row(
+        "SELECT 1 FROM documents WHERE document_key = ?1",
+        [document_key],
+        |_| Ok(()),
+    )?;
+    Ok(())
+}
+
+fn require_annotation_id(connection: &Connection, annotation_id: i64) -> Result<(), DbError> {
+    connection.query_row(
+        "SELECT 1 FROM annotations WHERE id = ?1",
+        [annotation_id],
+        |_| Ok(()),
+    )?;
+    Ok(())
 }
 
 pub fn upsert_bookmark(
@@ -718,6 +912,217 @@ pub fn list_annotations_for_document(
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+pub fn create_tag_tx(
+    connection: &Connection,
+    input: CreateTagInput,
+) -> Result<PersistedTag, DbError> {
+    let now = now_rfc3339();
+    connection.execute(
+        r#"
+        INSERT INTO tags (name, color, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4)
+        "#,
+        params![input.name, input.color, now, now],
+    )?;
+
+    tag_by_id(connection, connection.last_insert_rowid())
+}
+
+pub fn rename_tag_tx(
+    connection: &Connection,
+    id: i64,
+    name: &str,
+) -> Result<PersistedTag, DbError> {
+    connection.execute(
+        "UPDATE tags SET name = ?1, updated_at = ?2 WHERE id = ?3",
+        params![name, now_rfc3339(), id],
+    )?;
+
+    tag_by_id(connection, id)
+}
+
+pub fn delete_tag_tx(connection: &Connection, id: i64) -> Result<(), DbError> {
+    connection.execute("DELETE FROM annotation_tags WHERE tag_id = ?1", [id])?;
+    connection.execute("DELETE FROM document_tags WHERE tag_id = ?1", [id])?;
+    connection.execute("DELETE FROM tags WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+pub fn merge_tags_tx(
+    connection: &Connection,
+    input: MergeTagsInput,
+) -> Result<PersistedTag, DbError> {
+    if input.source_tag_id == input.target_tag_id {
+        return tag_by_id(connection, input.target_tag_id);
+    }
+
+    connection.execute_batch("BEGIN IMMEDIATE TRANSACTION")?;
+
+    let result: Result<PersistedTag, DbError> = (|| {
+        let now = now_rfc3339();
+        tag_by_id(connection, input.source_tag_id)?;
+        tag_by_id(connection, input.target_tag_id)?;
+        connection.execute(
+            r#"
+            INSERT OR IGNORE INTO document_tags (document_key, tag_id, created_at)
+            SELECT document_key, ?1, ?2
+            FROM document_tags
+            WHERE tag_id = ?3
+            "#,
+            params![input.target_tag_id, now, input.source_tag_id],
+        )?;
+        connection.execute(
+            r#"
+            INSERT OR IGNORE INTO annotation_tags (annotation_id, tag_id, created_at)
+            SELECT annotation_id, ?1, ?2
+            FROM annotation_tags
+            WHERE tag_id = ?3
+            "#,
+            params![input.target_tag_id, now, input.source_tag_id],
+        )?;
+        connection.execute(
+            "DELETE FROM document_tags WHERE tag_id = ?1",
+            [input.source_tag_id],
+        )?;
+        connection.execute(
+            "DELETE FROM annotation_tags WHERE tag_id = ?1",
+            [input.source_tag_id],
+        )?;
+        connection.execute("DELETE FROM tags WHERE id = ?1", [input.source_tag_id])?;
+        connection.execute(
+            "UPDATE tags SET updated_at = ?1 WHERE id = ?2",
+            params![now, input.target_tag_id],
+        )?;
+
+        tag_by_id(connection, input.target_tag_id)
+    })();
+
+    match result {
+        Ok(tag) => {
+            connection.execute_batch("COMMIT")?;
+            Ok(tag)
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+pub fn list_tags_tx(connection: &Connection) -> Result<Vec<PersistedTag>, DbError> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT t.id, t.name, t.color,
+               count(DISTINCT dt.document_key) AS document_count,
+               count(DISTINCT at.annotation_id) AS annotation_count,
+               t.created_at, t.updated_at
+        FROM tags t
+        LEFT JOIN document_tags dt ON dt.tag_id = t.id
+        LEFT JOIN annotation_tags at ON at.tag_id = t.id
+        GROUP BY t.id, t.name, t.color, t.created_at, t.updated_at
+        ORDER BY t.name ASC
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(PersistedTag {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            color: row.get(2)?,
+            document_count: row.get(3)?,
+            annotation_count: row.get(4)?,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+pub fn attach_document_tag_tx(
+    connection: &Connection,
+    document_key: &str,
+    tag_id: i64,
+) -> Result<(), DbError> {
+    tag_by_id(connection, tag_id)?;
+    require_document_key(connection, document_key)?;
+    connection.execute(
+        r#"
+        INSERT OR IGNORE INTO document_tags (document_key, tag_id, created_at)
+        VALUES (?1, ?2, ?3)
+        "#,
+        params![document_key, tag_id, now_rfc3339()],
+    )?;
+    Ok(())
+}
+
+pub fn detach_document_tag_tx(
+    connection: &Connection,
+    document_key: &str,
+    tag_id: i64,
+) -> Result<(), DbError> {
+    connection.execute(
+        "DELETE FROM document_tags WHERE document_key = ?1 AND tag_id = ?2",
+        params![document_key, tag_id],
+    )?;
+    Ok(())
+}
+
+pub fn attach_annotation_tag_tx(
+    connection: &Connection,
+    annotation_id: i64,
+    tag_id: i64,
+) -> Result<(), DbError> {
+    tag_by_id(connection, tag_id)?;
+    require_annotation_id(connection, annotation_id)?;
+    connection.execute(
+        r#"
+        INSERT OR IGNORE INTO annotation_tags (annotation_id, tag_id, created_at)
+        VALUES (?1, ?2, ?3)
+        "#,
+        params![annotation_id, tag_id, now_rfc3339()],
+    )?;
+    Ok(())
+}
+
+pub fn detach_annotation_tag_tx(
+    connection: &Connection,
+    annotation_id: i64,
+    tag_id: i64,
+) -> Result<(), DbError> {
+    connection.execute(
+        "DELETE FROM annotation_tags WHERE annotation_id = ?1 AND tag_id = ?2",
+        params![annotation_id, tag_id],
+    )?;
+    Ok(())
+}
+
+fn tag_by_id(connection: &Connection, id: i64) -> Result<PersistedTag, DbError> {
+    connection
+        .query_row(
+            r#"
+            SELECT t.id, t.name, t.color,
+                   (SELECT count(*) FROM document_tags WHERE tag_id = t.id) AS document_count,
+                   (SELECT count(*) FROM annotation_tags WHERE tag_id = t.id) AS annotation_count,
+                   t.created_at, t.updated_at
+            FROM tags t
+            WHERE t.id = ?1
+            "#,
+            [id],
+            |row| {
+                Ok(PersistedTag {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                    document_count: row.get(3)?,
+                    annotation_count: row.get(4)?,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            },
+        )
+        .map_err(DbError::from)
+}
+
 fn now_rfc3339() -> String {
     OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
@@ -727,6 +1132,13 @@ fn now_rfc3339() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn migrated_test_connection() -> Connection {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        enable_foreign_keys(&connection).expect("enable foreign keys");
+        apply_migrations(&connection).expect("schema applies");
+        connection
+    }
 
     #[test]
     fn opens_database_twice_without_replaying_alter_table() {
@@ -749,6 +1161,23 @@ mod tests {
             .expect("table count");
 
         assert_eq!(table_count, 1);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn open_database_enables_foreign_keys() {
+        let path = std::env::temp_dir().join(format!(
+            "smartreader-fk-test-{}-{}.sqlite3",
+            std::process::id(),
+            now_rfc3339().replace([':', '.'], "-")
+        ));
+
+        let connection = open_database(&path).expect("open database");
+        let enabled: i64 = connection
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .expect("foreign key pragma");
+
+        assert_eq!(enabled, 1);
         std::fs::remove_file(path).ok();
     }
 
@@ -883,6 +1312,225 @@ mod tests {
         assert_eq!(
             load_reader_session_tx(&connection).expect("load"),
             Some(session)
+        );
+    }
+
+    #[test]
+    fn marks_and_lists_favorite_documents() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        apply_migrations(&connection).expect("schema applies");
+
+        let document = PersistedDocument {
+            document_key: "desktop:/tmp/book.pdf".to_string(),
+            path: Some("/tmp/book.pdf".to_string()),
+            display_name: "book.pdf".to_string(),
+            file_size: Some(100),
+            modified_at: Some("2026-06-16T00:00:00Z".to_string()),
+            page_count: Some(20),
+            last_page: 7,
+            progress: 0.35,
+            missing: false,
+        };
+        upsert_document(&connection, &document).expect("document");
+
+        set_document_favorite_tx(&connection, &document.document_key, true).expect("favorite");
+        let favorites = list_favorite_documents_tx(&connection).expect("favorites");
+
+        assert_eq!(
+            favorites,
+            vec![FavoriteDocument {
+                document_key: document.document_key,
+                display_name: document.display_name,
+                path: document.path,
+                last_page: document.last_page,
+                progress: document.progress,
+            }]
+        );
+    }
+
+    #[test]
+    fn merges_tags_and_preserves_document_and_annotation_relations() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        apply_migrations(&connection).expect("schema applies");
+
+        let document = PersistedDocument {
+            document_key: "desktop:/tmp/book.pdf".to_string(),
+            path: Some("/tmp/book.pdf".to_string()),
+            display_name: "book.pdf".to_string(),
+            file_size: Some(100),
+            modified_at: Some("2026-06-16T00:00:00Z".to_string()),
+            page_count: Some(20),
+            last_page: 4,
+            progress: 0.2,
+            missing: false,
+        };
+        upsert_document(&connection, &document).expect("document");
+        let annotation = upsert_annotation(
+            &connection,
+            PersistedAnnotation {
+                id: None,
+                document_key: document.document_key.clone(),
+                page: 4,
+                r#type: "highlight".to_string(),
+                color: "#facc15".to_string(),
+                text: Some("Important".to_string()),
+                quote: Some("quoted text".to_string()),
+                areas: serde_json::json!([]),
+                created_at: "2026-06-16T00:00:00Z".to_string(),
+                updated_at: "2026-06-16T00:00:00Z".to_string(),
+            },
+        )
+        .expect("annotation");
+
+        let source = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "机器学习".to_string(),
+                color: "#2563eb".to_string(),
+            },
+        )
+        .expect("source tag");
+        let target = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "深度学习".to_string(),
+                color: "#16a34a".to_string(),
+            },
+        )
+        .expect("target tag");
+        attach_document_tag_tx(&connection, &document.document_key, source.id)
+            .expect("document tag");
+        attach_annotation_tag_tx(
+            &connection,
+            annotation.id.expect("annotation id"),
+            source.id,
+        )
+        .expect("annotation tag");
+
+        let merged = merge_tags_tx(
+            &connection,
+            MergeTagsInput {
+                source_tag_id: source.id,
+                target_tag_id: target.id,
+            },
+        )
+        .expect("merge");
+        let tags = list_tags_tx(&connection).expect("tags");
+
+        assert_eq!(merged.id, target.id);
+        assert_eq!(merged.document_count, 1);
+        assert_eq!(merged.annotation_count, 1);
+        assert_eq!(tags, vec![merged]);
+    }
+
+    #[test]
+    fn attach_document_tag_rejects_missing_document_without_inflating_counts() {
+        let connection = migrated_test_connection();
+        let tag = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "机器学习".to_string(),
+                color: "#2563eb".to_string(),
+            },
+        )
+        .expect("tag");
+
+        let result = attach_document_tag_tx(&connection, "desktop:/tmp/missing.pdf", tag.id);
+
+        assert!(matches!(
+            result,
+            Err(DbError::Sqlite(rusqlite::Error::QueryReturnedNoRows))
+        ));
+        assert_eq!(
+            tag_by_id(&connection, tag.id).expect("tag").document_count,
+            0
+        );
+    }
+
+    #[test]
+    fn attach_annotation_tag_rejects_missing_annotation_without_inflating_counts() {
+        let connection = migrated_test_connection();
+        let tag = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "机器学习".to_string(),
+                color: "#2563eb".to_string(),
+            },
+        )
+        .expect("tag");
+
+        let result = attach_annotation_tag_tx(&connection, 404, tag.id);
+
+        assert!(matches!(
+            result,
+            Err(DbError::Sqlite(rusqlite::Error::QueryReturnedNoRows))
+        ));
+        assert_eq!(
+            tag_by_id(&connection, tag.id)
+                .expect("tag")
+                .annotation_count,
+            0
+        );
+    }
+
+    #[test]
+    fn deleting_tagged_annotation_cascades_annotation_tag_relation() {
+        let connection = migrated_test_connection();
+        let document = PersistedDocument {
+            document_key: "desktop:/tmp/book.pdf".to_string(),
+            path: Some("/tmp/book.pdf".to_string()),
+            display_name: "book.pdf".to_string(),
+            file_size: Some(100),
+            modified_at: Some("2026-06-16T00:00:00Z".to_string()),
+            page_count: Some(20),
+            last_page: 4,
+            progress: 0.2,
+            missing: false,
+        };
+        upsert_document(&connection, &document).expect("document");
+        let annotation = upsert_annotation(
+            &connection,
+            PersistedAnnotation {
+                id: None,
+                document_key: document.document_key,
+                page: 4,
+                r#type: "highlight".to_string(),
+                color: "#facc15".to_string(),
+                text: Some("Important".to_string()),
+                quote: Some("quoted text".to_string()),
+                areas: serde_json::json!([]),
+                created_at: "2026-06-16T00:00:00Z".to_string(),
+                updated_at: "2026-06-16T00:00:00Z".to_string(),
+            },
+        )
+        .expect("annotation");
+        let annotation_id = annotation.id.expect("annotation id");
+        let tag = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "机器学习".to_string(),
+                color: "#2563eb".to_string(),
+            },
+        )
+        .expect("tag");
+        attach_annotation_tag_tx(&connection, annotation_id, tag.id).expect("annotation tag");
+
+        assert_eq!(
+            tag_by_id(&connection, tag.id)
+                .expect("tag")
+                .annotation_count,
+            1
+        );
+
+        connection
+            .execute("DELETE FROM annotations WHERE id = ?1", [annotation_id])
+            .expect("delete annotation");
+
+        assert_eq!(
+            tag_by_id(&connection, tag.id)
+                .expect("tag")
+                .annotation_count,
+            0
         );
     }
 }
