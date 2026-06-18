@@ -64,6 +64,45 @@ describe('App', () => {
     expect(screen.getByLabelText('SmartReader workbench')).toBeInTheDocument();
   });
 
+  it('shows the home dashboard with primary open actions', () => {
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开本地 PDF' })).toBeInTheDocument();
+    expect(screen.getByText('拖拽到这里')).toBeInTheDocument();
+    expect(screen.getByText('AI 助手')).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('switches to the reader workspace after opening a PDF', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:book');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/book.pdf', name: 'book.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-15T00:00:00Z',
+    });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+
+    expect(await screen.findByLabelText('阅读工作区')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
+  });
+
   it('opens a PDF from the native dialog and displays a tab', async () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:book');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
@@ -82,7 +121,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
 
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
@@ -107,8 +146,8 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
 
     await waitFor(() => {
       expect(screen.getAllByRole('tab', { name: 'book.pdf' })).toHaveLength(1);
@@ -295,7 +334,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Choose PDF file'), {
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
       target: { files: [file] },
     });
 
@@ -330,7 +369,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Choose PDF file'), {
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
       target: { files: [file] },
     });
 
@@ -360,7 +399,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
 
     await waitFor(() => {
       expect(persistence.saveDocument).toHaveBeenCalledWith(
@@ -373,7 +412,9 @@ describe('App', () => {
     });
   });
 
-  it('runs search and page jump commands from the toolbar', () => {
+  it('runs search and page jump commands from the toolbar', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:toolbar');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
     const viewerController = {
       jumpToPage: vi.fn().mockReturnValue(true),
       openSearch: vi.fn().mockReturnValue(true),
@@ -394,6 +435,12 @@ describe('App', () => {
         viewerRenderer={testViewerRenderer}
       />,
     );
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [new File(['%PDF-1.7'], 'toolbar.pdf', { type: 'application/pdf' })] },
+    });
+
+    await screen.findByRole('tab', { name: 'toolbar.pdf' });
 
     fireEvent.change(screen.getByLabelText('Search text'), { target: { value: 'method' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search PDF' }));
@@ -470,7 +517,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Choose PDF file'), {
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
       target: { files: [file] },
     });
 
@@ -504,7 +551,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Choose PDF file'), {
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
       target: { files: [file] },
     });
 
