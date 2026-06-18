@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b",
-    "tauri": "tauri"
+    "tauri": "tauri dev"
   },
   "dependencies": {
     "@react-pdf-viewer/core": "3.12.0",
