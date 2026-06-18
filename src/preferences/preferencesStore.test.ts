@@ -19,4 +19,9 @@ describe('preferencesStore', () => {
       },
     });
   });
+
+  it('defaults restore scope and preserves stored restore scope', () => {
+    expect(mergeReaderPreferences(null).restoreScope).toBe('all');
+    expect(mergeReaderPreferences({ restoreScope: 'active' }).restoreScope).toBe('active');
+  });
 });

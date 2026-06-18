@@ -1,6 +1,8 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PersistenceApi } from '../persistence/persistenceApi';
+import type { ReaderPreferences } from '../preferences/preferencesModels';
+import { defaultReaderPreferences } from '../preferences/preferencesStore';
 import { renderApp } from '../test/renderApp';
 import type { PdfRenderer } from '../viewer/PdfViewerBridge';
 import { App } from './App';
@@ -44,6 +46,17 @@ function createEmptyPersistence(): PersistenceApi {
     attachAnnotationTag: vi.fn(),
     detachAnnotationTag: vi.fn(),
   };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, resolve, reject };
 }
 
 describe('App', () => {
@@ -207,6 +220,38 @@ describe('App', () => {
     expect(viewerController.zoomOut).toHaveBeenCalledTimes(1);
   });
 
+  it('uses saved shortcut preferences for commands', async () => {
+    const openNativePdf = vi.fn().mockResolvedValue(null);
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadPreferences: vi.fn().mockResolvedValue({
+        ...defaultReaderPreferences,
+        shortcuts: {
+          ...defaultReaderPreferences.shortcuts,
+          'file.open': 'Shift+Meta+O',
+        },
+      }),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(persistence.loadPreferences).toHaveBeenCalled();
+    });
+
+    fireEvent.keyDown(window, { key: 'o', metaKey: true });
+    expect(openNativePdf).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: 'o', metaKey: true, shiftKey: true });
+    expect(openNativePdf).toHaveBeenCalledTimes(1);
+  });
+
   it('restores desktop sessions by reading the PDF bytes again', async () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:restored');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
@@ -307,6 +352,137 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText('file does not exist')).toBeInTheDocument();
     });
+  });
+
+  it('does not restore reader tabs when session restore is disabled', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:disabled-restore');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const readDesktopPdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/book.pdf', name: 'book.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-16T00:00:00Z',
+    });
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadPreferences: vi.fn().mockResolvedValue({
+        ...defaultReaderPreferences,
+        sessionRestoreEnabled: false,
+      }),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/book.pdf',
+          path: '/tmp/book.pdf',
+          displayName: 'book.pdf',
+          fileSize: 100,
+          modifiedAt: '2026-06-15T00:00:00Z',
+          pageCount: 20,
+          lastPage: 6,
+          progress: 0.3,
+          missing: false,
+        },
+      ]),
+      loadReaderSession: vi.fn().mockResolvedValue({
+        activeDocumentKey: 'desktop:/tmp/book.pdf',
+        sidebarOpen: true,
+        tabs: [
+          {
+            documentKey: 'desktop:/tmp/book.pdf',
+            tabOrder: 0,
+            page: 6,
+            zoom: 1,
+            history: { currentPage: 6, backStack: [], forwardStack: [] },
+          },
+        ],
+      }),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    expect(await screen.findByRole('button', { name: 'Open recent book.pdf' })).toBeInTheDocument();
+    expect(readDesktopPdf).not.toHaveBeenCalled();
+    expect(screen.queryByRole('tab', { name: 'book.pdf' })).not.toBeInTheDocument();
+  });
+
+  it('restores only the active tab when restore scope is active', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:active-restore');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const readDesktopPdf = vi.fn().mockImplementation(async (path: string) => ({
+      source: { kind: 'desktop-path', path, name: path.split('/').at(-1) ?? 'book.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-16T00:00:00Z',
+    }));
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadPreferences: vi.fn().mockResolvedValue({
+        ...defaultReaderPreferences,
+        restoreScope: 'active',
+      }),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/one.pdf',
+          path: '/tmp/one.pdf',
+          displayName: 'one.pdf',
+          fileSize: 100,
+          modifiedAt: '2026-06-15T00:00:00Z',
+          pageCount: 20,
+          lastPage: 3,
+          progress: 0.15,
+          missing: false,
+        },
+        {
+          documentKey: 'desktop:/tmp/two.pdf',
+          path: '/tmp/two.pdf',
+          displayName: 'two.pdf',
+          fileSize: 100,
+          modifiedAt: '2026-06-15T00:00:00Z',
+          pageCount: 20,
+          lastPage: 8,
+          progress: 0.4,
+          missing: false,
+        },
+      ]),
+      loadReaderSession: vi.fn().mockResolvedValue({
+        activeDocumentKey: 'desktop:/tmp/two.pdf',
+        sidebarOpen: true,
+        tabs: [
+          {
+            documentKey: 'desktop:/tmp/one.pdf',
+            tabOrder: 0,
+            page: 3,
+            zoom: 1,
+            history: { currentPage: 3, backStack: [], forwardStack: [] },
+          },
+          {
+            documentKey: 'desktop:/tmp/two.pdf',
+            tabOrder: 1,
+            page: 8,
+            zoom: 1.25,
+            history: { currentPage: 8, backStack: [2], forwardStack: [] },
+          },
+        ],
+      }),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    expect(await screen.findByRole('tab', { name: 'two.pdf' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'one.pdf' })).not.toBeInTheDocument();
+    expect(readDesktopPdf).toHaveBeenCalledTimes(1);
+    expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/two.pdf');
   });
 
   it('keeps one reader workspace per render', () => {
@@ -940,7 +1116,143 @@ describe('App', () => {
     expect(await screen.findByRole('tab', { name: 'open-with.pdf' })).toBeInTheDocument();
   });
 
-  it('shows shortcut conflicts in preferences', () => {
+  it('opens settings and saves preferences', async () => {
+    const persistence = createEmptyPersistence();
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+
+    expect(screen.getByRole('heading', { name: '快捷键' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+    await waitFor(() => {
+      expect(persistence.savePreferences).toHaveBeenCalled();
+    });
+  });
+
+  it('saves session restore scope through explicit preferences save', async () => {
+    const persistence = createEmptyPersistence();
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '会话恢复' }));
+    fireEvent.click(screen.getByRole('button', { name: '当前文档' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+    await waitFor(() => {
+      expect(persistence.savePreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ restoreScope: 'active' }),
+      );
+    });
+  });
+
+  it('does not overwrite dirty settings draft when preferences load late', async () => {
+    const preferencesLoad = createDeferred<ReaderPreferences | null>();
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadPreferences: vi.fn().mockReturnValue(preferencesLoad.promise),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '会话恢复' }));
+    fireEvent.click(screen.getByRole('button', { name: '当前文档' }));
+
+    await act(async () => {
+      preferencesLoad.resolve({
+        ...defaultReaderPreferences,
+        restoreScope: 'all',
+      });
+      await preferencesLoad.promise;
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+    await waitFor(() => {
+      expect(persistence.savePreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ restoreScope: 'active' }),
+      );
+    });
+  });
+
+  it('opens tag manager and creates a tag', async () => {
+    const persistence = {
+      ...createEmptyPersistence(),
+      createTag: vi.fn().mockImplementation(async (input) => ({
+        id: 1,
+        ...input,
+        documentCount: 0,
+        annotationCount: 0,
+        createdAt: '2026-06-18T00:00:00Z',
+        updatedAt: '2026-06-18T00:00:00Z',
+      })),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '标签管理' }));
+    fireEvent.change(screen.getByLabelText('标签名称'), { target: { value: '论文' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建标签' }));
+
+    await waitFor(() => {
+      expect(persistence.createTag).toHaveBeenCalledWith({ name: '论文', color: '#2563eb' });
+    });
+  });
+
+  it('keeps tag create input when creation fails', async () => {
+    const persistence = {
+      ...createEmptyPersistence(),
+      createTag: vi.fn().mockRejectedValue(new Error('create failed')),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '标签管理' }));
+    fireEvent.change(screen.getByLabelText('标签名称'), { target: { value: '论文' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建标签' }));
+
+    await waitFor(() => {
+      expect(persistence.createTag).toHaveBeenCalledWith({ name: '论文', color: '#2563eb' });
+    });
+    expect(screen.getByLabelText('标签名称')).toHaveValue('论文');
+    expect(screen.getByRole('status')).toHaveTextContent('标签创建失败');
+  });
+
+  it('opens settings from the preferences shortcut', () => {
     renderApp(
       <App
         bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
@@ -951,8 +1263,7 @@ describe('App', () => {
 
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    expect(screen.getByRole('dialog', { name: 'Preferences' })).toBeInTheDocument();
-    expect(screen.getByText('Session restore')).toBeInTheDocument();
-    expect(screen.getByText('Shortcut conflicts')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '快捷键' })).toBeInTheDocument();
+    expect(screen.getByText('当前没有快捷键冲突。')).toBeInTheDocument();
   });
 });

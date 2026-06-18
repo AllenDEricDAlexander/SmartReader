@@ -1,5 +1,5 @@
 import { useEffect, useMemo, type Dispatch, type SetStateAction } from 'react';
-import { CommandRegistry, defaultShortcuts } from '../../commands/commandRegistry';
+import { CommandRegistry, type CommandId } from '../../commands/commandRegistry';
 import { handleShortcutEvent } from '../../commands/shortcutController';
 import type { DocumentSession, DocumentState } from '../../documents/documentModels';
 import {
@@ -16,8 +16,9 @@ type UseReaderCommandsInput = {
   closeActiveTab(): void;
   openPdf(): void | Promise<void>;
   setDocuments: Dispatch<SetStateAction<DocumentState>>;
-  setPreferencesOpen: Dispatch<SetStateAction<boolean>>;
+  setPreferencesOpen(open: boolean): void;
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
+  shortcuts: Record<CommandId, string | null>;
   stepHistoryBack(): void;
   stepHistoryForward(): void;
 };
@@ -32,6 +33,7 @@ export function useReaderCommands({
   setDocuments,
   setPreferencesOpen,
   setSidebarOpen,
+  shortcuts,
   stepHistoryBack,
   stepHistoryForward,
 }: UseReaderCommandsInput) {
@@ -40,103 +42,103 @@ export function useReaderCommands({
     registry.register({
       id: 'file.open',
       label: 'Open File',
-      shortcut: defaultShortcuts.openFile,
+      shortcut: shortcuts['file.open'],
       run: () => void openPdf(),
     });
     registry.register({
       id: 'tab.close',
       label: 'Close Tab',
-      shortcut: defaultShortcuts.closeTab,
+      shortcut: shortcuts['tab.close'],
       run: closeActiveTab,
     });
     registry.register({
       id: 'find.open',
       label: 'Find',
-      shortcut: defaultShortcuts.find,
+      shortcut: shortcuts['find.open'],
       run: () => activeViewerController.openSearch(),
     });
     registry.register({
       id: 'find.next',
       label: 'Find Next',
-      shortcut: defaultShortcuts.findNext,
+      shortcut: shortcuts['find.next'],
       run: () => activeViewerController.searchNext(),
     });
     registry.register({
       id: 'find.previous',
       label: 'Find Previous',
-      shortcut: defaultShortcuts.findPrevious,
+      shortcut: shortcuts['find.previous'],
       run: () => activeViewerController.searchPrevious(),
     });
     registry.register({
       id: 'sidebar.toggle',
       label: 'Toggle Sidebar',
-      shortcut: defaultShortcuts.toggleSidebar,
+      shortcut: shortcuts['sidebar.toggle'],
       run: () => setSidebarOpen((open) => !open),
     });
     registry.register({
       id: 'zoom.in',
       label: 'Zoom In',
-      shortcut: defaultShortcuts.zoomIn,
+      shortcut: shortcuts['zoom.in'],
       run: () => activeViewerController.zoomIn(),
     });
     registry.register({
       id: 'zoom.out',
       label: 'Zoom Out',
-      shortcut: defaultShortcuts.zoomOut,
+      shortcut: shortcuts['zoom.out'],
       run: () => activeViewerController.zoomOut(),
     });
     registry.register({
       id: 'zoom.fitWidth',
       label: 'Fit Width',
-      shortcut: defaultShortcuts.fitWidth,
+      shortcut: shortcuts['zoom.fitWidth'],
       run: () => activeViewerController.fitWidth(),
     });
     registry.register({
       id: 'zoom.fitPage',
       label: 'Fit Page',
-      shortcut: defaultShortcuts.fitPage,
+      shortcut: shortcuts['zoom.fitPage'],
       run: () => activeViewerController.fitPage(),
     });
     registry.register({
       id: 'history.back',
       label: 'History Back',
-      shortcut: defaultShortcuts.historyBack,
+      shortcut: shortcuts['history.back'],
       run: stepHistoryBack,
     });
     registry.register({
       id: 'history.forward',
       label: 'History Forward',
-      shortcut: defaultShortcuts.historyForward,
+      shortcut: shortcuts['history.forward'],
       run: stepHistoryForward,
     });
     registry.register({
       id: 'tab.next',
       label: 'Next Tab',
-      shortcut: defaultShortcuts.nextTab,
+      shortcut: shortcuts['tab.next'],
       run: () => setDocuments(selectNextSession),
     });
     registry.register({
       id: 'tab.previous',
       label: 'Previous Tab',
-      shortcut: defaultShortcuts.previousTab,
+      shortcut: shortcuts['tab.previous'],
       run: () => setDocuments(selectPreviousSession),
     });
     registry.register({
       id: 'bookmark.add',
       label: 'Add Bookmark',
-      shortcut: defaultShortcuts.addBookmark,
+      shortcut: shortcuts['bookmark.add'],
       run: () => void addBookmarkForActivePage(),
     });
     registry.register({
       id: 'annotation.note',
       label: 'Add Note',
-      shortcut: defaultShortcuts.addNote,
+      shortcut: shortcuts['annotation.note'],
       run: () => void addPageNote(),
     });
     registry.register({
       id: 'preferences.open',
       label: 'Preferences',
-      shortcut: defaultShortcuts.openPreferences,
+      shortcut: shortcuts['preferences.open'],
       run: () => setPreferencesOpen(true),
     });
     return registry;
@@ -149,6 +151,7 @@ export function useReaderCommands({
     setDocuments,
     setPreferencesOpen,
     setSidebarOpen,
+    shortcuts,
     stepHistoryBack,
     stepHistoryForward,
   ]);

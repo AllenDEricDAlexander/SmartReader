@@ -14,6 +14,8 @@ type HomeDashboardProps = {
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
   onReopenRecentDocument(document: PersistedDocument): void | Promise<void>;
   onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
+  onOpenSettings(): void;
+  onOpenTags(): void;
 };
 
 export function HomeDashboard({
@@ -23,6 +25,8 @@ export function HomeDashboard({
   onBrowserFileChange,
   onReopenRecentDocument,
   onToggleFavorite,
+  onOpenSettings,
+  onOpenTags,
 }: HomeDashboardProps) {
   return (
     <section className="home-dashboard" aria-label="SmartReader 首页">
@@ -37,15 +41,15 @@ export function HomeDashboard({
         <nav aria-label="主导航" className="home-nav">
           <button type="button" className="active">
             <BookOpen size={16} />
-            首页
+            <span>首页</span>
           </button>
-          <button type="button" disabled aria-disabled="true">
+          <button type="button" onClick={onOpenTags}>
             <Tags size={16} />
-            标签
+            <span>标签管理</span>
           </button>
-          <button type="button" disabled aria-disabled="true">
+          <button type="button" onClick={onOpenSettings}>
             <Settings size={16} />
-            设置
+            <span>设置</span>
           </button>
         </nav>
       </aside>

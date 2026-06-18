@@ -3,6 +3,7 @@ import type { PartialReaderPreferences, ReaderPreferences } from './preferencesM
 
 export const defaultReaderPreferences: ReaderPreferences = {
   sessionRestoreEnabled: true,
+  restoreScope: 'all',
   defaultZoomMode: 'fit-width',
   shortcuts: {
     'file.open': defaultShortcuts.openFile,

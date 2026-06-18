@@ -116,6 +116,7 @@ describe('persistenceApi', () => {
     const api = createPersistenceApi(invoke);
     const preferences = {
       sessionRestoreEnabled: true,
+      restoreScope: 'all' as const,
       defaultZoomMode: 'fit-width' as const,
       shortcuts: {
         'file.open': 'Meta+O',

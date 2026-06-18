@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BlobUrlCache } from '../cache/blobUrlCache';
 import { PdfByteCache } from '../cache/pdfByteCache';
 import {
@@ -10,8 +10,10 @@ import type { DocumentSession } from '../documents/documentModels';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import { HomeDashboard } from '../home/HomeDashboard';
 import type { PersistedDocument } from '../persistence/persistenceApi';
-import { defaultReaderPreferences } from '../preferences/preferencesStore';
+import { defaultReaderPreferences, mergeReaderPreferences } from '../preferences/preferencesStore';
+import { SettingsWorkspace } from '../settings/SettingsWorkspace';
 import type { Tag } from '../tags/tagModels';
+import { TagManager } from '../tags/TagManager';
 import type { ReaderAnnotation } from '../annotations/annotationModels';
 import { ReaderEmptyState } from '../reader/ReaderEmptyState';
 import { ReaderErrorState } from '../reader/ReaderErrorState';
@@ -30,7 +32,7 @@ import { ReaderWorkspace } from '../reader/ReaderWorkspace';
 import { PdfViewerBridge } from '../viewer/PdfViewerBridge';
 import { ViewerController } from '../viewer/viewerController';
 import type { ViewerSource } from '../viewer/viewerTypes';
-import type { ReaderAppProps } from './appTypes';
+import type { AppWorkspace, ReaderAppProps } from './appTypes';
 
 function mapSessionToPersistedDocument(session: DocumentSession): PersistedDocument {
   return {
@@ -65,12 +67,15 @@ export function ReaderApp({
   const [searchText, setSearchText] = useState('');
   const [lastSearchCommand, setLastSearchCommand] = useState('');
   const [pageInput, setPageInput] = useState('');
-  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [workspaceOverride, setWorkspaceOverride] = useState<AppWorkspace | null>(null);
   const [readerPreferences, setReaderPreferences] = useState(defaultReaderPreferences);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
   const [recentDocuments, setRecentDocuments] = useState<PersistedDocument[]>([]);
   const [favoriteDocuments, setFavoriteDocuments] = useState<FavoriteDocument[]>([]);
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<number | null>(null);
+  const tagsMutatedRef = useRef(false);
   const blobUrlCache = useMemo(() => new BlobUrlCache(), []);
   const pdfByteCache = useMemo(() => new PdfByteCache(), []);
   const defaultViewerController = useMemo(() => new ViewerController(), []);
@@ -102,6 +107,8 @@ export function ReaderApp({
     loadDocumentDecorations,
     pdfByteCache,
     persistence,
+    preferences: readerPreferences,
+    preferencesLoaded,
     setDocuments,
     setRecentDocuments,
     setSidebarOpen,
@@ -110,6 +117,20 @@ export function ReaderApp({
 
   useEffect(() => {
     let cancelled = false;
+
+    persistence
+      .loadPreferences()
+      .then((preferences) => {
+        if (!cancelled) {
+          setReaderPreferences(mergeReaderPreferences(preferences));
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) {
+          setPreferencesLoaded(true);
+        }
+      });
 
     persistence
       .listFavoriteDocuments()
@@ -123,7 +144,7 @@ export function ReaderApp({
     persistence
       .listTags()
       .then((tags) => {
-        if (!cancelled) {
+        if (!cancelled && !tagsMutatedRef.current) {
           setAvailableTags(tags);
         }
       })
@@ -212,10 +233,17 @@ export function ReaderApp({
     closeActiveTab,
     openPdf,
     setDocuments,
-    setPreferencesOpen,
+    setPreferencesOpen: (open) => {
+      if (open) {
+        setWorkspaceOverride('settings');
+      } else {
+        setWorkspaceOverride(null);
+      }
+    },
     setSidebarOpen,
     stepHistoryBack,
     stepHistoryForward,
+    shortcuts: readerPreferences.shortcuts,
   });
 
   const activeBookmarks = activeSession
@@ -329,6 +357,22 @@ export function ReaderApp({
     setSearchText('');
     runSearch('');
   }, [runSearch]);
+
+  const handleSavePreferences = useCallback(
+    async (preferences: typeof readerPreferences) => {
+      setSettingsSaving(true);
+      try {
+        await persistence.savePreferences(preferences);
+        setReaderPreferences(preferences);
+      } finally {
+        setSettingsSaving(false);
+      }
+    },
+    [persistence],
+  );
+  const activeWorkspace: AppWorkspace =
+    workspaceOverride ?? (activeSession ? 'reader' : 'home');
+
   const viewerContent = activeSession ? (
     activeSession.status === 'error' ? (
       <ReaderErrorState
@@ -375,12 +419,34 @@ export function ReaderApp({
 
   return (
     <main
-      className={activeSession ? 'app-shell reader-mode' : 'app-shell home-mode'}
+      className={`app-shell ${activeWorkspace}-mode`}
       aria-label="SmartReader workbench"
       onDragOver={(event) => event.preventDefault()}
       onDrop={handleDrop}
     >
-      {activeSession ? (
+      {activeWorkspace === 'settings' ? (
+        <SettingsWorkspace
+          commandRegistry={commandRegistry}
+          preferences={readerPreferences}
+          openSessionCount={documents.sessions.length}
+          recentDocumentCount={recentDocuments.length}
+          saving={settingsSaving}
+          onClose={() => setWorkspaceOverride(null)}
+          onSave={handleSavePreferences}
+        />
+      ) : null}
+      {activeWorkspace === 'tags' ? (
+        <TagManager
+          tags={availableTags}
+          persistence={persistence}
+          onTagsChange={(update) => {
+            tagsMutatedRef.current = true;
+            setAvailableTags(update);
+          }}
+          onClose={() => setWorkspaceOverride(null)}
+        />
+      ) : null}
+      {activeWorkspace === 'reader' && activeSession ? (
         <ReaderWorkspace
           sidebarOpen={sidebarOpen}
           tabs={
@@ -414,7 +480,7 @@ export function ReaderApp({
               onAddNote={addPageNote}
               isFavorite={activeSessionIsFavorite}
               onToggleFavorite={handleToggleActiveFavorite}
-              onOpenPreferences={() => setPreferencesOpen(true)}
+              onOpenPreferences={() => setWorkspaceOverride('settings')}
             />
           }
           leftPanel={
@@ -470,7 +536,8 @@ export function ReaderApp({
           }
           statusBar={<ReaderStatusBar activeSession={activeSession} />}
         />
-      ) : (
+      ) : null}
+      {activeWorkspace === 'home' ? (
         <HomeDashboard
           recentDocuments={recentDocuments}
           favoriteDocuments={favoriteDocuments}
@@ -478,42 +545,9 @@ export function ReaderApp({
           onBrowserFileChange={handleBrowserFileChange}
           onReopenRecentDocument={reopenRecentDocument}
           onToggleFavorite={handleToggleFavorite}
+          onOpenSettings={() => setWorkspaceOverride('settings')}
+          onOpenTags={() => setWorkspaceOverride('tags')}
         />
-      )}
-      {preferencesOpen ? (
-        <section role="dialog" aria-label="Preferences" className="preferences-panel">
-          <header>
-            <h2>Preferences</h2>
-            <button type="button" onClick={() => setPreferencesOpen(false)}>
-              Close
-            </button>
-          </header>
-          <label>
-            <input
-              type="checkbox"
-              checked={readerPreferences.sessionRestoreEnabled}
-              onChange={(event) =>
-                setReaderPreferences((current) => ({
-                  ...current,
-                  sessionRestoreEnabled: event.target.checked,
-                }))
-              }
-            />
-            Session restore
-          </label>
-          <section>
-            <h3>Shortcut conflicts</h3>
-            {commandRegistry.getShortcutConflicts().length === 0 ? (
-              <p>No conflicts</p>
-            ) : (
-              commandRegistry.getShortcutConflicts().map((conflict) => (
-                <p key={conflict.shortcut}>
-                  {conflict.shortcut}: {conflict.commandIds.join(', ')}
-                </p>
-              ))
-            )}
-          </section>
-        </section>
       ) : null}
     </main>
   );
