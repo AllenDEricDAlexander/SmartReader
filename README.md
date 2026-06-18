@@ -2,7 +2,7 @@
 
 当前项目不是知识库、云同步工具或 PDF 编辑器。分类、标签、分类级加密、RAG、云同步、写回原始 PDF 文件不属于当前 MVP。
 
-SmartReader 是一款本地优先的桌面端 PDF 阅读器，当前版本聚焦 PDF 阅读核心能力：打开本地 PDF、阅读、搜索、跳转、缩放、书签、SmartReader 管理的批注、最近文件、会话恢复、快捷键、缓存和桌面系统集成。
+SmartReader 是一款本地优先的桌面端 PDF 阅读器，当前版本聚焦 PDF 阅读核心能力：打开本地 PDF、阅读、搜索、跳转、缩放、书签、SmartReader 管理的批注和笔记、收藏、标签、最近文件、会话恢复、快捷键、缓存和桌面系统集成。
 
 ## 当前状态
 
@@ -10,18 +10,20 @@ SmartReader 是一款本地优先的桌面端 PDF 阅读器，当前版本聚焦
 
 已覆盖能力：
 
-- 通过浏览器文件选择器、拖拽、Tauri 原生文件对话框打开 PDF。
-- 支持桌面系统 Open With 事件和 PDF 文件关联。
+- 通过浏览器文件选择器、拖拽、Tauri 原生文件对话框、最近文件和桌面系统 Open With 打开 PDF。
+- PDF 加载失败和加载超时会进入可恢复错误状态，不再无限 loading。
 - 已打开的桌面路径 PDF 再次打开时聚焦已有标签页。
 - 桌面路径 PDF 支持最近文件、阅读进度和会话恢复。
 - 浏览器 `File` 打开的 PDF 仅作为运行时会话，不跨重启恢复。
-- 支持搜索、页码跳转、缩放、适合宽度、适合页面。
+- 支持搜索命令、页码跳转、缩放、适合宽度、适合页面；当前 viewer API 暂不提供真实匹配列表和匹配计数。
 - 支持 per-tab 阅读历史，明确跳转才进入后退/前进历史。
 - 支持书签新增、列表、跳转、删除和 SQLite 持久化。
-- 支持 SmartReader 管理的高亮批注和页面笔记，不写回原始 PDF。
-- 支持批注列表、跳转、删除、JSON 导入和 JSON 导出。
+- 支持 SmartReader 管理的高亮、下划线和页面笔记，不写回原始 PDF。
+- 支持批注列表、跳转、删除、可编辑笔记、标签、JSON 导入和 JSON 导出。
+- 支持文档收藏，以及文档、批注和笔记的标签创建、重命名、合并、删除和关联计数。
+- 支持设置工作区：快捷键覆盖、快捷键冲突提示、缓存状态、桌面集成状态和会话恢复偏好。
 - 支持运行时 PDF byte cache、blob URL cache 和桌面 PDF 磁盘缓存读取。
-- 支持快捷键注册和偏好设置面板的快捷键冲突提示。
+- AI 助手、对比阅读、文件夹库管理、全文知识库、导出文本/图片、打印、重命名/移动/删除本地文件仍是未来版本入口；当前不会伪装成可用功能。
 
 ## 技术栈
 
@@ -51,6 +53,9 @@ src/
   persistence/   前端 typed persistence API 和 debounce 写入
   platform/      文件选择、拖拽、Open With、Tauri bridge 和路径过滤
   preferences/   阅读器偏好和快捷键覆盖配置
+  reader/        阅读工作区、工具栏、侧栏、搜索、批注和 reader hooks
+  settings/      设置工作区、快捷键、缓存、桌面集成和会话恢复设置
+  tags/          标签模型、标签选择器和标签管理工作区
   viewer/        @react-pdf-viewer 隔离层和 viewer controller
 
 src-tauri/
@@ -60,13 +65,17 @@ src-tauri/
   src/migrations/001_init.sql   初始文档、会话、偏好表
   src/migrations/002_reader_core_completion.sql
                                 书签、批注、缓存和 Open With 事件表
+  src/migrations/003_workbench_stabilization.sql
+                                收藏、标签和文档/批注标签关系
 ```
 
 ## 数据和文件边界
 
 - 桌面路径 PDF 是可恢复来源，会保存最近文件、阅读进度、会话、书签和批注。
 - 浏览器 `File` 只属于当前运行时会话，重启后需要用户重新打开。
+- 收藏浏览器 `File` 时会保存一条不可自动重开的收藏记录；普通浏览器打开不会进入最近文件。
 - 批注由 SmartReader 管理并存入 SQLite，不修改原始 PDF。
+- 标签由 SmartReader 管理，可关联文档、批注和笔记。
 - SQLite 访问集中在 Rust/Tauri 命令后面，React 组件不直接写 SQL。
 - PDF 渲染、搜索、缩放和页面导航能力由 `@react-pdf-viewer` 承担，应用状态由 SmartReader 自己维护。
 

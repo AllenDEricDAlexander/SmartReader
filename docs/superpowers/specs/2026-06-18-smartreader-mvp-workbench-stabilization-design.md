@@ -16,7 +16,7 @@ In scope:
 
 - Home dashboard with open PDF, drag-and-drop, recent files, session restore, favorites, tag entry points, cache status, desktop integration status, and version/status information.
 - Reader workspace with multi-document tabs, page navigation, history back/forward, zoom, fit width, fit page, search, bookmarks, annotations, notes, tags, favorites, recent files, and status bar.
-- Search mode with result list, current match controls, page jump, fit controls, case-sensitive and whole-word options.
+- Search mode with viewer search commands, previous/next match controls, page jump, fit controls, and honest unavailable-state copy when the current viewer API cannot provide real match counts or result snippets.
 - Annotation mode with bookmarks, highlights, underlines, page notes, selected-text notes, annotation detail, editable note text, colors, and tags.
 - Favorites for PDF documents.
 - Tag management center with create, rename, merge, delete, color, statistics, and batch maintenance.
@@ -209,6 +209,18 @@ The app owns:
 - Current page, zoom, search text, bookmarks, annotations, tags, favorites, and history.
 
 The viewer must not display a Blob URL from another session.
+
+## Shipped Behavior Notes
+
+The implementation keeps search command-driven because `ViewerController` exposes search commands but not real match result data. The UI must not fabricate result counts or snippets. Search panels therefore show the active query, the last search command state, previous/next controls, clear search, page jump, and fit controls, while explicitly stating that match details are not available yet.
+
+Session restore settings are persisted and applied:
+
+- Disabled session restore still loads recent documents for the home dashboard, but does not reopen reader tabs.
+- `restoreScope: all` restores all saved desktop-path tabs.
+- `restoreScope: active` restores only the saved active desktop-path tab, with a safe fallback to one restorable tab.
+
+Shortcut settings are persisted and used by command registration. Saved shortcut overrides replace default shortcuts at runtime.
 
 ## Data Model
 

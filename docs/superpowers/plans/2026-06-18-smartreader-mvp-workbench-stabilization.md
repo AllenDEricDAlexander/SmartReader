@@ -1464,3 +1464,25 @@ Before final response after implementation:
 - Home, reader, search, annotation, settings, and tag manager workspaces render.
 - Disabled future features are visibly disabled and do not pretend to work.
 - Full automated validation commands have been run and results recorded.
+
+## Automated Validation Evidence
+
+- `bun run typecheck`: pass.
+- `bun run test`: pass, 19 test files and 91 tests.
+- `bun run build`: pass; emitted the existing PDF.js direct `eval` warning and chunk-size warning.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml --check`: pass.
+- `cargo test --manifest-path src-tauri/Cargo.toml`: pass, 19 Rust tests.
+
+## Manual Test Evidence
+
+- Desktop Open PDF: not run, browser/app launch was explicitly disabled for this execution.
+- Browser Choose: not run, browser/app launch was explicitly disabled for this execution.
+- Drag and drop: not run, browser/app launch was explicitly disabled for this execution.
+- Search: not run, browser/app launch was explicitly disabled for this execution.
+- Zoom and fit: not run, browser/app launch was explicitly disabled for this execution.
+- Bookmarks: not run, browser/app launch was explicitly disabled for this execution.
+- Annotations and notes: not run, browser/app launch was explicitly disabled for this execution.
+- Tags: not run, browser/app launch was explicitly disabled for this execution.
+- Favorites: not run, browser/app launch was explicitly disabled for this execution.
+- Settings persistence: not run, browser/app launch was explicitly disabled for this execution.
+- Restart/session restore: not run, browser/app launch was explicitly disabled for this execution.
