@@ -591,51 +591,66 @@ pub fn save_reader_session_tx(
     connection: &Connection,
     session: &PersistedReaderSession,
 ) -> Result<(), DbError> {
-    let now = now_rfc3339();
-    let active_document_id = match &session.active_document_key {
-        Some(document_key) => document_id_for_key(connection, document_key)?,
-        None => None,
-    };
+    connection.execute_batch("BEGIN IMMEDIATE TRANSACTION")?;
 
-    connection.execute("DELETE FROM session_tabs", [])?;
-    connection.execute("DELETE FROM sessions", [])?;
-    connection.execute(
-        r#"
-        INSERT INTO sessions (active_document_id, sidebar_open, created_at, updated_at)
-        VALUES (?1, ?2, ?3, ?4)
-        "#,
-        params![
-            active_document_id,
-            i64::from(session.sidebar_open),
-            now,
-            now
-        ],
-    )?;
-    let session_id = connection.last_insert_rowid();
+    let result = (|| -> Result<(), DbError> {
+        let now = now_rfc3339();
+        let active_document_id = match &session.active_document_key {
+            Some(document_key) => document_id_for_key(connection, document_key)?,
+            None => None,
+        };
 
-    for tab in &session.tabs {
-        if let Some(document_id) = document_id_for_key(connection, &tab.document_key)? {
-            connection.execute(
-                r#"
-                INSERT INTO session_tabs (
-                    session_id, document_id, tab_order, page, zoom, history_json, updated_at
-                )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                "#,
-                params![
-                    session_id,
-                    document_id,
-                    tab.tab_order,
-                    tab.page,
-                    tab.zoom,
-                    serde_json::to_string(&tab.history)?,
-                    now,
-                ],
-            )?;
+        connection.execute("DELETE FROM session_tabs", [])?;
+        connection.execute("DELETE FROM sessions", [])?;
+        connection.execute(
+            r#"
+            INSERT INTO sessions (active_document_id, sidebar_open, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4)
+            "#,
+            params![
+                active_document_id,
+                i64::from(session.sidebar_open),
+                now,
+                now
+            ],
+        )?;
+        let session_id = connection.last_insert_rowid();
+
+        for tab in &session.tabs {
+            if let Some(document_id) = document_id_for_key(connection, &tab.document_key)? {
+                connection.execute(
+                    r#"
+                    INSERT INTO session_tabs (
+                        session_id, document_id, tab_order, page, zoom, history_json, updated_at
+                    )
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                    "#,
+                    params![
+                        session_id,
+                        document_id,
+                        tab.tab_order,
+                        tab.page,
+                        tab.zoom,
+                        serde_json::to_string(&tab.history)?,
+                        now,
+                    ],
+                )?;
+            }
+        }
+
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => {
+            connection.execute_batch("COMMIT")?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
         }
     }
-
-    Ok(())
 }
 
 pub fn load_reader_session_tx(
@@ -1400,6 +1415,54 @@ mod tests {
         assert_eq!(
             load_reader_session_tx(&connection).expect("load"),
             Some(session)
+        );
+    }
+
+    #[test]
+    fn saving_empty_reader_session_clears_previous_tabs() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        apply_migrations(&connection).expect("schema applies");
+
+        let document = PersistedDocument {
+            document_key: "desktop:/tmp/book.pdf".to_string(),
+            path: Some("/tmp/book.pdf".to_string()),
+            display_name: "book.pdf".to_string(),
+            file_size: Some(100),
+            modified_at: Some("2026-06-16T00:00:00Z".to_string()),
+            page_count: Some(20),
+            last_page: 4,
+            progress: 0.2,
+            missing: false,
+        };
+        upsert_document(&connection, &document).expect("document");
+
+        let session = PersistedReaderSession {
+            active_document_key: Some(document.document_key.clone()),
+            sidebar_open: true,
+            tabs: vec![PersistedSessionTab {
+                document_key: document.document_key,
+                tab_order: 0,
+                page: 4,
+                zoom: 1.25,
+                history: PersistedHistory {
+                    current_page: 4,
+                    back_stack: vec![1],
+                    forward_stack: vec![],
+                },
+            }],
+        };
+        save_reader_session_tx(&connection, &session).expect("save session");
+
+        let empty_session = PersistedReaderSession {
+            active_document_key: None,
+            sidebar_open: false,
+            tabs: vec![],
+        };
+        save_reader_session_tx(&connection, &empty_session).expect("save empty session");
+
+        assert_eq!(
+            load_reader_session_tx(&connection).expect("load"),
+            Some(empty_session)
         );
     }
 

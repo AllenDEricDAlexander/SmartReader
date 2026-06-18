@@ -1,11 +1,7 @@
 import { useEffect, useMemo, type Dispatch, type SetStateAction } from 'react';
 import { CommandRegistry, type CommandId } from '../../commands/commandRegistry';
 import { handleShortcutEvent } from '../../commands/shortcutController';
-import type { DocumentSession, DocumentState } from '../../documents/documentModels';
-import {
-  selectNextSession,
-  selectPreviousSession,
-} from '../../documents/documentSessionStore';
+import type { DocumentSession } from '../../documents/documentModels';
 import type { ViewerActions } from '../../viewer/viewerController';
 
 type UseReaderCommandsInput = {
@@ -15,7 +11,8 @@ type UseReaderCommandsInput = {
   addPageNote(): void | Promise<void>;
   closeActiveTab(): void;
   openPdf(): void | Promise<void>;
-  setDocuments: Dispatch<SetStateAction<DocumentState>>;
+  selectNextSession(): void;
+  selectPreviousSession(): void;
   setPreferencesOpen(open: boolean): void;
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
   shortcuts: Record<CommandId, string | null>;
@@ -30,7 +27,8 @@ export function useReaderCommands({
   addPageNote,
   closeActiveTab,
   openPdf,
-  setDocuments,
+  selectNextSession,
+  selectPreviousSession,
   setPreferencesOpen,
   setSidebarOpen,
   shortcuts,
@@ -115,13 +113,13 @@ export function useReaderCommands({
       id: 'tab.next',
       label: 'Next Tab',
       shortcut: shortcuts['tab.next'],
-      run: () => setDocuments(selectNextSession),
+      run: selectNextSession,
     });
     registry.register({
       id: 'tab.previous',
       label: 'Previous Tab',
       shortcut: shortcuts['tab.previous'],
-      run: () => setDocuments(selectPreviousSession),
+      run: selectPreviousSession,
     });
     registry.register({
       id: 'bookmark.add',
@@ -148,7 +146,8 @@ export function useReaderCommands({
     addPageNote,
     closeActiveTab,
     openPdf,
-    setDocuments,
+    selectNextSession,
+    selectPreviousSession,
     setPreferencesOpen,
     setSidebarOpen,
     shortcuts,

@@ -183,7 +183,7 @@ It delegates behavior to hooks:
 - `useReaderCommands`
   - Command registry, shortcuts, command enablement, conflict detection, and command execution.
 - `useReaderDecorations`
-  - Bookmarks, annotations, notes, favorite state, document tags, and annotation tags for the active document.
+  - Bookmarks, annotations, notes, favorite state, and annotation/note tags for the active document.
 - `useReaderNavigation`
   - Page jump, previous/next page, history back/forward, tab next/previous, and viewer synchronization.
 
@@ -332,7 +332,7 @@ Tauri and Rust errors must be serialized into clear user-facing categories inste
 7. The Blob URL cache creates a URL keyed by session ID.
 8. The active viewer source becomes `{ sessionId, url }`.
 9. Desktop-path documents are saved to recent files.
-10. Bookmarks, annotations, favorite state, document tags, and annotation tags are loaded.
+10. Bookmarks, annotations, favorite state, and annotation/note tags are loaded.
 11. The viewer loads the Blob URL and reports document load, page, and zoom events.
 12. Failure at any step shows a visible error with retry or reopen actions.
 

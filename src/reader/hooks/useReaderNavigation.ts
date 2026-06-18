@@ -4,6 +4,8 @@ import type { DocumentSession, DocumentState } from '../../documents/documentMod
 import {
   closeDocumentSession,
   recordHardNavigation,
+  selectNextSession,
+  selectPreviousSession,
   selectSession,
   stepSessionHistoryBack,
   stepSessionHistoryForward,
@@ -26,13 +28,28 @@ export function useReaderNavigation({
   setDocuments,
   setViewerSource,
 }: UseReaderNavigationInput) {
-  const selectReaderSession = useCallback(
-    (sessionId: string) => {
-      setDocuments((current) => selectSession(current, sessionId));
+  const syncViewerSource = useCallback(
+    (sessionId: string | null) => {
+      if (!sessionId) {
+        setViewerSource(null);
+        return;
+      }
+
       const url = blobUrlCache.getForSession(sessionId);
       setViewerSource(url ? { sessionId, url } : null);
     },
-    [blobUrlCache, setDocuments, setViewerSource],
+    [blobUrlCache, setViewerSource],
+  );
+
+  const selectReaderSession = useCallback(
+    (sessionId: string) => {
+      setDocuments((current) => {
+        const next = selectSession(current, sessionId);
+        syncViewerSource(next.activeSessionId);
+        return next;
+      });
+    },
+    [setDocuments, syncViewerSource],
   );
 
   const closeActiveTab = useCallback(() => {
@@ -41,9 +58,28 @@ export function useReaderNavigation({
     }
 
     blobUrlCache.revokeForSession(activeSession.id);
-    setDocuments((current) => closeDocumentSession(current, activeSession.id));
-    setViewerSource(null);
-  }, [activeSession, blobUrlCache, setDocuments, setViewerSource]);
+    setDocuments((current) => {
+      const next = closeDocumentSession(current, activeSession.id);
+      syncViewerSource(next.activeSessionId);
+      return next;
+    });
+  }, [activeSession, blobUrlCache, setDocuments, syncViewerSource]);
+
+  const selectNextReaderSession = useCallback(() => {
+    setDocuments((current) => {
+      const next = selectNextSession(current);
+      syncViewerSource(next.activeSessionId);
+      return next;
+    });
+  }, [setDocuments, syncViewerSource]);
+
+  const selectPreviousReaderSession = useCallback(() => {
+    setDocuments((current) => {
+      const next = selectPreviousSession(current);
+      syncViewerSource(next.activeSessionId);
+      return next;
+    });
+  }, [setDocuments, syncViewerSource]);
 
   const jumpToPage = useCallback(
     (page: number) => {
@@ -111,6 +147,8 @@ export function useReaderNavigation({
     handleViewerWheel,
     jumpToActiveDocumentPage,
     jumpToPage,
+    selectNextReaderSession,
+    selectPreviousReaderSession,
     selectReaderSession,
     stepHistoryBack,
     stepHistoryForward,

@@ -76,6 +76,7 @@ export function ReaderApp({
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<number | null>(null);
   const tagsMutatedRef = useRef(false);
+  const hadReaderSessionsRef = useRef(false);
   const blobUrlCache = useMemo(() => new BlobUrlCache(), []);
   const pdfByteCache = useMemo(() => new PdfByteCache(), []);
   const defaultViewerController = useMemo(() => new ViewerController(), []);
@@ -160,8 +161,14 @@ export function ReaderApp({
   }, [activeSession?.documentKey]);
 
   useEffect(() => {
-    if (documents.sessions.length === 0) {
+    const hasSessions = documents.sessions.length > 0;
+
+    if (!hasSessions && !hadReaderSessionsRef.current) {
       return;
+    }
+
+    if (hasSessions) {
+      hadReaderSessionsRef.current = true;
     }
 
     sessionPersistence.schedule({
@@ -214,6 +221,8 @@ export function ReaderApp({
     handleViewerWheel,
     jumpToActiveDocumentPage,
     jumpToPage,
+    selectNextReaderSession,
+    selectPreviousReaderSession,
     selectReaderSession,
     stepHistoryBack,
     stepHistoryForward,
@@ -232,7 +241,8 @@ export function ReaderApp({
     addPageNote,
     closeActiveTab,
     openPdf,
-    setDocuments,
+    selectNextSession: selectNextReaderSession,
+    selectPreviousSession: selectPreviousReaderSession,
     setPreferencesOpen: (open) => {
       if (open) {
         setWorkspaceOverride('settings');

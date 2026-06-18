@@ -521,6 +521,110 @@ describe('App', () => {
     expect(persistence.saveDocument).not.toHaveBeenCalled();
   });
 
+  it('persists an empty reader session after closing the final tab', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:book');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const persistence = createEmptyPersistence();
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/book.pdf', name: 'book.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-16T00:00:00Z',
+    });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+    expect(await screen.findByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close active tab' }));
+
+    await waitFor(
+      () => {
+        expect(persistence.saveReaderSession).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            activeDocumentKey: null,
+            tabs: [],
+          }),
+        );
+      },
+      { timeout: 1000 },
+    );
+  });
+
+  it('keeps the fallback PDF visible after closing the active tab', async () => {
+    let blobIndex = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      blobIndex += 1;
+      return `blob:tab-${blobIndex}`;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [new File(['%PDF-1.7'], 'one.pdf', { type: 'application/pdf' })] },
+    });
+    expect(await screen.findByText('PDF blob:tab-1')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [new File(['%PDF-1.7'], 'two.pdf', { type: 'application/pdf' })] },
+    });
+    expect(await screen.findByText('PDF blob:tab-2')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close active tab' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('PDF blob:tab-1')).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('tab', { name: 'two.pdf' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the PDF source in sync when switching tabs with shortcuts', async () => {
+    let blobIndex = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      blobIndex += 1;
+      return `blob:tab-${blobIndex}`;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [new File(['%PDF-1.7'], 'one.pdf', { type: 'application/pdf' })] },
+    });
+    expect(await screen.findByText('PDF blob:tab-1')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [new File(['%PDF-1.7'], 'two.pdf', { type: 'application/pdf' })] },
+    });
+    expect(await screen.findByText('PDF blob:tab-2')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByText('PDF blob:tab-1')).toBeInTheDocument();
+    });
+  });
+
   it('marks the active session as failed when the viewer reports a load error', async () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:broken');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
