@@ -224,6 +224,59 @@ button:disabled {
   color: #6b6258;
 }
 
+.pdf-viewer-bridge {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: #fffaf0;
+  overflow: hidden;
+}
+
+.viewer-plugin-toolbar {
+  min-width: 0;
+  border-bottom: 1px solid rgba(93, 79, 61, 0.12);
+  background: rgba(255, 250, 240, 0.9);
+  overflow-x: auto;
+}
+
+.viewer-plugin-toolbar-inner {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.viewer-loading {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: #6b6258;
+  font-size: 13px;
+}
+
+.viewer-load-error {
+  align-self: center;
+  justify-self: center;
+  width: min(420px, calc(100vw - 48px));
+  padding: 24px;
+  border: 1px solid rgba(154, 64, 43, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 250, 246, 0.94);
+}
+
+.viewer-load-error h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.viewer-load-error p {
+  margin: 0;
+  color: #7a5144;
+}
+
 .reader-error {
   align-self: center;
   justify-self: center;

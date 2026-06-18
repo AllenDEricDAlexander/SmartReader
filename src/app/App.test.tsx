@@ -280,6 +280,43 @@ describe('App', () => {
     });
   });
 
+  it('marks the active session as failed when the viewer reports a load error', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:broken');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const file = new File(['not a pdf'], 'broken.pdf', { type: 'application/pdf' });
+    const failingViewerRenderer: PdfRenderer = ({ onLoadError }) => (
+      <button
+        type="button"
+        onClick={() =>
+          onLoadError?.({
+            status: 'error',
+            message: 'PDF failed in viewer',
+          })
+        }
+      >
+        Fail viewer load
+      </button>
+    );
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={failingViewerRenderer}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Choose PDF file'), {
+      target: { files: [file] },
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Fail viewer load' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('broken.pdf');
+    expect(alert).toHaveTextContent('PDF failed in viewer');
+  });
+
   it('saves desktop documents when they are opened', async () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:book');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);

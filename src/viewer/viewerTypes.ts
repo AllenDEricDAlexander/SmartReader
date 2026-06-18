@@ -10,6 +10,19 @@ export type ViewerProgress = {
   zoom: number;
 };
 
+export type ViewerLoadStatus =
+  | 'idle'
+  | 'loading-document'
+  | 'measuring-pages'
+  | 'ready'
+  | 'error'
+  | 'timeout';
+
+export type ViewerLoadError = {
+  status: 'error' | 'timeout';
+  message: string;
+};
+
 export type ViewerHighlightArea = {
   pageIndex: number;
   top: number;

@@ -821,6 +821,13 @@ export function App({
                     }),
                   );
                 }}
+                onLoadError={(error) => {
+                  setDocuments((current) =>
+                    activeSession
+                      ? markSessionError(current, activeSession.id, error.message)
+                      : current,
+                  );
+                }}
               />
             )
           ) : (
