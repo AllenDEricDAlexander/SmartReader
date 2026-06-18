@@ -37,6 +37,8 @@ pub fn run() {
             db::list_recent_documents,
             db::save_reader_session,
             db::load_reader_session,
+            db::save_preferences,
+            db::load_preferences,
             db::save_bookmark,
             db::list_bookmarks,
             db::delete_bookmark,

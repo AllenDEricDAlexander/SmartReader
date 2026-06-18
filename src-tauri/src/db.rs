@@ -5,11 +5,26 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 use time::OffsetDateTime;
 
-const INIT_SQL: &str = concat!(
-    include_str!("migrations/001_init.sql"),
-    "\n",
-    include_str!("migrations/002_reader_core_completion.sql"),
-);
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: "001_init",
+        sql: include_str!("migrations/001_init.sql"),
+    },
+    Migration {
+        version: "002_reader_core_completion",
+        sql: include_str!("migrations/002_reader_core_completion.sql"),
+    },
+    Migration {
+        version: "003_workbench_stabilization",
+        sql: include_str!("migrations/003_workbench_stabilization.sql"),
+    },
+];
+const READER_PREFERENCES_KEY: &str = "reader_preferences";
+
+struct Migration {
+    version: &'static str,
+    sql: &'static str,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
@@ -119,12 +134,106 @@ pub fn open_database(path: &Path) -> Result<Connection, DbError> {
     }
 
     let connection = Connection::open(path)?;
-    connection.execute_batch(INIT_SQL)?;
+    apply_migrations(&connection)?;
     Ok(connection)
 }
 
 pub fn default_database_path(app_data_dir: PathBuf) -> PathBuf {
     app_data_dir.join("smartreader.sqlite3")
+}
+
+pub fn apply_migrations(connection: &Connection) -> Result<(), DbError> {
+    let had_schema_migrations = table_exists(connection, "schema_migrations")?;
+
+    connection.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+        "#,
+        [],
+    )?;
+
+    if !had_schema_migrations
+        && column_exists(connection, "documents", "favorite")?
+        && table_exists(connection, "annotations")?
+    {
+        mark_migration_applied(connection, "001_init")?;
+        mark_migration_applied(connection, "002_reader_core_completion")?;
+    }
+
+    for migration in MIGRATIONS {
+        if !migration_applied(connection, migration.version)? {
+            apply_migration(connection, migration)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn apply_migration(connection: &Connection, migration: &Migration) -> Result<(), DbError> {
+    connection.execute_batch("BEGIN IMMEDIATE TRANSACTION")?;
+
+    let result = (|| {
+        connection.execute_batch(migration.sql)?;
+        mark_migration_applied(connection, migration.version)?;
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => {
+            connection.execute_batch("COMMIT")?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+fn table_exists(connection: &Connection, table_name: &str) -> Result<bool, DbError> {
+    let count: i64 = connection.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [table_name],
+        |row| row.get(0),
+    )?;
+
+    Ok(count == 1)
+}
+
+fn column_exists(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+) -> Result<bool, DbError> {
+    let count: i64 = connection.query_row(
+        "SELECT count(*) FROM pragma_table_info(?1) WHERE name = ?2",
+        params![table_name, column_name],
+        |row| row.get(0),
+    )?;
+
+    Ok(count == 1)
+}
+
+fn migration_applied(connection: &Connection, version: &str) -> Result<bool, DbError> {
+    let count: i64 = connection.query_row(
+        "SELECT count(*) FROM schema_migrations WHERE version = ?1",
+        [version],
+        |row| row.get(0),
+    )?;
+
+    Ok(count == 1)
+}
+
+fn mark_migration_applied(connection: &Connection, version: &str) -> Result<(), DbError> {
+    connection.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+        params![version, now_rfc3339()],
+    )?;
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -159,6 +268,23 @@ pub fn load_reader_session(
 ) -> Result<Option<PersistedReaderSession>, DbError> {
     let connection = state.connection.lock().expect("database mutex poisoned");
     load_reader_session_tx(&connection)
+}
+
+#[tauri::command]
+pub fn save_preferences(
+    state: State<'_, DatabaseState>,
+    preferences: serde_json::Value,
+) -> Result<(), DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    save_preferences_tx(&connection, &preferences)
+}
+
+#[tauri::command]
+pub fn load_preferences(
+    state: State<'_, DatabaseState>,
+) -> Result<Option<serde_json::Value>, DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    load_preferences_tx(&connection)
 }
 
 #[tauri::command]
@@ -387,6 +513,41 @@ pub fn load_reader_session_tx(
     }))
 }
 
+pub fn save_preferences_tx(
+    connection: &Connection,
+    preferences: &serde_json::Value,
+) -> Result<(), DbError> {
+    let now = now_rfc3339();
+    connection.execute(
+        r#"
+        INSERT INTO preferences (key, value_json, updated_at)
+        VALUES (?1, ?2, ?3)
+        ON CONFLICT(key) DO UPDATE SET
+            value_json = excluded.value_json,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            READER_PREFERENCES_KEY,
+            serde_json::to_string(preferences)?,
+            now,
+        ],
+    )?;
+
+    Ok(())
+}
+
+pub fn load_preferences_tx(connection: &Connection) -> Result<Option<serde_json::Value>, DbError> {
+    let mut statement =
+        connection.prepare("SELECT value_json FROM preferences WHERE key = ?1 LIMIT 1")?;
+    let mut rows = statement.query([READER_PREFERENCES_KEY])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+
+    let value_json: String = row.get(0)?;
+    Ok(Some(serde_json::from_str(&value_json)?))
+}
+
 fn document_id_for_key(
     connection: &Connection,
     document_key: &str,
@@ -568,9 +729,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn opens_database_twice_without_replaying_alter_table() {
+        let path = std::env::temp_dir().join(format!(
+            "smartreader-test-{}-{}.sqlite3",
+            std::process::id(),
+            now_rfc3339().replace([':', '.'], "-")
+        ));
+
+        let connection = open_database(&path).expect("first open");
+        drop(connection);
+        let connection = open_database(&path).expect("second open");
+
+        let table_count: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("table count");
+
+        assert_eq!(table_count, 1);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn saves_and_loads_reader_preferences() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        apply_migrations(&connection).expect("schema applies");
+
+        let preferences = serde_json::json!({
+            "theme": "sepia",
+            "fontSize": 18,
+            "showToolbar": true
+        });
+
+        save_preferences_tx(&connection, &preferences).expect("save preferences");
+
+        assert_eq!(
+            load_preferences_tx(&connection).expect("load preferences"),
+            Some(preferences)
+        );
+    }
+
+    #[test]
     fn opens_database_and_creates_schema() {
         let connection = Connection::open_in_memory().expect("in-memory database");
-        connection.execute_batch(INIT_SQL).expect("schema applies");
+        apply_migrations(&connection).expect("schema applies");
 
         let table_count: i64 = connection
             .query_row(
@@ -586,7 +790,7 @@ mod tests {
     #[test]
     fn opens_reader_core_schema() {
         let connection = Connection::open_in_memory().expect("in-memory database");
-        connection.execute_batch(INIT_SQL).expect("schema applies");
+        apply_migrations(&connection).expect("schema applies");
 
         let tables = [
             "bookmarks",
@@ -621,7 +825,7 @@ mod tests {
     #[test]
     fn upserts_and_lists_documents() {
         let connection = Connection::open_in_memory().expect("in-memory database");
-        connection.execute_batch(INIT_SQL).expect("schema applies");
+        apply_migrations(&connection).expect("schema applies");
 
         let document = PersistedDocument {
             document_key: "desktop:/tmp/book.pdf".to_string(),
@@ -644,7 +848,7 @@ mod tests {
     #[test]
     fn saves_and_loads_reader_session() {
         let connection = Connection::open_in_memory().expect("in-memory database");
-        connection.execute_batch(INIT_SQL).expect("schema applies");
+        apply_migrations(&connection).expect("schema applies");
 
         let document = PersistedDocument {
             document_key: "desktop:/tmp/book.pdf".to_string(),
