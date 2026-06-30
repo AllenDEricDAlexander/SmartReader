@@ -518,7 +518,15 @@ export function ReaderApp({
               onSearch={() => runSearch(searchText)}
             />
           }
-          viewer={<div onWheel={handleViewerWheel}>{viewerContent}</div>}
+          viewer={
+            <section
+              className="viewer-surface"
+              aria-label="PDF viewer surface"
+              onWheel={handleViewerWheel}
+            >
+              {viewerContent}
+            </section>
+          }
           rightPanel={
             <ReaderRightPanel
               activeSession={activeSession}
