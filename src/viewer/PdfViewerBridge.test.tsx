@@ -33,47 +33,60 @@ vi.mock('@react-pdf-viewer/toolbar', async () => {
     React.createElement('button', { type: 'button' }, label);
 
   return {
-    toolbarPlugin: () => ({
-      pageNavigationPluginInstance: { jumpToPage: vi.fn() },
-      searchPluginInstance: {
-        highlight: vi.fn(),
-        jumpToNextMatch: vi.fn(),
-        jumpToPreviousMatch: vi.fn(),
-      },
-      zoomPluginInstance: { zoomTo: vi.fn() },
-      Toolbar: ({ children }: { children(slots: Record<string, unknown>): React.ReactNode }) =>
-        React.createElement(
-          'div',
-          null,
-          children({
-            CurrentPageInput: () => React.createElement('input', { 'aria-label': 'Current page' }),
-            GoToNextPage: () => React.createElement(Button, { label: 'Next page' }),
-            GoToPreviousPage: () => React.createElement(Button, { label: 'Previous page' }),
-            NumberOfPages: ({
-              children: renderPages,
-            }: {
-              children(props: { numberOfPages: number }): React.ReactNode;
-            }) => React.createElement('span', null, renderPages({ numberOfPages: 1 })),
-            ShowSearchPopover: ({
-              children: renderSearch,
-            }: {
-              children(props: { onClick(): void }): React.ReactNode;
-            }) => React.createElement('span', null, renderSearch({ onClick: vi.fn() })),
-            Zoom: () => React.createElement('span', null, '100%'),
-            ZoomIn: () => React.createElement(Button, { label: 'Zoom in' }),
-            ZoomOut: () => React.createElement(Button, { label: 'Zoom out' }),
-          }),
-        ),
-    }),
+    toolbarPlugin: () => {
+      React.useRef(null);
+
+      return {
+        pageNavigationPluginInstance: { jumpToPage: vi.fn() },
+        searchPluginInstance: {
+          highlight: vi.fn(),
+          jumpToNextMatch: vi.fn(),
+          jumpToPreviousMatch: vi.fn(),
+        },
+        zoomPluginInstance: { zoomTo: vi.fn() },
+        Toolbar: ({ children }: { children(slots: Record<string, unknown>): React.ReactNode }) =>
+          React.createElement(
+            'div',
+            null,
+            children({
+              CurrentPageInput: () =>
+                React.createElement('input', { 'aria-label': 'Current page' }),
+              GoToNextPage: () => React.createElement(Button, { label: 'Next page' }),
+              GoToPreviousPage: () => React.createElement(Button, { label: 'Previous page' }),
+              NumberOfPages: ({
+                children: renderPages,
+              }: {
+                children(props: { numberOfPages: number }): React.ReactNode;
+              }) => React.createElement('span', null, renderPages({ numberOfPages: 1 })),
+              ShowSearchPopover: ({
+                children: renderSearch,
+              }: {
+                children(props: { onClick(): void }): React.ReactNode;
+              }) => React.createElement('span', null, renderSearch({ onClick: vi.fn() })),
+              Zoom: () => React.createElement('span', null, '100%'),
+              ZoomIn: () => React.createElement(Button, { label: 'Zoom in' }),
+              ZoomOut: () => React.createElement(Button, { label: 'Zoom out' }),
+            }),
+          ),
+      };
+    },
   };
 });
 
-vi.mock('@react-pdf-viewer/highlight', () => ({
-  highlightPlugin: () => ({}),
-  Trigger: {
-    TextSelection: 'TextSelection',
-  },
-}));
+vi.mock('@react-pdf-viewer/highlight', async () => {
+  const React = await import('react');
+
+  return {
+    highlightPlugin: () => {
+      const pluginRef = React.useRef({});
+
+      return pluginRef.current;
+    },
+    Trigger: {
+      TextSelection: 'TextSelection',
+    },
+  };
+});
 
 describe('PdfViewerBridge', () => {
   afterEach(() => {
@@ -210,6 +223,31 @@ describe('PdfViewerBridge', () => {
       });
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it('does not call react-pdf-viewer plugin hooks from inside built-in hooks', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      render(
+        <PdfViewerBridge
+          source={{ sessionId: 'session-a', url: 'blob:book' }}
+          onProgressChange={vi.fn()}
+        />,
+      );
+
+      const hookWarnings = consoleError.mock.calls.filter((call) =>
+        call.some(
+          (entry) =>
+            typeof entry === 'string' &&
+            entry.includes('Do not call Hooks inside useEffect'),
+        ),
+      );
+
+      expect(hookWarnings).toHaveLength(0);
+    } finally {
+      consoleError.mockRestore();
     }
   });
 

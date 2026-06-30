@@ -1,7 +1,7 @@
 import { SpecialZoomLevel, Worker, Viewer } from '@react-pdf-viewer/core';
 import { highlightPlugin, Trigger, type HighlightArea } from '@react-pdf-viewer/highlight';
 import { toolbarPlugin } from '@react-pdf-viewer/toolbar';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReaderAnnotation } from '../annotations/annotationModels';
 import '@react-pdf-viewer/core/lib/styles/index.css';
 import '@react-pdf-viewer/highlight/lib/styles/index.css';
@@ -224,63 +224,55 @@ function ReactPdfViewer({
 }) {
   const scaleRef = useRef(1);
   const searchButtonRef = useRef<HTMLButtonElement | null>(null);
-  const toolbarPluginInstance = useMemo(
-    () =>
-      toolbarPlugin({
-        pageNavigationPlugin: { enableShortcuts: false },
-        searchPlugin: { enableShortcuts: false },
-        zoomPlugin: { enableShortcuts: false },
-      }),
-    [],
-  );
+  const toolbarPluginInstance = toolbarPlugin({
+    pageNavigationPlugin: { enableShortcuts: false },
+    searchPlugin: { enableShortcuts: false },
+    zoomPlugin: { enableShortcuts: false },
+  });
   const {
     pageNavigationPluginInstance,
     searchPluginInstance,
     zoomPluginInstance,
     Toolbar,
   } = toolbarPluginInstance;
-  const highlightPluginInstance = useMemo(
-    () =>
-      highlightPlugin({
-        trigger: Trigger.TextSelection,
-        renderHighlightTarget: (props) => (
-          <button
-            type="button"
-            className="highlight-target"
-            onClick={() => {
-              onHighlightSelection?.({
-                selectedText: props.selectedText,
-                page: props.selectionRegion.pageIndex + 1,
-                areas: props.highlightAreas.map(mapHighlightArea),
-              });
-              props.cancel();
-            }}
-          >
-            Save highlight
-          </button>
-        ),
-        renderHighlights: (props) => (
-          <>
-            {annotations
-              .flatMap((annotation) =>
-                annotation.areas.map((area) => ({ area, color: annotation.color })),
-              )
-              .filter(({ area }) => area.pageIndex === props.pageIndex)
-              .map(({ area, color }, index) => (
-                <div
-                  key={`${area.pageIndex}-${area.top}-${area.left}-${index}`}
-                  className="reader-highlight"
-                  style={{
-                    ...props.getCssProperties(area, props.rotation),
-                    background: color,
-                  }}
-                />
-              ))}
-          </>
-        ),
-      }),
-    [annotations, onHighlightSelection],
-  );
+  const highlightPluginInstance = highlightPlugin({
+    trigger: Trigger.TextSelection,
+    renderHighlightTarget: (props) => (
+      <button
+        type="button"
+        className="highlight-target"
+        onClick={() => {
+          onHighlightSelection?.({
+            selectedText: props.selectedText,
+            page: props.selectionRegion.pageIndex + 1,
+            areas: props.highlightAreas.map(mapHighlightArea),
+          });
+          props.cancel();
+        }}
+      >
+        Save highlight
+      </button>
+    ),
+    renderHighlights: (props) => (
+      <>
+        {annotations
+          .flatMap((annotation) =>
+            annotation.areas.map((area) => ({ area, color: annotation.color })),
+          )
+          .filter(({ area }) => area.pageIndex === props.pageIndex)
+          .map(({ area, color }, index) => (
+            <div
+              key={`${area.pageIndex}-${area.top}-${area.left}-${index}`}
+              className="reader-highlight"
+              style={{
+                ...props.getCssProperties(area, props.rotation),
+                background: color,
+              }}
+            />
+          ))}
+      </>
+    ),
+  });
 
   useEffect(() => {
     if (!controller) {
