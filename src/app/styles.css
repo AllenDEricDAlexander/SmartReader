@@ -271,7 +271,7 @@ button:disabled,
   position: relative;
 }
 
-.file-picker-button input {
+.file-picker-input {
   position: absolute;
   width: 1px;
   height: 1px;
