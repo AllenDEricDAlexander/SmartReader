@@ -1927,6 +1927,36 @@ describe('App', () => {
     expect(trigger).toHaveFocus();
   });
 
+  it('does not reopen global search after closing activation from an already focused search trigger', async () => {
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    const trigger = screen.getByLabelText('全局搜索');
+
+    trigger.focus();
+    const focusDialog = await screen.findByRole('dialog', { name: '全局搜索' });
+    fireEvent.keyDown(focusDialog, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '全局搜索' })).not.toBeInTheDocument();
+    });
+    expect(trigger).toHaveFocus();
+
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    const keyboardDialog = await screen.findByRole('dialog', { name: '全局搜索' });
+    fireEvent.keyDown(keyboardDialog, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '全局搜索' })).not.toBeInTheDocument();
+    });
+    expect(trigger).toHaveFocus();
+  });
+
   it('keeps focus inside global search when tabbing past dialog controls', async () => {
     renderApp(
       <App

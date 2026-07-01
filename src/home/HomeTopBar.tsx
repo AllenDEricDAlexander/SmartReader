@@ -8,7 +8,7 @@ import {
   Search,
   Settings,
 } from 'lucide-react';
-import { useRef, type KeyboardEvent } from 'react';
+import { useRef, type KeyboardEvent, type MouseEvent } from 'react';
 
 type HomeTopBarProps = {
   onOpenPdf(): void;
@@ -51,7 +51,7 @@ export function HomeTopBar({
     suppressNextSearchFocusRef.current = true;
   };
 
-  const handleSearchClick = () => {
+  const handleSearchClick = (event: MouseEvent<HTMLInputElement>) => {
     mouseDownOnSearchRef.current = false;
 
     if (ignoreNextSearchClickRef.current) {
@@ -59,12 +59,16 @@ export function HomeTopBar({
       return;
     }
 
+    if (document.activeElement === event.currentTarget) {
+      suppressNextSearchFocusRef.current = true;
+    }
     onOpenGlobalSearch();
   };
 
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
+      suppressNextSearchFocusRef.current = true;
       onOpenGlobalSearch();
     }
   };
