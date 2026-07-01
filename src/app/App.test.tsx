@@ -1,6 +1,10 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PersistedBookmarkRecord, PersistenceApi } from '../persistence/persistenceApi';
+import type {
+  PersistedAnnotationRecord,
+  PersistedBookmarkRecord,
+  PersistenceApi,
+} from '../persistence/persistenceApi';
 import type { ReaderPreferences } from '../preferences/preferencesModels';
 import { defaultReaderPreferences } from '../preferences/preferencesStore';
 import { renderApp } from '../test/renderApp';
@@ -63,6 +67,10 @@ function createDeferred<T>() {
 
 function mainNavigation() {
   return within(screen.getByRole('navigation', { name: '主导航' }));
+}
+
+function topShortcuts() {
+  return within(screen.getByRole('navigation', { name: '全局快捷入口' }));
 }
 
 describe('App', () => {
@@ -1400,6 +1408,185 @@ describe('App', () => {
 
     expect(screen.getByRole('heading', { name: '快捷键' })).toBeInTheDocument();
     expect(screen.getByText('当前没有快捷键冲突。')).toBeInTheDocument();
+  });
+
+  it('routes top bar shortcuts to local workspaces', () => {
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '导入文献' }));
+    expect(screen.getByLabelText('文献导入工作区')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回首页' }));
+    fireEvent.click(screen.getByRole('button', { name: '对比阅读' }));
+    expect(screen.getByLabelText('对比阅读工作区')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回首页' }));
+    fireEvent.click(screen.getByRole('button', { name: '批注管理' }));
+    expect(screen.getByLabelText('批注管理工作区')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回首页' }));
+    fireEvent.click(screen.getByRole('button', { name: '书签' }));
+    expect(screen.getByLabelText('书签管理工作区')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回首页' }));
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
+    expect(screen.getByLabelText('设置工作区')).toBeInTheDocument();
+  });
+
+  it('opens recent documents from the compare workspace', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:compare');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const readDesktopPdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/compare.pdf', name: 'compare.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-07-01T00:00:00Z',
+    });
+    const persistence = {
+      ...createEmptyPersistence(),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/compare.pdf',
+          path: '/tmp/compare.pdf',
+          displayName: 'compare.pdf',
+          fileSize: 2048,
+          modifiedAt: '2026-07-01T00:00:00Z',
+          pageCount: 20,
+          lastPage: 4,
+          progress: 0.2,
+          missing: false,
+        },
+      ]),
+      loadReaderSession: vi.fn().mockResolvedValue(null),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '对比阅读' }));
+    fireEvent.click((await screen.findAllByRole('button', { name: /compare\.pdf/ }))[0]);
+
+    await waitFor(() => {
+      expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/compare.pdf');
+    });
+    expect(await screen.findByRole('tab', { name: 'compare.pdf' })).toBeInTheDocument();
+  });
+
+  it('refreshes and opens manager records from local workspaces', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:manager-record');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const bookmarkRecords: PersistedBookmarkRecord[] = [
+      {
+        id: 9,
+        documentKey: 'desktop:/tmp/records.pdf',
+        page: 6,
+        title: '关键书签',
+        createdAt: '2026-07-01T00:00:00Z',
+        updatedAt: '2026-07-01T00:00:00Z',
+        documentDisplayName: 'records.pdf',
+        documentPath: '/tmp/records.pdf',
+        documentMissing: false,
+      },
+    ];
+    const annotationRecords: PersistedAnnotationRecord[] = [
+      {
+        id: 12,
+        documentKey: 'desktop:/tmp/records.pdf',
+        page: 7,
+        type: 'note',
+        color: '#facc15',
+        text: '关键批注',
+        quote: null,
+        areas: [],
+        tagIds: [],
+        createdAt: '2026-07-01T00:00:00Z',
+        updatedAt: '2026-07-01T00:00:00Z',
+        documentDisplayName: 'records.pdf',
+        documentPath: '/tmp/records.pdf',
+        documentMissing: false,
+      },
+    ];
+    const readDesktopPdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/records.pdf', name: 'records.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-07-01T00:00:00Z',
+    });
+    const persistence = {
+      ...createEmptyPersistence(),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/records.pdf',
+          path: '/tmp/records.pdf',
+          displayName: 'records.pdf',
+          fileSize: 2048,
+          modifiedAt: '2026-07-01T00:00:00Z',
+          pageCount: 20,
+          lastPage: 4,
+          progress: 0.2,
+          missing: false,
+        },
+      ]),
+      listAllBookmarks: vi.fn().mockResolvedValue(bookmarkRecords),
+      listAllAnnotations: vi.fn().mockResolvedValue(annotationRecords),
+      loadReaderSession: vi.fn().mockResolvedValue(null),
+    };
+    const viewerController = {
+      jumpToPage: vi.fn().mockReturnValue(true),
+      openSearch: vi.fn().mockReturnValue(true),
+      search: vi.fn().mockReturnValue(true),
+      searchNext: vi.fn().mockReturnValue(true),
+      searchPrevious: vi.fn().mockReturnValue(true),
+      zoomIn: vi.fn().mockReturnValue(true),
+      zoomOut: vi.fn().mockReturnValue(true),
+      fitWidth: vi.fn().mockReturnValue(true),
+      fitPage: vi.fn().mockReturnValue(true),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf }}
+        persistence={persistence}
+        viewerController={viewerController}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '批注管理' }));
+    expect(await screen.findByText('关键批注')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /关键批注/ }));
+
+    expect(await screen.findByRole('tab', { name: 'records.pdf' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(viewerController.jumpToPage).toHaveBeenCalledWith(7);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close active tab' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('tab', { name: 'records.pdf' })).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '书签' }));
+    expect(await screen.findByText('关键书签')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /关键书签/ }));
+
+    expect(await screen.findByRole('tab', { name: 'records.pdf' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(viewerController.jumpToPage).toHaveBeenCalledWith(6);
+    });
+    expect(persistence.listAllBookmarks).toHaveBeenCalled();
+    expect(persistence.listAllAnnotations).toHaveBeenCalled();
   });
 
   it('opens global search from the top-bar search box and shows recent file results', async () => {

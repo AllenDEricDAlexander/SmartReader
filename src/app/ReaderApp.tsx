@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { BlobUrlCache } from '../cache/blobUrlCache';
 import { PdfByteCache } from '../cache/pdfByteCache';
 import {
@@ -38,6 +38,10 @@ import type { GlobalSearchResult } from '../search/globalSearch';
 import { PdfViewerBridge } from '../viewer/PdfViewerBridge';
 import { ViewerController } from '../viewer/viewerController';
 import type { ViewerSource } from '../viewer/viewerTypes';
+import { AnnotationManagerWorkspace } from '../workspaces/AnnotationManagerWorkspace';
+import { BookmarkManagerWorkspace } from '../workspaces/BookmarkManagerWorkspace';
+import { CompareWorkspace } from '../workspaces/CompareWorkspace';
+import { ImportWorkspace } from '../workspaces/ImportWorkspace';
 import type { AppWorkspace, ReaderAppProps } from './appTypes';
 
 function mapSessionToPersistedDocument(session: DocumentSession): PersistedDocument {
@@ -278,6 +282,21 @@ export function ReaderApp({
     refreshGlobalSearchCollections();
   }, [refreshGlobalSearchCollections]);
 
+  const closeToolWorkspace = useCallback(() => {
+    setWorkspaceOverride(null);
+  }, []);
+
+  const openShortcutWorkspace = useCallback(
+    (workspace: Extract<AppWorkspace, 'import' | 'compare' | 'annotations' | 'bookmarks'>) => {
+      if (workspace === 'annotations' || workspace === 'bookmarks') {
+        refreshGlobalSearchCollections();
+      }
+
+      setWorkspaceOverride(workspace);
+    },
+    [refreshGlobalSearchCollections],
+  );
+
   const { commandRegistry } = useReaderCommands({
     activeSession,
     activeViewerController,
@@ -462,6 +481,76 @@ export function ReaderApp({
     ],
   );
 
+  const findRecentDocumentForRecord = useCallback(
+    (documentKey: string, path: string | null) =>
+      recentDocuments.find(
+        (document) =>
+          document.documentKey === documentKey || (Boolean(path) && document.path === path),
+      ) ?? null,
+    [recentDocuments],
+  );
+
+  const canOpenRecordPage = useCallback(
+    (documentKey: string, path: string | null, missing: boolean) => {
+      if (missing) {
+        return false;
+      }
+
+      return (
+        activeSession?.documentKey === documentKey ||
+        Boolean(findRecentDocumentForRecord(documentKey, path))
+      );
+    },
+    [activeSession, findRecentDocumentForRecord],
+  );
+
+  const openRecordPage = useCallback(
+    async (documentKey: string, path: string | null, page: number, missing: boolean) => {
+      if (missing) {
+        return;
+      }
+
+      if (activeSession?.documentKey === documentKey) {
+        jumpToActiveDocumentPage(page);
+        setPendingGlobalSearchJump(null);
+        setWorkspaceOverride(null);
+        return;
+      }
+
+      const recentDocument = findRecentDocumentForRecord(documentKey, path);
+
+      if (!recentDocument) {
+        return;
+      }
+
+      setPendingGlobalSearchJump({ documentKey, page });
+      setWorkspaceOverride(null);
+      await reopenRecentDocument(recentDocument);
+    },
+    [activeSession, findRecentDocumentForRecord, jumpToActiveDocumentPage, reopenRecentDocument],
+  );
+
+  const openCompareDocument = useCallback(
+    async (document: PersistedDocument) => {
+      setWorkspaceOverride(null);
+      await reopenRecentDocument(document);
+    },
+    [reopenRecentDocument],
+  );
+
+  const openImportPdf = useCallback(async () => {
+    await openPdf();
+    setWorkspaceOverride(null);
+  }, [openPdf]);
+
+  const handleImportBrowserFileChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      void handleBrowserFileChange(event);
+      setWorkspaceOverride(null);
+    },
+    [handleBrowserFileChange],
+  );
+
   useEffect(() => {
     if (
       !pendingGlobalSearchJump ||
@@ -550,6 +639,58 @@ export function ReaderApp({
           saving={settingsSaving}
           onClose={() => setWorkspaceOverride(null)}
           onSave={handleSavePreferences}
+        />
+      ) : null}
+      {activeWorkspace === 'import' ? (
+        <ImportWorkspace
+          onOpenPdf={openImportPdf}
+          onBrowserFileChange={handleImportBrowserFileChange}
+          onClose={closeToolWorkspace}
+        />
+      ) : null}
+      {activeWorkspace === 'compare' ? (
+        <CompareWorkspace
+          recentDocuments={recentDocuments}
+          onOpenDocument={openCompareDocument}
+          onClose={closeToolWorkspace}
+        />
+      ) : null}
+      {activeWorkspace === 'annotations' ? (
+        <AnnotationManagerWorkspace
+          annotations={globalSearchAnnotations}
+          canOpenAnnotation={(annotation) =>
+            canOpenRecordPage(
+              annotation.documentKey,
+              annotation.documentPath,
+              annotation.documentMissing,
+            )
+          }
+          onClose={closeToolWorkspace}
+          onOpenAnnotation={(annotation) =>
+            void openRecordPage(
+              annotation.documentKey,
+              annotation.documentPath,
+              annotation.page,
+              annotation.documentMissing,
+            )
+          }
+        />
+      ) : null}
+      {activeWorkspace === 'bookmarks' ? (
+        <BookmarkManagerWorkspace
+          bookmarks={globalSearchBookmarks}
+          canOpenBookmark={(bookmark) =>
+            canOpenRecordPage(bookmark.documentKey, bookmark.documentPath, bookmark.documentMissing)
+          }
+          onClose={closeToolWorkspace}
+          onOpenBookmark={(bookmark) =>
+            void openRecordPage(
+              bookmark.documentKey,
+              bookmark.documentPath,
+              bookmark.page,
+              bookmark.documentMissing,
+            )
+          }
         />
       ) : null}
       {activeWorkspace === 'tags' ? (
@@ -672,6 +813,10 @@ export function ReaderApp({
           onToggleFavorite={handleToggleFavorite}
           canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
           onOpenGlobalSearch={openGlobalSearch}
+          onOpenImport={() => openShortcutWorkspace('import')}
+          onOpenCompare={() => openShortcutWorkspace('compare')}
+          onOpenAnnotations={() => openShortcutWorkspace('annotations')}
+          onOpenBookmarks={() => openShortcutWorkspace('bookmarks')}
           onOpenSettings={() => setWorkspaceOverride('settings')}
           onOpenTags={() => setWorkspaceOverride('tags')}
         />
