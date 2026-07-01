@@ -93,6 +93,7 @@ export function ReaderApp({
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<number | null>(null);
   const tagsMutatedRef = useRef(false);
   const hadReaderSessionsRef = useRef(false);
+  const globalSearchRefreshRequestRef = useRef(0);
   const blobUrlCache = useMemo(() => new BlobUrlCache(), []);
   const pdfByteCache = useMemo(() => new PdfByteCache(), []);
   const defaultViewerController = useMemo(() => new ViewerController(), []);
@@ -251,13 +252,24 @@ export function ReaderApp({
   });
 
   const refreshGlobalSearchCollections = useCallback(() => {
+    globalSearchRefreshRequestRef.current += 1;
+    const requestId = globalSearchRefreshRequestRef.current;
+
     void persistence
       .listAllBookmarks()
-      .then((bookmarks) => setGlobalSearchBookmarks(bookmarks))
+      .then((bookmarks) => {
+        if (requestId === globalSearchRefreshRequestRef.current) {
+          setGlobalSearchBookmarks(bookmarks);
+        }
+      })
       .catch(() => undefined);
     void persistence
       .listAllAnnotations()
-      .then((annotations) => setGlobalSearchAnnotations(annotations))
+      .then((annotations) => {
+        if (requestId === globalSearchRefreshRequestRef.current) {
+          setGlobalSearchAnnotations(annotations);
+        }
+      })
       .catch(() => undefined);
   }, [persistence]);
 
@@ -284,6 +296,7 @@ export function ReaderApp({
       }
     },
     setSidebarOpen,
+    shortcutsEnabled: !globalSearchOpen,
     stepHistoryBack,
     stepHistoryForward,
     shortcuts: readerPreferences.shortcuts,

@@ -1,5 +1,5 @@
 import { FileText, Search, X } from 'lucide-react';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react';
 import type {
   PersistedAnnotationRecord,
   PersistedBookmarkRecord,
@@ -46,6 +46,7 @@ export function GlobalSearchPanel({
   onClose,
 }: GlobalSearchPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const results = useMemo(
     () =>
       buildGlobalSearchResults({
@@ -65,8 +66,47 @@ export function GlobalSearchPanel({
       return;
     }
 
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     inputRef.current?.focus();
+
+    return () => {
+      const previousFocus = previousFocusRef.current;
+      previousFocusRef.current = null;
+
+      if (previousFocus?.isConnected) {
+        previousFocus.focus();
+      }
+    };
   }, [open]);
+
+  const handleDialogKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+
+    if (event.key !== 'Tab') {
+      return;
+    }
+
+    const focusableElements = getFocusableElements(event.currentTarget);
+
+    if (focusableElements.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    const activeIndex = focusableElements.indexOf(document.activeElement as HTMLElement);
+    const currentIndex = activeIndex >= 0 ? activeIndex : 0;
+    const nextIndex = event.shiftKey
+      ? (currentIndex - 1 + focusableElements.length) % focusableElements.length
+      : (currentIndex + 1) % focusableElements.length;
+
+    focusableElements[nextIndex].focus();
+  };
 
   if (!open) {
     return null;
@@ -79,6 +119,7 @@ export function GlobalSearchPanel({
         aria-modal="true"
         className="global-search-dialog"
         role="dialog"
+        onKeyDown={handleDialogKeyDown}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="global-search-header">
@@ -100,12 +141,6 @@ export function GlobalSearchPanel({
             type="search"
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                onClose();
-              }
-            }}
           />
         </label>
 
@@ -144,4 +179,12 @@ export function GlobalSearchPanel({
       </section>
     </div>
   );
+}
+
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((element) => !element.getAttribute('aria-hidden'));
 }

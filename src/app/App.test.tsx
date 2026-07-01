@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PersistenceApi } from '../persistence/persistenceApi';
+import type { PersistedBookmarkRecord, PersistenceApi } from '../persistence/persistenceApi';
 import type { ReaderPreferences } from '../preferences/preferencesModels';
 import { defaultReaderPreferences } from '../preferences/preferencesStore';
 import { renderApp } from '../test/renderApp';
@@ -1503,5 +1503,167 @@ describe('App', () => {
       expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/research.pdf');
     });
     expect(await screen.findByRole('tab', { name: 'research.pdf' })).toBeInTheDocument();
+  });
+
+  it('does not run reader shortcuts while global search is open', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:shortcut-modal');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [new File(['%PDF-1.7'], 'shortcut.pdf', { type: 'application/pdf' })] },
+    });
+    expect(await screen.findByRole('tab', { name: 'shortcut.pdf' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    expect(await screen.findByRole('dialog', { name: '全局搜索' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'w', metaKey: true });
+
+    expect(screen.getByRole('tab', { name: 'shortcut.pdf' })).toBeInTheDocument();
+  });
+
+  it('closes global search with Escape from a result and restores prior focus', async () => {
+    const persistence = {
+      ...createEmptyPersistence(),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/focus.pdf',
+          path: '/tmp/focus.pdf',
+          displayName: 'focus.pdf',
+          fileSize: 2048,
+          modifiedAt: '2026-07-01T00:00:00Z',
+          pageCount: 20,
+          lastPage: 4,
+          progress: 0.2,
+          missing: false,
+        },
+      ]),
+      loadReaderSession: vi.fn().mockResolvedValue(null),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    const trigger = screen.getByLabelText('全局搜索');
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole('dialog', { name: '全局搜索' });
+    fireEvent.change(within(dialog).getByPlaceholderText('搜索文件、书签、批注...'), {
+      target: { value: 'focus' },
+    });
+    const result = await within(dialog).findByRole('button', { name: /focus\.pdf/ });
+
+    result.focus();
+    fireEvent.keyDown(result, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '全局搜索' })).not.toBeInTheDocument();
+    });
+    expect(trigger).toHaveFocus();
+  });
+
+  it('keeps focus inside global search when tabbing past dialog controls', async () => {
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: '全局搜索' });
+    const searchInput = within(dialog).getByLabelText('全局搜索关键词');
+    const closeButton = within(dialog).getByRole('button', { name: '关闭全局搜索' });
+
+    closeButton.focus();
+    fireEvent.keyDown(dialog, { key: 'Tab' });
+
+    expect(searchInput).toHaveFocus();
+  });
+
+  it('ignores stale global search collection refreshes', async () => {
+    const oldBookmarks: PersistedBookmarkRecord[] = [
+      {
+        id: 1,
+        documentKey: 'desktop:/tmp/old.pdf',
+        page: 3,
+        title: 'Old bookmark',
+        createdAt: '2026-07-01T00:00:00Z',
+        updatedAt: '2026-07-01T00:00:00Z',
+        documentDisplayName: 'old.pdf',
+        documentPath: '/tmp/old.pdf',
+        documentMissing: false,
+      },
+    ];
+    const freshBookmarks: PersistedBookmarkRecord[] = [
+      {
+        id: 2,
+        documentKey: 'desktop:/tmp/fresh.pdf',
+        page: 8,
+        title: 'Fresh bookmark',
+        createdAt: '2026-07-01T00:00:00Z',
+        updatedAt: '2026-07-01T00:00:00Z',
+        documentDisplayName: 'fresh.pdf',
+        documentPath: '/tmp/fresh.pdf',
+        documentMissing: false,
+      },
+    ];
+    const firstBookmarkLoad = createDeferred<PersistedBookmarkRecord[]>();
+    const secondBookmarkLoad = createDeferred<PersistedBookmarkRecord[]>();
+    const persistence = {
+      ...createEmptyPersistence(),
+      listAllBookmarks: vi
+        .fn()
+        .mockReturnValueOnce(firstBookmarkLoad.promise)
+        .mockReturnValueOnce(secondBookmarkLoad.promise),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.keyDown(await screen.findByRole('dialog', { name: '全局搜索' }), { key: 'Escape' });
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: '全局搜索' });
+    fireEvent.change(within(dialog).getByPlaceholderText('搜索文件、书签、批注...'), {
+      target: { value: 'bookmark' },
+    });
+
+    await waitFor(() => {
+      expect(persistence.listAllBookmarks).toHaveBeenCalledTimes(2);
+    });
+
+    await act(async () => {
+      secondBookmarkLoad.resolve(freshBookmarks);
+      await secondBookmarkLoad.promise;
+    });
+    expect(await within(dialog).findByText('Fresh bookmark')).toBeInTheDocument();
+
+    await act(async () => {
+      firstBookmarkLoad.resolve(oldBookmarks);
+      await firstBookmarkLoad.promise;
+    });
+
+    expect(within(dialog).getByText('Fresh bookmark')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Old bookmark')).not.toBeInTheDocument();
   });
 });

@@ -16,6 +16,7 @@ type UseReaderCommandsInput = {
   selectPreviousSession(): void;
   setPreferencesOpen(open: boolean): void;
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
+  shortcutsEnabled?: boolean;
   shortcuts: Record<CommandId, string | null>;
   stepHistoryBack(): void;
   stepHistoryForward(): void;
@@ -33,6 +34,7 @@ export function useReaderCommands({
   selectPreviousSession,
   setPreferencesOpen,
   setSidebarOpen,
+  shortcutsEnabled = true,
   shortcuts,
   stepHistoryBack,
   stepHistoryForward,
@@ -166,12 +168,16 @@ export function useReaderCommands({
 
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
+      if (!shortcutsEnabled) {
+        return;
+      }
+
       handleShortcutEvent(event, commandRegistry);
     };
 
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
-  }, [commandRegistry]);
+  }, [commandRegistry, shortcutsEnabled]);
 
   return { commandRegistry, hasActiveSession: Boolean(activeSession) };
 }
