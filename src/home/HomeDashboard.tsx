@@ -13,7 +13,7 @@ const noop = () => undefined;
 type HomeDashboardProps = {
   recentDocuments: PersistedDocument[];
   favoriteDocuments: FavoriteDocument[];
-  onOpenPdf(): void | Promise<void>;
+  onOpenPdf(): void | Promise<unknown>;
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
   onReopenRecentDocument(document: PersistedDocument): void | Promise<void>;
   onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;

@@ -2,7 +2,7 @@ import { FileInput, FolderOpen, Upload, X } from 'lucide-react';
 import { useCallback, useRef, type ChangeEventHandler } from 'react';
 
 type ImportWorkspaceProps = {
-  onOpenPdf(): void | Promise<void>;
+  onOpenPdf(): void | Promise<unknown>;
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
   canOpenNativePdf(): boolean;
   onClose(): void;

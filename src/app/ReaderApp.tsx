@@ -319,7 +319,7 @@ export function ReaderApp({
     [refreshGlobalSearchCollections],
   );
   const openPdfAndIgnoreResult = useCallback(() => {
-    void openPdf();
+    void openPdf().catch(() => undefined);
   }, [openPdf]);
 
   const { commandRegistry } = useReaderCommands({
@@ -857,7 +857,7 @@ export function ReaderApp({
         <HomeDashboard
           recentDocuments={recentDocuments}
           favoriteDocuments={favoriteDocuments}
-          onOpenPdf={openPdfAndIgnoreResult}
+          onOpenPdf={openPdf}
           onBrowserFileChange={handleBrowserFileChange}
           onReopenRecentDocument={(document) => void reopenRecentDocument(document)}
           onToggleFavorite={handleToggleFavorite}

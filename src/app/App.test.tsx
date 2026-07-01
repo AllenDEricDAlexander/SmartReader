@@ -106,6 +106,30 @@ describe('App', () => {
     expect(screen.getByText('AI 助手')).toHaveAttribute('aria-disabled', 'true');
   });
 
+  it('falls back to the home browser picker when native open rejects', async () => {
+    const inputClick = vi.spyOn(HTMLInputElement.prototype, 'click');
+    const openNativePdf = vi.fn().mockRejectedValue(new Error('native dialog failed'));
+
+    renderApp(
+      <App
+        bridge={{
+          canOpenNativePdf: () => true,
+          openNativePdf,
+          readDesktopPdf: vi.fn(),
+        }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }));
+
+    await waitFor(() => {
+      expect(inputClick).toHaveBeenCalled();
+    });
+    expect(openNativePdf).toHaveBeenCalledTimes(1);
+  });
+
   it('switches to the reader workspace after opening a PDF', async () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:book');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
