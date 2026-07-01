@@ -37,6 +37,17 @@ describe('buildGlobalSearchResults', () => {
       query: 'stats',
       recentDocuments: [
         {
+          documentKey: 'desktop:/tmp/stats-guide.pdf',
+          displayName: 'stats-guide.pdf',
+          path: '/tmp/books/intro.pdf',
+          fileSize: 100,
+          modifiedAt: null,
+          pageCount: 20,
+          lastPage: 2,
+          progress: 0.1,
+          missing: false,
+        },
+        {
           documentKey: 'desktop:/tmp/stats.pdf',
           displayName: 'statistics.pdf',
           path: '/tmp/books/stats.pdf',
@@ -55,6 +66,13 @@ describe('buildGlobalSearchResults', () => {
     });
 
     expect(results).toEqual([
+      expect.objectContaining({
+        id: 'file:desktop:/tmp/stats-guide.pdf',
+        source: 'file',
+        title: 'stats-guide.pdf',
+        documentKey: 'desktop:/tmp/stats-guide.pdf',
+        path: '/tmp/books/intro.pdf',
+      }),
       expect.objectContaining({
         id: 'file:desktop:/tmp/stats.pdf',
         source: 'file',
