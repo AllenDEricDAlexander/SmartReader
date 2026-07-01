@@ -46,6 +46,12 @@ export type PersistedBookmark = {
   updatedAt: string;
 };
 
+export type PersistedBookmarkRecord = PersistedBookmark & {
+  documentDisplayName: string | null;
+  documentPath: string | null;
+  documentMissing: boolean;
+};
+
 export type PersistedHighlightArea = {
   pageIndex: number;
   top: number;
@@ -68,6 +74,12 @@ export type PersistedAnnotation = {
   updatedAt: string;
 };
 
+export type PersistedAnnotationRecord = PersistedAnnotation & {
+  documentDisplayName: string | null;
+  documentPath: string | null;
+  documentMissing: boolean;
+};
+
 export type CorePersistenceApi = {
   saveDocument(document: PersistedDocument): Promise<void>;
   listRecentDocuments(): Promise<PersistedDocument[]>;
@@ -75,9 +87,11 @@ export type CorePersistenceApi = {
   loadReaderSession(): Promise<PersistedReaderSession | null>;
   saveBookmark(bookmark: PersistedBookmark): Promise<PersistedBookmark>;
   listBookmarks(documentKey: string): Promise<PersistedBookmark[]>;
+  listAllBookmarks(): Promise<PersistedBookmarkRecord[]>;
   deleteBookmark(id: number): Promise<void>;
   saveAnnotation(annotation: PersistedAnnotation): Promise<PersistedAnnotation>;
   listAnnotations(documentKey: string): Promise<PersistedAnnotation[]>;
+  listAllAnnotations(): Promise<PersistedAnnotationRecord[]>;
   deleteAnnotation(id: number): Promise<void>;
   savePreferences(preferences: ReaderPreferences): Promise<void>;
   loadPreferences(): Promise<ReaderPreferences | null>;
@@ -119,6 +133,9 @@ export function createPersistenceApi(invoke: Invoke = tauriInvoke): PersistenceA
     listBookmarks(documentKey) {
       return invoke<PersistedBookmark[]>('list_bookmarks', { documentKey });
     },
+    listAllBookmarks() {
+      return invoke<PersistedBookmarkRecord[]>('list_all_bookmarks');
+    },
     deleteBookmark(id) {
       return invoke<void>('delete_bookmark', { id });
     },
@@ -127,6 +144,9 @@ export function createPersistenceApi(invoke: Invoke = tauriInvoke): PersistenceA
     },
     listAnnotations(documentKey) {
       return invoke<PersistedAnnotation[]>('list_annotations', { documentKey });
+    },
+    listAllAnnotations() {
+      return invoke<PersistedAnnotationRecord[]>('list_all_annotations');
     },
     deleteAnnotation(id) {
       return invoke<void>('delete_annotation', { id });

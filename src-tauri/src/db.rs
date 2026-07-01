@@ -104,9 +104,43 @@ pub struct PersistedBookmark {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct PersistedBookmarkRecord {
+    pub id: Option<i64>,
+    pub document_key: String,
+    pub document_display_name: Option<String>,
+    pub document_path: Option<String>,
+    pub document_missing: bool,
+    pub page: i64,
+    pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct PersistedAnnotation {
     pub id: Option<i64>,
     pub document_key: String,
+    pub page: i64,
+    pub r#type: String,
+    pub color: String,
+    pub text: Option<String>,
+    pub quote: Option<String>,
+    pub areas: serde_json::Value,
+    #[serde(default)]
+    pub tag_ids: Option<Vec<i64>>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedAnnotationRecord {
+    pub id: Option<i64>,
+    pub document_key: String,
+    pub document_display_name: Option<String>,
+    pub document_path: Option<String>,
+    pub document_missing: bool,
     pub page: i64,
     pub r#type: String,
     pub color: String,
@@ -350,6 +384,14 @@ pub fn list_bookmarks(
 }
 
 #[tauri::command]
+pub fn list_all_bookmarks(
+    state: State<'_, DatabaseState>,
+) -> Result<Vec<PersistedBookmarkRecord>, DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    list_all_bookmark_records_tx(&connection)
+}
+
+#[tauri::command]
 pub fn delete_bookmark(state: State<'_, DatabaseState>, id: i64) -> Result<(), DbError> {
     let connection = state.connection.lock().expect("database mutex poisoned");
     connection.execute("DELETE FROM bookmarks WHERE id = ?1", [id])?;
@@ -372,6 +414,14 @@ pub fn list_annotations(
 ) -> Result<Vec<PersistedAnnotation>, DbError> {
     let connection = state.connection.lock().expect("database mutex poisoned");
     list_annotations_for_document(&connection, &document_key)
+}
+
+#[tauri::command]
+pub fn list_all_annotations(
+    state: State<'_, DatabaseState>,
+) -> Result<Vec<PersistedAnnotationRecord>, DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    list_all_annotation_records_tx(&connection)
 }
 
 #[tauri::command]
@@ -840,6 +890,35 @@ pub fn list_bookmarks_for_document(
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+pub fn list_all_bookmark_records_tx(
+    connection: &Connection,
+) -> Result<Vec<PersistedBookmarkRecord>, DbError> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT b.id, b.document_key, d.display_name, d.path, COALESCE(d.missing, 1),
+               b.page, b.title, b.created_at, b.updated_at
+        FROM bookmarks b
+        LEFT JOIN documents d ON d.document_key = b.document_key
+        ORDER BY COALESCE(d.display_name, b.document_key) COLLATE NOCASE ASC,
+                 b.page ASC, b.title ASC
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(PersistedBookmarkRecord {
+            id: Some(row.get(0)?),
+            document_key: row.get(1)?,
+            document_display_name: row.get(2)?,
+            document_path: row.get(3)?,
+            document_missing: row.get::<_, i64>(4)? == 1,
+            page: row.get(5)?,
+            title: row.get(6)?,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
 pub fn upsert_annotation(
     connection: &Connection,
     annotation: PersistedAnnotation,
@@ -957,6 +1036,58 @@ pub fn list_annotations_for_document(
             tag_ids: Some(Vec::new()),
             created_at: row.get(8)?,
             updated_at: row.get(9)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(DbError::from)?
+        .into_iter()
+        .map(|mut annotation| {
+            if let Some(id) = annotation.id {
+                annotation.tag_ids = Some(list_annotation_tag_ids_tx(connection, id)?);
+            }
+            Ok(annotation)
+        })
+        .collect()
+}
+
+pub fn list_all_annotation_records_tx(
+    connection: &Connection,
+) -> Result<Vec<PersistedAnnotationRecord>, DbError> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT a.id, a.document_key, d.display_name, d.path, COALESCE(d.missing, 1),
+               a.page, a.type, a.color, a.text, a.quote, a.areas_json, a.created_at, a.updated_at
+        FROM annotations a
+        LEFT JOIN documents d ON d.document_key = a.document_key
+        ORDER BY COALESCE(d.display_name, a.document_key) COLLATE NOCASE ASC,
+                 a.page ASC, a.created_at ASC
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| {
+        let areas_json: String = row.get(10)?;
+        let areas = serde_json::from_str(&areas_json).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                10,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?;
+        let id = row.get(0)?;
+        Ok(PersistedAnnotationRecord {
+            id: Some(id),
+            document_key: row.get(1)?,
+            document_display_name: row.get(2)?,
+            document_path: row.get(3)?,
+            document_missing: row.get::<_, i64>(4)? == 1,
+            page: row.get(5)?,
+            r#type: row.get(6)?,
+            color: row.get(7)?,
+            text: row.get(8)?,
+            quote: row.get(9)?,
+            areas,
+            tag_ids: Some(Vec::new()),
+            created_at: row.get(11)?,
+            updated_at: row.get(12)?,
         })
     })?;
     rows.collect::<Result<Vec<_>, _>>()
@@ -1509,6 +1640,106 @@ mod tests {
             result,
             Err(DbError::Sqlite(rusqlite::Error::QueryReturnedNoRows))
         ));
+    }
+
+    #[test]
+    fn lists_all_bookmarks_with_document_metadata() {
+        let connection = migrated_test_connection();
+        let document = PersistedDocument {
+            document_key: "desktop:/tmp/book.pdf".to_string(),
+            path: Some("/tmp/book.pdf".to_string()),
+            display_name: "book.pdf".to_string(),
+            file_size: Some(100),
+            modified_at: Some("2026-07-01T00:00:00Z".to_string()),
+            page_count: Some(20),
+            last_page: 1,
+            progress: 0.0,
+            missing: false,
+        };
+        upsert_document(&connection, &document).expect("document");
+        upsert_bookmark(
+            &connection,
+            PersistedBookmark {
+                id: None,
+                document_key: document.document_key.clone(),
+                page: 12,
+                title: "Important section".to_string(),
+                created_at: "2026-07-01T00:00:00Z".to_string(),
+                updated_at: "2026-07-01T00:00:00Z".to_string(),
+            },
+        )
+        .expect("bookmark");
+
+        let records = list_all_bookmark_records_tx(&connection).expect("records");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].document_key, document.document_key);
+        assert_eq!(
+            records[0].document_display_name.as_deref(),
+            Some("book.pdf")
+        );
+        assert_eq!(records[0].document_path.as_deref(), Some("/tmp/book.pdf"));
+        assert!(!records[0].document_missing);
+        assert_eq!(records[0].title, "Important section");
+    }
+
+    #[test]
+    fn lists_all_annotations_with_document_metadata_and_tag_ids() {
+        let connection = migrated_test_connection();
+        let document = PersistedDocument {
+            document_key: "desktop:/tmp/annotated.pdf".to_string(),
+            path: Some("/tmp/annotated.pdf".to_string()),
+            display_name: "annotated.pdf".to_string(),
+            file_size: Some(100),
+            modified_at: Some("2026-07-01T00:00:00Z".to_string()),
+            page_count: Some(20),
+            last_page: 1,
+            progress: 0.0,
+            missing: false,
+        };
+        upsert_document(&connection, &document).expect("document");
+        let tag = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "Research".to_string(),
+                color: "#2563eb".to_string(),
+            },
+        )
+        .expect("tag");
+        let annotation = upsert_annotation(
+            &connection,
+            PersistedAnnotation {
+                id: None,
+                document_key: document.document_key.clone(),
+                page: 3,
+                r#type: "note".to_string(),
+                color: "#facc15".to_string(),
+                text: Some("Remember this claim".to_string()),
+                quote: Some("quoted PDF text".to_string()),
+                areas: serde_json::json!([]),
+                tag_ids: Some(vec![tag.id]),
+                created_at: "2026-07-01T00:00:00Z".to_string(),
+                updated_at: "2026-07-01T00:00:00Z".to_string(),
+            },
+        )
+        .expect("annotation");
+
+        let records = list_all_annotation_records_tx(&connection).expect("records");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, annotation.id);
+        assert_eq!(records[0].document_key, document.document_key);
+        assert_eq!(
+            records[0].document_display_name.as_deref(),
+            Some("annotated.pdf")
+        );
+        assert_eq!(
+            records[0].document_path.as_deref(),
+            Some("/tmp/annotated.pdf")
+        );
+        assert_eq!(records[0].text.as_deref(), Some("Remember this claim"));
+        assert_eq!(records[0].quote.as_deref(), Some("quoted PDF text"));
+        assert_eq!(records[0].tag_ids, Some(vec![tag.id]));
     }
 
     #[test]
