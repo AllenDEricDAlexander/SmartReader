@@ -103,13 +103,14 @@ export function useDocumentOpening({
     const opened = await bridge.openNativePdf();
 
     if (!opened) {
-      return;
+      return false;
     }
 
     openBytes(opened.source, opened.bytes, {
       fileSize: opened.fileSize,
       modifiedAt: opened.modifiedAt,
     });
+    return true;
   }, [bridge, openBytes]);
 
   const reopenDesktopSession = useCallback(

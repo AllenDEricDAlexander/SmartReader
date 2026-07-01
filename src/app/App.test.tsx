@@ -1541,6 +1541,33 @@ describe('App', () => {
     expect(openNativePdf).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the import workspace open when the native picker is cancelled', async () => {
+    const openNativePdf = vi.fn().mockResolvedValue(null);
+
+    renderApp(
+      <App
+        bridge={{
+          canOpenNativePdf: () => true,
+          openNativePdf,
+          readDesktopPdf: vi.fn(),
+        }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '导入文献' }));
+    expect(await screen.findByLabelText('文献导入工作区')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+
+    await waitFor(() => {
+      expect(openNativePdf).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByLabelText('文献导入工作区')).toBeInTheDocument();
+    expect(screen.queryByLabelText('阅读工作区')).not.toBeInTheDocument();
+  });
+
   it('opens recent documents from the compare workspace', async () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:compare');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
@@ -1583,6 +1610,45 @@ describe('App', () => {
       expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/compare.pdf');
     });
     expect(await screen.findByRole('tab', { name: 'compare.pdf' })).toBeInTheDocument();
+  });
+
+  it('keeps the compare workspace visible when reopening a recent document fails', async () => {
+    const readDesktopPdf = vi.fn().mockRejectedValue(new Error('file does not exist'));
+    const persistence = {
+      ...createEmptyPersistence(),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/missing-compare.pdf',
+          path: '/tmp/missing-compare.pdf',
+          displayName: 'missing-compare.pdf',
+          fileSize: 2048,
+          modifiedAt: '2026-07-01T00:00:00Z',
+          pageCount: 20,
+          lastPage: 4,
+          progress: 0.2,
+          missing: false,
+        },
+      ]),
+      loadReaderSession: vi.fn().mockResolvedValue(null),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '对比阅读' }));
+    expect(await screen.findByLabelText('对比阅读工作区')).toBeInTheDocument();
+    fireEvent.click((await screen.findAllByRole('button', { name: /missing-compare\.pdf/ }))[0]);
+
+    await waitFor(() => {
+      expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/missing-compare.pdf');
+    });
+    expect(screen.getByLabelText('对比阅读工作区')).toBeInTheDocument();
+    expect(screen.queryByLabelText('阅读工作区')).not.toBeInTheDocument();
   });
 
   it('refreshes and opens manager records from local workspaces', async () => {
@@ -1689,6 +1755,59 @@ describe('App', () => {
     });
     expect(persistence.listAllBookmarks).toHaveBeenCalled();
     expect(persistence.listAllAnnotations).toHaveBeenCalled();
+  });
+
+  it('keeps a manager workspace visible when reopening a bookmark record fails', async () => {
+    const bookmarkRecords: PersistedBookmarkRecord[] = [
+      {
+        id: 19,
+        documentKey: 'desktop:/tmp/missing-bookmark.pdf',
+        page: 6,
+        title: '失效书签',
+        createdAt: '2026-07-01T00:00:00Z',
+        updatedAt: '2026-07-01T00:00:00Z',
+        documentDisplayName: 'missing-bookmark.pdf',
+        documentPath: '/tmp/missing-bookmark.pdf',
+        documentMissing: false,
+      },
+    ];
+    const readDesktopPdf = vi.fn().mockRejectedValue(new Error('file does not exist'));
+    const persistence = {
+      ...createEmptyPersistence(),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/missing-bookmark.pdf',
+          path: '/tmp/missing-bookmark.pdf',
+          displayName: 'missing-bookmark.pdf',
+          fileSize: 2048,
+          modifiedAt: '2026-07-01T00:00:00Z',
+          pageCount: 20,
+          lastPage: 4,
+          progress: 0.2,
+          missing: false,
+        },
+      ]),
+      listAllBookmarks: vi.fn().mockResolvedValue(bookmarkRecords),
+      loadReaderSession: vi.fn().mockResolvedValue(null),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '书签' }));
+    expect(await screen.findByLabelText('书签管理工作区')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /失效书签/ }));
+
+    await waitFor(() => {
+      expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/missing-bookmark.pdf');
+    });
+    expect(screen.getByLabelText('书签管理工作区')).toBeInTheDocument();
+    expect(screen.queryByLabelText('阅读工作区')).not.toBeInTheDocument();
   });
 
   it('opens global search from the top-bar search box and shows recent file results', async () => {

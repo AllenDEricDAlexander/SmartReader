@@ -318,6 +318,9 @@ export function ReaderApp({
     },
     [refreshGlobalSearchCollections],
   );
+  const openPdfAndIgnoreResult = useCallback(() => {
+    void openPdf();
+  }, [openPdf]);
 
   const { commandRegistry } = useReaderCommands({
     activeSession,
@@ -326,7 +329,7 @@ export function ReaderApp({
     addPageNote,
     closeActiveTab,
     openGlobalSearch,
-    openPdf,
+    openPdf: openPdfAndIgnoreResult,
     selectNextSession: selectNextReaderSession,
     selectPreviousSession: selectPreviousReaderSession,
     setPreferencesOpen: (open) => {
@@ -553,24 +556,38 @@ export function ReaderApp({
         return;
       }
 
-      setPendingGlobalSearchJump({ documentKey, page });
+      const opened = await reopenRecentDocument(recentDocument);
+
+      if (!opened) {
+        setPendingGlobalSearchJump(null);
+        return;
+      }
+
       setWorkspaceOverride(null);
-      await reopenRecentDocument(recentDocument);
+      setPendingGlobalSearchJump({ documentKey, page });
     },
     [activeSession, findRecentDocumentForRecord, jumpToActiveDocumentPage, reopenRecentDocument],
   );
 
   const openCompareDocument = useCallback(
     async (document: PersistedDocument) => {
+      const opened = await reopenRecentDocument(document);
+
+      if (!opened) {
+        return;
+      }
+
       setWorkspaceOverride(null);
-      await reopenRecentDocument(document);
     },
     [reopenRecentDocument],
   );
 
   const openImportPdf = useCallback(async () => {
-    await openPdf();
-    setWorkspaceOverride(null);
+    const opened = await openPdf();
+
+    if (opened) {
+      setWorkspaceOverride(null);
+    }
   }, [openPdf]);
 
   const handleImportBrowserFileChange = useCallback(
@@ -650,7 +667,7 @@ export function ReaderApp({
       />
     )
   ) : (
-    <ReaderEmptyState onOpenPdf={openPdf} />
+    <ReaderEmptyState onOpenPdf={openPdfAndIgnoreResult} />
   );
 
   return (
@@ -752,7 +769,7 @@ export function ReaderApp({
               activeSession={activeSession}
               searchText={searchText}
               pageInput={pageInput}
-              onOpenPdf={openPdf}
+              onOpenPdf={openPdfAndIgnoreResult}
               onBrowserFileChange={handleBrowserFileChange}
               onSearchTextChange={setSearchText}
               onPageInputChange={setPageInput}
@@ -840,7 +857,7 @@ export function ReaderApp({
         <HomeDashboard
           recentDocuments={recentDocuments}
           favoriteDocuments={favoriteDocuments}
-          onOpenPdf={openPdf}
+          onOpenPdf={openPdfAndIgnoreResult}
           onBrowserFileChange={handleBrowserFileChange}
           onReopenRecentDocument={(document) => void reopenRecentDocument(document)}
           onToggleFavorite={handleToggleFavorite}
