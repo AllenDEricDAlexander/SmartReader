@@ -1,6 +1,9 @@
 import { useEffect, useMemo, type Dispatch, type SetStateAction } from 'react';
 import { CommandRegistry, type CommandId } from '../../commands/commandRegistry';
-import { handleShortcutEvent } from '../../commands/shortcutController';
+import {
+  handleShortcutEvent,
+  preventRegisteredShortcutDefault,
+} from '../../commands/shortcutController';
 import type { DocumentSession } from '../../documents/documentModels';
 import type { ViewerActions } from '../../viewer/viewerController';
 
@@ -169,6 +172,7 @@ export function useReaderCommands({
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       if (!shortcutsEnabled) {
+        preventRegisteredShortcutDefault(event, commandRegistry);
         return;
       }
 

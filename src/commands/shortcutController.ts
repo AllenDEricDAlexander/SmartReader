@@ -25,7 +25,7 @@ export function getShortcutFromKeyboardEvent(event: KeyboardEvent): string {
 
 export function handleShortcutEvent(event: KeyboardEvent, registry: CommandRegistry): boolean {
   const shortcut = getShortcutFromKeyboardEvent(event);
-  const command = registry.list().find((candidate) => candidate.shortcut === shortcut);
+  const command = findCommandByShortcut(registry, shortcut);
 
   if (!command) {
     return false;
@@ -34,6 +34,25 @@ export function handleShortcutEvent(event: KeyboardEvent, registry: CommandRegis
   event.preventDefault();
   registry.run(command.id);
   return true;
+}
+
+export function preventRegisteredShortcutDefault(
+  event: KeyboardEvent,
+  registry: CommandRegistry,
+): boolean {
+  const shortcut = getShortcutFromKeyboardEvent(event);
+  const command = findCommandByShortcut(registry, shortcut);
+
+  if (!command) {
+    return false;
+  }
+
+  event.preventDefault();
+  return true;
+}
+
+function findCommandByShortcut(registry: CommandRegistry, shortcut: string) {
+  return registry.list().find((candidate) => candidate.shortcut === shortcut);
 }
 
 function normalizeKey(key: string): string {

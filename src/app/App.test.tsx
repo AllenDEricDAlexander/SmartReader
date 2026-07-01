@@ -1525,8 +1525,15 @@ describe('App', () => {
     fireEvent.keyDown(window, { key: 'k', metaKey: true });
     expect(await screen.findByRole('dialog', { name: '全局搜索' })).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: 'w', metaKey: true });
+    const closeShortcut = new KeyboardEvent('keydown', {
+      key: 'w',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(closeShortcut);
 
+    expect(closeShortcut.defaultPrevented).toBe(true);
     expect(screen.getByRole('tab', { name: 'shortcut.pdf' })).toBeInTheDocument();
   });
 
