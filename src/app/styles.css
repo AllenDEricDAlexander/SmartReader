@@ -182,6 +182,7 @@ button:disabled,
   border: 1px solid var(--sr-border);
   border-radius: 7px;
   background: var(--sr-surface);
+  color: var(--sr-text);
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
   cursor: pointer;
 }
@@ -191,14 +192,14 @@ button:disabled,
   outline-offset: 2px;
 }
 
-.global-search-trigger input {
+.global-search-copy {
   min-width: 0;
   width: 100%;
-  border: 0;
-  outline: 0;
-  background: transparent;
   color: var(--sr-text);
-  cursor: pointer;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .global-search-trigger kbd {
@@ -1423,6 +1424,22 @@ select {
 
 .tag-manager-empty strong {
   color: var(--sr-text);
+}
+
+@media (max-width: 1040px) {
+  .home-dashboard-shell {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .home-top-bar {
+    grid-template-columns: minmax(260px, 1fr) minmax(240px, 360px);
+  }
+
+  .top-shortcuts {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
 }
 
 @media (max-width: 960px) {

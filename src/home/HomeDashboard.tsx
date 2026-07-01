@@ -17,6 +17,7 @@ type HomeDashboardProps = {
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
   onReopenRecentDocument(document: PersistedDocument): void | Promise<void>;
   onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
+  canOpenNativePdf?(): boolean;
   onOpenGlobalSearch?(): void;
   onOpenImport?(): void;
   onOpenCompare?(): void;
@@ -33,6 +34,7 @@ export function HomeDashboard({
   onBrowserFileChange,
   onReopenRecentDocument,
   onToggleFavorite,
+  canOpenNativePdf = () => true,
   onOpenGlobalSearch = noop,
   onOpenImport = noop,
   onOpenCompare = noop,
@@ -48,12 +50,17 @@ export function HomeDashboard({
   }, []);
 
   const handleOpenPdf = useCallback(() => {
-    try {
-      void Promise.resolve(onOpenPdf()).catch(openBrowserFilePicker);
-    } catch {
+    if (!canOpenNativePdf()) {
       openBrowserFilePicker();
+      return;
     }
-  }, [onOpenPdf, openBrowserFilePicker]);
+
+    try {
+      void Promise.resolve(onOpenPdf()).catch(() => undefined);
+    } catch {
+      return;
+    }
+  }, [canOpenNativePdf, onOpenPdf, openBrowserFilePicker]);
 
   return (
     <div className="home-dashboard-shell">
@@ -72,6 +79,7 @@ export function HomeDashboard({
         aria-label="选择 PDF 文件"
         type="file"
         accept="application/pdf,.pdf"
+        tabIndex={-1}
         onChange={onBrowserFileChange}
       />
       <section className="home-dashboard" aria-label="SmartReader 首页内容">

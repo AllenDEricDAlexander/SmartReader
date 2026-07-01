@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderApp } from '../test/renderApp';
@@ -12,6 +12,7 @@ function renderDashboard(overrides: Partial<ComponentProps<typeof HomeDashboard>
     onBrowserFileChange: vi.fn(),
     onReopenRecentDocument: vi.fn(),
     onToggleFavorite: vi.fn(),
+    canOpenNativePdf: () => true,
     onOpenSettings: vi.fn(),
     onOpenTags: vi.fn(),
     ...overrides,
@@ -32,24 +33,33 @@ describe('HomeDashboard', () => {
     expect(input).toHaveClass('file-picker-input');
     expect(input).toHaveAttribute('type', 'file');
     expect(input).toHaveAttribute('accept', 'application/pdf,.pdf');
+    expect(input).toHaveAttribute('tabindex', '-1');
   });
 
-  it('falls back to the shared PDF input from native open actions', async () => {
-    const onOpenPdf = vi.fn().mockRejectedValue(new Error('native dialog unavailable'));
-    const { clickInput } = renderDashboard({ onOpenPdf });
+  it('clicks the shared PDF input synchronously when native open is unavailable', () => {
+    const onOpenPdf = vi.fn();
+    const { clickInput } = renderDashboard({ onOpenPdf, canOpenNativePdf: () => false });
 
     fireEvent.click(screen.getByRole('button', { name: '打开文件' }));
 
-    await waitFor(() => {
-      expect(clickInput).toHaveBeenCalledTimes(1);
-    });
+    expect(clickInput).toHaveBeenCalledTimes(1);
+    expect(onOpenPdf).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
 
-    await waitFor(() => {
-      expect(clickInput).toHaveBeenCalledTimes(2);
-    });
+    expect(clickInput).toHaveBeenCalledTimes(2);
+    expect(onOpenPdf).not.toHaveBeenCalled();
+  });
+
+  it('uses native open when available without async browser fallback', () => {
+    const onOpenPdf = vi.fn().mockRejectedValue(new Error('native dialog failed'));
+    const { clickInput } = renderDashboard({ onOpenPdf, canOpenNativePdf: () => true });
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+
     expect(onOpenPdf).toHaveBeenCalledTimes(2);
+    expect(clickInput).not.toHaveBeenCalled();
   });
 
   it('opens the shared PDF input directly from the quick-start chooser', () => {

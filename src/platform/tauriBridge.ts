@@ -1,6 +1,7 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { open as tauriOpen } from '@tauri-apps/plugin-dialog';
 import type { DesktopPathFileSource } from './fileSource';
+import { isTauriRuntimeAvailable } from './tauriRuntime';
 
 type OpenDialog = typeof tauriOpen;
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -21,6 +22,7 @@ export type OpenedDesktopPdf = {
 };
 
 export type TauriBridge = {
+  canOpenNativePdf?(): boolean;
   openNativePdf(): Promise<OpenedDesktopPdf | null>;
   readDesktopPdf(path: string): Promise<OpenedDesktopPdf>;
 };
@@ -33,8 +35,12 @@ export function createTauriBridge(
 ): TauriBridge {
   const open = dependencies.open ?? tauriOpen;
   const invoke = dependencies.invoke ?? tauriInvoke;
+  const hasInjectedDependencies = Boolean(dependencies.open || dependencies.invoke);
 
   return {
+    canOpenNativePdf() {
+      return hasInjectedDependencies || isTauriRuntimeAvailable();
+    },
     async openNativePdf() {
       const selected = await open({
         multiple: false,

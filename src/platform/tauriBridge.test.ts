@@ -13,6 +13,8 @@ describe('tauriBridge', () => {
     });
     const bridge = createTauriBridge({ open, invoke });
 
+    expect(bridge.canOpenNativePdf?.()).toBe(true);
+
     const file = await bridge.openNativePdf();
 
     expect(open).toHaveBeenCalledWith({
@@ -33,5 +35,13 @@ describe('tauriBridge', () => {
     });
 
     await expect(bridge.openNativePdf()).resolves.toBeNull();
+  });
+
+  it('reports native PDF opening as unavailable outside the Tauri runtime', () => {
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+
+    const bridge = createTauriBridge();
+
+    expect(bridge.canOpenNativePdf?.()).toBe(false);
   });
 });

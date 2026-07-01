@@ -563,6 +563,7 @@ export function ReaderApp({
           onBrowserFileChange={handleBrowserFileChange}
           onReopenRecentDocument={reopenRecentDocument}
           onToggleFavorite={handleToggleFavorite}
+          canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
           onOpenSettings={() => setWorkspaceOverride('settings')}
           onOpenTags={() => setWorkspaceOverride('tags')}
         />
