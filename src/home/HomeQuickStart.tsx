@@ -1,26 +1,11 @@
 import { FileDown, FolderOpen, HardDriveUpload } from 'lucide-react';
-import { useCallback, useRef, type ChangeEventHandler } from 'react';
 
 type HomeQuickStartProps = {
-  onOpenPdf(): void | Promise<void>;
-  onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
+  onOpenPdf(): void;
+  onPickBrowserFile(): void;
 };
 
-export function HomeQuickStart({ onOpenPdf, onBrowserFileChange }: HomeQuickStartProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const openBrowserFilePicker = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
-
-  const handleOpenPdf = useCallback(() => {
-    try {
-      void Promise.resolve(onOpenPdf()).catch(openBrowserFilePicker);
-    } catch {
-      openBrowserFilePicker();
-    }
-  }, [onOpenPdf, openBrowserFilePicker]);
-
+export function HomeQuickStart({ onOpenPdf, onPickBrowserFile }: HomeQuickStartProps) {
   return (
     <section className="home-panel home-quick-start" aria-labelledby="home-quick-start-title">
       <div className="section-heading">
@@ -28,26 +13,18 @@ export function HomeQuickStart({ onOpenPdf, onBrowserFileChange }: HomeQuickStar
         <h2 id="home-quick-start-title">打开或导入 PDF</h2>
       </div>
       <div className="quick-actions">
-        <button type="button" className="primary-action" onClick={handleOpenPdf}>
+        <button type="button" className="primary-action" onClick={onOpenPdf}>
           <FolderOpen size={18} />
           打开本地 PDF
         </button>
         <button
           type="button"
           className="secondary-action file-picker-button"
-          onClick={openBrowserFilePicker}
+          onClick={onPickBrowserFile}
         >
           <FileDown size={18} />
           选择 PDF 文件
         </button>
-        <input
-          ref={fileInputRef}
-          className="file-picker-input"
-          aria-label="选择 PDF 文件"
-          type="file"
-          accept="application/pdf,.pdf"
-          onChange={onBrowserFileChange}
-        />
         <button type="button" className="secondary-action" disabled aria-disabled="true">
           <HardDriveUpload size={18} />
           选择文件夹
