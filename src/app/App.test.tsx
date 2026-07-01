@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PersistenceApi } from '../persistence/persistenceApi';
 import type { ReaderPreferences } from '../preferences/preferencesModels';
@@ -59,6 +59,10 @@ function createDeferred<T>() {
   });
 
   return { promise, resolve, reject };
+}
+
+function mainNavigation() {
+  return within(screen.getByRole('navigation', { name: '主导航' }));
 }
 
 describe('App', () => {
@@ -1258,7 +1262,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(mainNavigation().getByRole('button', { name: '设置' }));
 
     expect(screen.getByRole('heading', { name: '快捷键' })).toBeInTheDocument();
 
@@ -1280,7 +1284,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(mainNavigation().getByRole('button', { name: '设置' }));
     fireEvent.click(screen.getByRole('button', { name: '会话恢复' }));
     fireEvent.click(screen.getByRole('button', { name: '当前文档' }));
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
@@ -1307,7 +1311,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(mainNavigation().getByRole('button', { name: '设置' }));
     fireEvent.click(screen.getByRole('button', { name: '会话恢复' }));
     fireEvent.click(screen.getByRole('button', { name: '当前文档' }));
 

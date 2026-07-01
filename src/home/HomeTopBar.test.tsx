@@ -53,4 +53,18 @@ describe('HomeTopBar', () => {
     expect(props.onOpenBookmarks).toHaveBeenCalledTimes(1);
     expect(props.onOpenSettings).toHaveBeenCalledTimes(1);
   });
+
+  it('opens global search from keyboard activation', () => {
+    const props = renderTopBar();
+    const searchTrigger = screen
+      .getByPlaceholderText('搜索文件、书签、批注...')
+      .closest('.global-search-trigger');
+
+    expect(searchTrigger).toBeInTheDocument();
+
+    fireEvent.keyDown(searchTrigger!, { key: 'Enter' });
+    fireEvent.keyDown(searchTrigger!, { key: ' ' });
+
+    expect(props.onOpenGlobalSearch).toHaveBeenCalledTimes(2);
+  });
 });
