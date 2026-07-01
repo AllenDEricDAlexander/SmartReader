@@ -342,6 +342,21 @@ button:disabled,
   text-align: center;
 }
 
+.global-search-provider-errors {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid rgba(220, 38, 38, 0.18);
+  border-radius: 7px;
+  background: rgba(220, 38, 38, 0.06);
+  color: var(--sr-danger);
+  font-size: 12px;
+}
+
+.global-search-provider-errors p {
+  margin: 0;
+}
+
 .global-search-result {
   width: 100%;
   min-height: 64px;

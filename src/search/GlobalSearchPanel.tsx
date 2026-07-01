@@ -20,6 +20,8 @@ type GlobalSearchPanelProps = {
   favoriteDocuments: FavoriteDocument[];
   bookmarks: PersistedBookmarkRecord[];
   annotations: PersistedAnnotationRecord[];
+  bookmarkError: string | null;
+  annotationError: string | null;
   activeSession: GlobalSearchActiveSession | null;
   onQueryChange(query: string): void;
   onSelectResult(result: GlobalSearchResult): void;
@@ -40,6 +42,8 @@ export function GlobalSearchPanel({
   favoriteDocuments,
   bookmarks,
   annotations,
+  bookmarkError,
+  annotationError,
   activeSession,
   onQueryChange,
   onSelectResult,
@@ -60,6 +64,9 @@ export function GlobalSearchPanel({
     [activeSession, annotations, bookmarks, favoriteDocuments, query, recentDocuments],
   );
   const normalizedQuery = query.trim();
+  const providerErrors = [bookmarkError, annotationError].filter(
+    (error): error is string => Boolean(error),
+  );
 
   useEffect(() => {
     if (!open) {
@@ -145,6 +152,13 @@ export function GlobalSearchPanel({
         </label>
 
         <div className="global-search-results">
+          {providerErrors.length > 0 ? (
+            <div className="global-search-provider-errors" role="status">
+              {providerErrors.map((error) => (
+                <p key={error}>{error}</p>
+              ))}
+            </div>
+          ) : null}
           {!normalizedQuery ? (
             <div className="global-search-empty">
               <FileText size={20} />

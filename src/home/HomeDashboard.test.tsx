@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderApp } from '../test/renderApp';
@@ -51,7 +51,7 @@ describe('HomeDashboard', () => {
     expect(onOpenPdf).not.toHaveBeenCalled();
   });
 
-  it('uses native open when available without async browser fallback', () => {
+  it('falls back to the shared PDF input when native open rejects asynchronously', async () => {
     const onOpenPdf = vi.fn().mockRejectedValue(new Error('native dialog failed'));
     const { clickInput } = renderDashboard({ onOpenPdf, canOpenNativePdf: () => true });
 
@@ -59,7 +59,21 @@ describe('HomeDashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
 
     expect(onOpenPdf).toHaveBeenCalledTimes(2);
-    expect(clickInput).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(clickInput).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('falls back to the shared PDF input when native open throws synchronously', () => {
+    const onOpenPdf = vi.fn(() => {
+      throw new Error('native dialog failed');
+    });
+    const { clickInput } = renderDashboard({ onOpenPdf, canOpenNativePdf: () => true });
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }));
+
+    expect(onOpenPdf).toHaveBeenCalledTimes(1);
+    expect(clickInput).toHaveBeenCalledTimes(1);
   });
 
   it('opens the shared PDF input directly from the quick-start chooser', () => {

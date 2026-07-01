@@ -3,6 +3,7 @@ import type { PersistedAnnotationRecord } from '../persistence/persistenceApi';
 
 type AnnotationManagerWorkspaceProps = {
   annotations: PersistedAnnotationRecord[];
+  error: string | null;
   canOpenAnnotation(annotation: PersistedAnnotationRecord): boolean;
   onClose(): void;
   onOpenAnnotation(annotation: PersistedAnnotationRecord): void;
@@ -10,6 +11,7 @@ type AnnotationManagerWorkspaceProps = {
 
 export function AnnotationManagerWorkspace({
   annotations,
+  error,
   canOpenAnnotation,
   onClose,
   onOpenAnnotation,
@@ -31,7 +33,11 @@ export function AnnotationManagerWorkspace({
             <Highlighter size={18} />
             <h2>全部批注</h2>
           </div>
-          {annotations.length > 0 ? (
+          {error ? (
+            <p className="muted-copy" role="status">
+              {error}
+            </p>
+          ) : annotations.length > 0 ? (
             <div className="workspace-list">
               {annotations.map((annotation) => {
                 const canOpen = canOpenAnnotation(annotation);

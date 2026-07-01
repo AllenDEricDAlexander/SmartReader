@@ -56,9 +56,9 @@ export function HomeDashboard({
     }
 
     try {
-      void Promise.resolve(onOpenPdf()).catch(() => undefined);
+      void Promise.resolve(onOpenPdf()).catch(openBrowserFilePicker);
     } catch {
-      return;
+      openBrowserFilePicker();
     }
   }, [canOpenNativePdf, onOpenPdf, openBrowserFilePicker]);
 

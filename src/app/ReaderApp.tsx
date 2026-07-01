@@ -44,6 +44,9 @@ import { CompareWorkspace } from '../workspaces/CompareWorkspace';
 import { ImportWorkspace } from '../workspaces/ImportWorkspace';
 import type { AppWorkspace, ReaderAppProps } from './appTypes';
 
+const bookmarkProviderErrorMessage = '书签加载失败，请重试。';
+const annotationProviderErrorMessage = '批注加载失败，请重试。';
+
 function mapSessionToPersistedDocument(session: DocumentSession): PersistedDocument {
   return {
     documentKey: session.documentKey,
@@ -89,6 +92,10 @@ export function ReaderApp({
   const [globalSearchAnnotations, setGlobalSearchAnnotations] = useState<
     PersistedAnnotationRecord[]
   >([]);
+  const [globalSearchBookmarkError, setGlobalSearchBookmarkError] = useState<string | null>(null);
+  const [globalSearchAnnotationError, setGlobalSearchAnnotationError] = useState<string | null>(
+    null,
+  );
   const [pendingGlobalSearchJump, setPendingGlobalSearchJump] = useState<{
     documentKey: string;
     page: number;
@@ -259,22 +266,37 @@ export function ReaderApp({
     globalSearchRefreshRequestRef.current += 1;
     const requestId = globalSearchRefreshRequestRef.current;
 
+    setGlobalSearchBookmarkError(null);
+    setGlobalSearchAnnotationError(null);
+
     void persistence
       .listAllBookmarks()
       .then((bookmarks) => {
         if (requestId === globalSearchRefreshRequestRef.current) {
           setGlobalSearchBookmarks(bookmarks);
+          setGlobalSearchBookmarkError(null);
         }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (requestId === globalSearchRefreshRequestRef.current) {
+          setGlobalSearchBookmarks([]);
+          setGlobalSearchBookmarkError(bookmarkProviderErrorMessage);
+        }
+      });
     void persistence
       .listAllAnnotations()
       .then((annotations) => {
         if (requestId === globalSearchRefreshRequestRef.current) {
           setGlobalSearchAnnotations(annotations);
+          setGlobalSearchAnnotationError(null);
         }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (requestId === globalSearchRefreshRequestRef.current) {
+          setGlobalSearchAnnotations([]);
+          setGlobalSearchAnnotationError(annotationProviderErrorMessage);
+        }
+      });
   }, [persistence]);
 
   const openGlobalSearch = useCallback(() => {
@@ -659,6 +681,7 @@ export function ReaderApp({
       {activeWorkspace === 'annotations' ? (
         <AnnotationManagerWorkspace
           annotations={globalSearchAnnotations}
+          error={globalSearchAnnotationError}
           canOpenAnnotation={(annotation) =>
             canOpenRecordPage(
               annotation.documentKey,
@@ -680,6 +703,7 @@ export function ReaderApp({
       {activeWorkspace === 'bookmarks' ? (
         <BookmarkManagerWorkspace
           bookmarks={globalSearchBookmarks}
+          error={globalSearchBookmarkError}
           canOpenBookmark={(bookmark) =>
             canOpenRecordPage(bookmark.documentKey, bookmark.documentPath, bookmark.documentMissing)
           }
@@ -829,6 +853,8 @@ export function ReaderApp({
         favoriteDocuments={favoriteDocuments}
         bookmarks={globalSearchBookmarks}
         annotations={globalSearchAnnotations}
+        bookmarkError={globalSearchBookmarkError}
+        annotationError={globalSearchAnnotationError}
         activeSession={
           activeSession
             ? {

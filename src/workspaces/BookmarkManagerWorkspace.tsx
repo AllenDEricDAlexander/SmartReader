@@ -3,6 +3,7 @@ import type { PersistedBookmarkRecord } from '../persistence/persistenceApi';
 
 type BookmarkManagerWorkspaceProps = {
   bookmarks: PersistedBookmarkRecord[];
+  error: string | null;
   canOpenBookmark(bookmark: PersistedBookmarkRecord): boolean;
   onClose(): void;
   onOpenBookmark(bookmark: PersistedBookmarkRecord): void;
@@ -10,6 +11,7 @@ type BookmarkManagerWorkspaceProps = {
 
 export function BookmarkManagerWorkspace({
   bookmarks,
+  error,
   canOpenBookmark,
   onClose,
   onOpenBookmark,
@@ -31,7 +33,11 @@ export function BookmarkManagerWorkspace({
             <BookMarked size={18} />
             <h2>全部书签</h2>
           </div>
-          {bookmarks.length > 0 ? (
+          {error ? (
+            <p className="muted-copy" role="status">
+              {error}
+            </p>
+          ) : bookmarks.length > 0 ? (
             <div className="workspace-list">
               {bookmarks.map((bookmark) => {
                 const canOpen = canOpenBookmark(bookmark);

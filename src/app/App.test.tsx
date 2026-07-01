@@ -1516,6 +1516,31 @@ describe('App', () => {
     expect(await screen.findByRole('tab', { name: 'import-browser.pdf' })).toBeInTheDocument();
   });
 
+  it('uses the import browser file picker from the primary action when native open rejects', async () => {
+    const inputClick = vi.spyOn(HTMLInputElement.prototype, 'click');
+    const openNativePdf = vi.fn().mockRejectedValue(new Error('native dialog failed'));
+
+    renderApp(
+      <App
+        bridge={{
+          canOpenNativePdf: () => true,
+          openNativePdf,
+          readDesktopPdf: vi.fn(),
+        }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '导入文献' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+
+    await waitFor(() => {
+      expect(inputClick).toHaveBeenCalled();
+    });
+    expect(openNativePdf).toHaveBeenCalledTimes(1);
+  });
+
   it('opens recent documents from the compare workspace', async () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:compare');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
@@ -1700,11 +1725,67 @@ describe('App', () => {
     });
 
     expect(dialog).toBeInTheDocument();
-    expect(
-      await within(dialog).findByRole('button', { name: /research\.pdf/ }),
-    ).toBeInTheDocument();
+    expect(await within(dialog).findByText('打开文件')).toBeInTheDocument();
     expect(persistence.listAllBookmarks).toHaveBeenCalled();
     expect(persistence.listAllAnnotations).toHaveBeenCalled();
+  });
+
+  it('shows provider load errors without hiding successful global search results', async () => {
+    const annotationRecords: PersistedAnnotationRecord[] = [
+      {
+        id: 21,
+        documentKey: 'desktop:/tmp/research.pdf',
+        page: 5,
+        type: 'note',
+        color: '#facc15',
+        text: 'research note',
+        quote: null,
+        areas: [],
+        tagIds: [],
+        createdAt: '2026-07-01T00:00:00Z',
+        updatedAt: '2026-07-01T00:00:00Z',
+        documentDisplayName: 'research.pdf',
+        documentPath: '/tmp/research.pdf',
+        documentMissing: false,
+      },
+    ];
+    const persistence = {
+      ...createEmptyPersistence(),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/research.pdf',
+          path: '/tmp/research.pdf',
+          displayName: 'research.pdf',
+          fileSize: 2048,
+          modifiedAt: '2026-07-01T00:00:00Z',
+          pageCount: 20,
+          lastPage: 4,
+          progress: 0.2,
+          missing: false,
+        },
+      ]),
+      listAllBookmarks: vi.fn().mockRejectedValue(new Error('bookmark provider failed')),
+      listAllAnnotations: vi.fn().mockResolvedValue(annotationRecords),
+      loadReaderSession: vi.fn().mockResolvedValue(null),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('全局搜索'));
+    const dialog = await screen.findByRole('dialog', { name: '全局搜索' });
+    fireEvent.change(within(dialog).getByPlaceholderText('搜索文件、书签、批注...'), {
+      target: { value: 'research' },
+    });
+
+    expect(await within(dialog).findByText('打开文件')).toBeInTheDocument();
+    expect(await within(dialog).findByText('research note')).toBeInTheDocument();
+    expect(within(dialog).getByText('书签加载失败，请重试。')).toBeInTheDocument();
   });
 
   it('opens global search from Meta+K', async () => {
@@ -1936,5 +2017,28 @@ describe('App', () => {
 
     expect(within(dialog).getByText('Fresh bookmark')).toBeInTheDocument();
     expect(within(dialog).queryByText('Old bookmark')).not.toBeInTheDocument();
+  });
+
+  it('shows inline manager errors when persisted records fail to load', async () => {
+    const persistence = {
+      ...createEmptyPersistence(),
+      listAllBookmarks: vi.fn().mockRejectedValue(new Error('bookmark provider failed')),
+      listAllAnnotations: vi.fn().mockRejectedValue(new Error('annotation provider failed')),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '批注管理' }));
+    expect(await screen.findByText('批注加载失败，请重试。')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回首页' }));
+    fireEvent.click(screen.getByRole('button', { name: '书签' }));
+    expect(await screen.findByText('书签加载失败，请重试。')).toBeInTheDocument();
   });
 });

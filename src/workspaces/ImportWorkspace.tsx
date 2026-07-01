@@ -27,9 +27,9 @@ export function ImportWorkspace({
     }
 
     try {
-      void Promise.resolve(onOpenPdf()).catch(() => undefined);
+      void Promise.resolve(onOpenPdf()).catch(openBrowserFilePicker);
     } catch {
-      return;
+      openBrowserFilePicker();
     }
   }, [canOpenNativePdf, onOpenPdf, openBrowserFilePicker]);
 

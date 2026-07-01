@@ -8,7 +8,7 @@ import {
   Search,
   Settings,
 } from 'lucide-react';
-import type { KeyboardEvent } from 'react';
+import { useRef, type KeyboardEvent } from 'react';
 
 type HomeTopBarProps = {
   onOpenPdf(): void;
@@ -29,6 +29,39 @@ export function HomeTopBar({
   onOpenBookmarks,
   onOpenSettings,
 }: HomeTopBarProps) {
+  const mouseDownOnSearchRef = useRef(false);
+  const ignoreNextSearchClickRef = useRef(false);
+  const suppressNextSearchFocusRef = useRef(false);
+
+  const handleSearchFocus = () => {
+    if (suppressNextSearchFocusRef.current) {
+      suppressNextSearchFocusRef.current = false;
+      return;
+    }
+
+    if (mouseDownOnSearchRef.current) {
+      ignoreNextSearchClickRef.current = true;
+      window.setTimeout(() => {
+        mouseDownOnSearchRef.current = false;
+        ignoreNextSearchClickRef.current = false;
+      }, 0);
+    }
+
+    onOpenGlobalSearch();
+    suppressNextSearchFocusRef.current = true;
+  };
+
+  const handleSearchClick = () => {
+    mouseDownOnSearchRef.current = false;
+
+    if (ignoreNextSearchClickRef.current) {
+      ignoreNextSearchClickRef.current = false;
+      return;
+    }
+
+    onOpenGlobalSearch();
+  };
+
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -62,8 +95,12 @@ export function HomeTopBar({
           placeholder="搜索文件、书签、批注..."
           readOnly
           type="search"
-          onClick={onOpenGlobalSearch}
+          onClick={handleSearchClick}
+          onFocus={handleSearchFocus}
           onKeyDown={handleSearchKeyDown}
+          onMouseDown={() => {
+            mouseDownOnSearchRef.current = true;
+          }}
         />
         <kbd>⌘K</kbd>
       </label>
