@@ -28,6 +28,22 @@ describe('CommandRegistry', () => {
     ]);
   });
 
+  it('detects shortcut alias conflicts', () => {
+    const registry = new CommandRegistry();
+    registry.register({
+      id: 'global.search.open',
+      label: 'Global Search',
+      shortcut: 'Meta+K',
+      shortcutAliases: ['Control+K'],
+      run: vi.fn(),
+    });
+    registry.register({ id: 'find.open', label: 'Find', shortcut: 'Control+K', run: vi.fn() });
+
+    expect(registry.getShortcutConflicts()).toEqual([
+      { shortcut: 'Control+K', commandIds: ['global.search.open', 'find.open'] },
+    ]);
+  });
+
   it('defines the MVP shortcuts', () => {
     expect(defaultShortcuts).toMatchObject({
       openFile: 'Meta+O',

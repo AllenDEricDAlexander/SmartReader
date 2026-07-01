@@ -65,6 +65,24 @@ describe('HomeTopBar', () => {
     expect(props.onOpenGlobalSearch).toHaveBeenCalledTimes(1);
   });
 
+  it('reopens from focus after restoring focus from the global search panel', () => {
+    const props = renderTopBar();
+    const searchTrigger = screen.getByRole('searchbox', { name: '全局搜索' });
+
+    fireEvent.focus(searchTrigger);
+    expect(props.onOpenGlobalSearch).toHaveBeenCalledTimes(1);
+
+    props.onOpenGlobalSearch.mockClear();
+    searchTrigger.dataset.globalSearchRestoreFocus = 'true';
+    fireEvent.focus(searchTrigger);
+    expect(props.onOpenGlobalSearch).not.toHaveBeenCalled();
+
+    fireEvent.blur(searchTrigger);
+    fireEvent.focus(searchTrigger);
+
+    expect(props.onOpenGlobalSearch).toHaveBeenCalledTimes(1);
+  });
+
   it('opens global search from input click including when focused', () => {
     const props = renderTopBar();
     const searchTrigger = screen.getByRole('searchbox', { name: '全局搜索' });

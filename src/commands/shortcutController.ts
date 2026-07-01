@@ -52,7 +52,9 @@ export function preventRegisteredShortcutDefault(
 }
 
 function findCommandByShortcut(registry: CommandRegistry, shortcut: string) {
-  return registry.list().find((candidate) => candidate.shortcut === shortcut);
+  return registry
+    .list()
+    .find((candidate) => [candidate.shortcut, ...(candidate.shortcutAliases ?? [])].includes(shortcut));
 }
 
 function normalizeKey(key: string): string {

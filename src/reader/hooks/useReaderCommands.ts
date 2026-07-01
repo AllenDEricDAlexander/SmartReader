@@ -1,5 +1,5 @@
 import { useEffect, useMemo, type Dispatch, type SetStateAction } from 'react';
-import { CommandRegistry, type CommandId } from '../../commands/commandRegistry';
+import { CommandRegistry, defaultShortcuts, type CommandId } from '../../commands/commandRegistry';
 import {
   handleShortcutEvent,
   preventRegisteredShortcutDefault,
@@ -78,6 +78,8 @@ export function useReaderCommands({
       id: 'global.search.open',
       label: 'Global Search',
       shortcut: shortcuts['global.search.open'],
+      shortcutAliases:
+        shortcuts['global.search.open'] === defaultShortcuts.globalSearch ? ['Control+K'] : [],
       run: openGlobalSearch,
     });
     registry.register({

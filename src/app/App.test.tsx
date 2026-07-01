@@ -1945,6 +1945,20 @@ describe('App', () => {
     expect(await screen.findByRole('dialog', { name: '全局搜索' })).toBeInTheDocument();
   });
 
+  it('opens global search from Ctrl+K', async () => {
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+
+    expect(await screen.findByRole('dialog', { name: '全局搜索' })).toBeInTheDocument();
+  });
+
   it('opens a recent file from a global search result', async () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:global-search');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);

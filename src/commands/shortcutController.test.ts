@@ -33,6 +33,28 @@ describe('shortcutController', () => {
     expect(preventDefault).toHaveBeenCalledTimes(1);
   });
 
+  it('runs commands from shortcut aliases', () => {
+    const registry = new CommandRegistry();
+    const run = vi.fn();
+    registry.register({
+      id: 'global.search.open',
+      label: 'Global Search',
+      shortcut: 'Meta+K',
+      shortcutAliases: ['Control+K'],
+      run,
+    });
+    const event = new KeyboardEvent('keydown', {
+      key: 'k',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    expect(handleShortcutEvent(event, registry)).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   it('prevents defaults for registered shortcuts without running commands', () => {
     const registry = new CommandRegistry();
     const run = vi.fn();

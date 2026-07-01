@@ -25,6 +25,7 @@ export type Command = {
   id: CommandId;
   label: string;
   shortcut: string | null;
+  shortcutAliases?: string[];
   run: () => void;
 };
 
@@ -83,11 +84,14 @@ export class CommandRegistry {
     const byShortcut = new Map<string, CommandId[]>();
 
     for (const command of this.commands.values()) {
-      if (!command.shortcut) {
-        continue;
+      const commandShortcuts = new Set(
+        [command.shortcut, ...(command.shortcutAliases ?? [])].filter(
+          (shortcut): shortcut is string => Boolean(shortcut),
+        ),
+      );
+      for (const shortcut of commandShortcuts) {
+        byShortcut.set(shortcut, [...(byShortcut.get(shortcut) ?? []), command.id]);
       }
-
-      byShortcut.set(command.shortcut, [...(byShortcut.get(command.shortcut) ?? []), command.id]);
     }
 
     return [...byShortcut.entries()]

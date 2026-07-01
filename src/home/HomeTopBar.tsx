@@ -38,6 +38,7 @@ export function HomeTopBar({
   const handleSearchFocus = (event: FocusEvent<HTMLInputElement>) => {
     if (event.currentTarget.dataset[focusRestoreMarker] === 'true') {
       delete event.currentTarget.dataset[focusRestoreMarker];
+      suppressNextSearchFocusRef.current = false;
       return;
     }
 
