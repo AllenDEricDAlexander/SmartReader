@@ -645,6 +645,7 @@ export function ReaderApp({
         <ImportWorkspace
           onOpenPdf={openImportPdf}
           onBrowserFileChange={handleImportBrowserFileChange}
+          canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
           onClose={closeToolWorkspace}
         />
       ) : null}

@@ -1439,6 +1439,83 @@ describe('App', () => {
     expect(screen.getByLabelText('设置工作区')).toBeInTheDocument();
   });
 
+  it('keeps the import workspace hidden file input out of tab order', () => {
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '导入文献' }));
+
+    expect(screen.getByLabelText('导入 PDF 文件')).toHaveAttribute('tabIndex', '-1');
+  });
+
+  it('opens a native PDF from the import workspace primary action when native dialogs are available', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:import-native');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/import-native.pdf', name: 'import-native.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-07-01T00:00:00Z',
+    });
+
+    renderApp(
+      <App
+        bridge={{
+          canOpenNativePdf: () => true,
+          openNativePdf,
+          readDesktopPdf: vi.fn(),
+        }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '导入文献' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+
+    await waitFor(() => {
+      expect(openNativePdf).toHaveBeenCalledTimes(1);
+    });
+    expect(await screen.findByRole('tab', { name: 'import-native.pdf' })).toBeInTheDocument();
+  });
+
+  it('uses the import browser file picker from the primary action when native dialogs are unavailable', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:import-browser');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const inputClick = vi.spyOn(HTMLInputElement.prototype, 'click');
+    const openNativePdf = vi.fn();
+    const file = new File(['%PDF-1.7'], 'import-browser.pdf', { type: 'application/pdf' });
+
+    renderApp(
+      <App
+        bridge={{
+          canOpenNativePdf: () => false,
+          openNativePdf,
+          readDesktopPdf: vi.fn(),
+        }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '导入文献' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+
+    expect(inputClick).toHaveBeenCalled();
+    expect(openNativePdf).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('导入 PDF 文件'), {
+      target: { files: [file] },
+    });
+
+    expect(await screen.findByRole('tab', { name: 'import-browser.pdf' })).toBeInTheDocument();
+  });
+
   it('opens recent documents from the compare workspace', async () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:compare');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);

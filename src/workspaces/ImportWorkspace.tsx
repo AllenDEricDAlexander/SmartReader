@@ -4,12 +4,14 @@ import { useCallback, useRef, type ChangeEventHandler } from 'react';
 type ImportWorkspaceProps = {
   onOpenPdf(): void | Promise<void>;
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
+  canOpenNativePdf(): boolean;
   onClose(): void;
 };
 
 export function ImportWorkspace({
   onOpenPdf,
   onBrowserFileChange,
+  canOpenNativePdf,
   onClose,
 }: ImportWorkspaceProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -17,6 +19,19 @@ export function ImportWorkspace({
   const openBrowserFilePicker = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
+
+  const handleOpenPdf = useCallback(() => {
+    if (!canOpenNativePdf()) {
+      openBrowserFilePicker();
+      return;
+    }
+
+    try {
+      void Promise.resolve(onOpenPdf()).catch(() => undefined);
+    } catch {
+      return;
+    }
+  }, [canOpenNativePdf, onOpenPdf, openBrowserFilePicker]);
 
   return (
     <section className="tool-workspace" aria-label="文献导入工作区">
@@ -40,7 +55,7 @@ export function ImportWorkspace({
             <button
               type="button"
               className="primary-action"
-              onClick={() => void onOpenPdf()}
+              onClick={handleOpenPdf}
             >
               <FolderOpen size={18} />
               打开本地 PDF
