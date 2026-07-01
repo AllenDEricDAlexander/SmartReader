@@ -4,6 +4,7 @@ export type CommandId =
   | 'find.open'
   | 'find.next'
   | 'find.previous'
+  | 'global.search.open'
   | 'sidebar.toggle'
   | 'zoom.in'
   | 'zoom.out'
@@ -38,6 +39,7 @@ export const defaultShortcuts = {
   find: 'Meta+F',
   findNext: 'Meta+G',
   findPrevious: 'Shift+Meta+G',
+  globalSearch: 'Meta+K',
   toggleSidebar: 'Meta+B',
   zoomIn: 'Meta+=',
   zoomOut: 'Meta+-',

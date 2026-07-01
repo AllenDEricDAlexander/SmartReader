@@ -10,6 +10,7 @@ type UseReaderCommandsInput = {
   addBookmarkForActivePage(): void | Promise<void>;
   addPageNote(): void | Promise<void>;
   closeActiveTab(): void;
+  openGlobalSearch(): void;
   openPdf(): void | Promise<void>;
   selectNextSession(): void;
   selectPreviousSession(): void;
@@ -26,6 +27,7 @@ export function useReaderCommands({
   addBookmarkForActivePage,
   addPageNote,
   closeActiveTab,
+  openGlobalSearch,
   openPdf,
   selectNextSession,
   selectPreviousSession,
@@ -66,6 +68,12 @@ export function useReaderCommands({
       label: 'Find Previous',
       shortcut: shortcuts['find.previous'],
       run: () => activeViewerController.searchPrevious(),
+    });
+    registry.register({
+      id: 'global.search.open',
+      label: 'Global Search',
+      shortcut: shortcuts['global.search.open'],
+      run: openGlobalSearch,
     });
     registry.register({
       id: 'sidebar.toggle',
@@ -145,6 +153,7 @@ export function useReaderCommands({
     addBookmarkForActivePage,
     addPageNote,
     closeActiveTab,
+    openGlobalSearch,
     openPdf,
     selectNextSession,
     selectPreviousSession,

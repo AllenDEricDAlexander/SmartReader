@@ -1401,4 +1401,107 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: '快捷键' })).toBeInTheDocument();
     expect(screen.getByText('当前没有快捷键冲突。')).toBeInTheDocument();
   });
+
+  it('opens global search from the top-bar search box and shows recent file results', async () => {
+    const persistence = {
+      ...createEmptyPersistence(),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/research.pdf',
+          path: '/tmp/research.pdf',
+          displayName: 'research.pdf',
+          fileSize: 2048,
+          modifiedAt: '2026-07-01T00:00:00Z',
+          pageCount: 20,
+          lastPage: 4,
+          progress: 0.2,
+          missing: false,
+        },
+      ]),
+      loadReaderSession: vi.fn().mockResolvedValue(null),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('全局搜索'));
+    const dialog = await screen.findByRole('dialog', { name: '全局搜索' });
+    fireEvent.change(within(dialog).getByPlaceholderText('搜索文件、书签、批注...'), {
+      target: { value: 'research' },
+    });
+
+    expect(dialog).toBeInTheDocument();
+    expect(
+      await within(dialog).findByRole('button', { name: /research\.pdf/ }),
+    ).toBeInTheDocument();
+    expect(persistence.listAllBookmarks).toHaveBeenCalled();
+    expect(persistence.listAllAnnotations).toHaveBeenCalled();
+  });
+
+  it('opens global search from Meta+K', async () => {
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+
+    expect(await screen.findByRole('dialog', { name: '全局搜索' })).toBeInTheDocument();
+  });
+
+  it('opens a recent file from a global search result', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:global-search');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const readDesktopPdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/research.pdf', name: 'research.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-07-01T00:00:00Z',
+    });
+    const persistence = {
+      ...createEmptyPersistence(),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/research.pdf',
+          path: '/tmp/research.pdf',
+          displayName: 'research.pdf',
+          fileSize: 2048,
+          modifiedAt: '2026-07-01T00:00:00Z',
+          pageCount: 20,
+          lastPage: 4,
+          progress: 0.2,
+          missing: false,
+        },
+      ]),
+      loadReaderSession: vi.fn().mockResolvedValue(null),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: '全局搜索' });
+    fireEvent.change(within(dialog).getByPlaceholderText('搜索文件、书签、批注...'), {
+      target: { value: 'research' },
+    });
+    fireEvent.click(await within(dialog).findByRole('button', { name: /research\.pdf/ }));
+
+    await waitFor(() => {
+      expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/research.pdf');
+    });
+    expect(await screen.findByRole('tab', { name: 'research.pdf' })).toBeInTheDocument();
+  });
 });

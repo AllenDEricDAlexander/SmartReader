@@ -124,6 +124,7 @@ describe('persistenceApi', () => {
         'find.open': 'Meta+F',
         'find.next': 'Meta+G',
         'find.previous': 'Shift+Meta+G',
+        'global.search.open': 'Meta+K',
         'sidebar.toggle': 'Meta+B',
         'zoom.in': 'Meta+=',
         'zoom.out': 'Meta+-',

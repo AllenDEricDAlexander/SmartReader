@@ -1,0 +1,147 @@
+import { FileText, Search, X } from 'lucide-react';
+import { useEffect, useMemo, useRef } from 'react';
+import type {
+  PersistedAnnotationRecord,
+  PersistedBookmarkRecord,
+  PersistedDocument,
+} from '../persistence/persistenceApi';
+import type { FavoriteDocument } from '../favorites/favoriteModels';
+import {
+  buildGlobalSearchResults,
+  type GlobalSearchActiveSession,
+  type GlobalSearchResult,
+  type GlobalSearchSource,
+} from './globalSearch';
+
+type GlobalSearchPanelProps = {
+  open: boolean;
+  query: string;
+  recentDocuments: PersistedDocument[];
+  favoriteDocuments: FavoriteDocument[];
+  bookmarks: PersistedBookmarkRecord[];
+  annotations: PersistedAnnotationRecord[];
+  activeSession: GlobalSearchActiveSession | null;
+  onQueryChange(query: string): void;
+  onSelectResult(result: GlobalSearchResult): void;
+  onClose(): void;
+};
+
+const sourceLabels: Record<GlobalSearchSource, string> = {
+  file: '文件',
+  bookmark: '书签',
+  annotation: '批注',
+  fullText: '全文',
+};
+
+export function GlobalSearchPanel({
+  open,
+  query,
+  recentDocuments,
+  favoriteDocuments,
+  bookmarks,
+  annotations,
+  activeSession,
+  onQueryChange,
+  onSelectResult,
+  onClose,
+}: GlobalSearchPanelProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const results = useMemo(
+    () =>
+      buildGlobalSearchResults({
+        query,
+        recentDocuments,
+        favoriteDocuments,
+        bookmarks,
+        annotations,
+        activeSession,
+      }),
+    [activeSession, annotations, bookmarks, favoriteDocuments, query, recentDocuments],
+  );
+  const normalizedQuery = query.trim();
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    inputRef.current?.focus();
+  }, [open]);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="global-search-overlay" role="presentation" onMouseDown={onClose}>
+      <section
+        aria-label="全局搜索"
+        aria-modal="true"
+        className="global-search-dialog"
+        role="dialog"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="global-search-header">
+          <div>
+            <p>全局搜索</p>
+            <h2>全局搜索</h2>
+          </div>
+          <button type="button" aria-label="关闭全局搜索" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </header>
+
+        <label className="global-search-input">
+          <Search size={18} />
+          <input
+            ref={inputRef}
+            aria-label="全局搜索关键词"
+            placeholder="搜索文件、书签、批注..."
+            type="search"
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                onClose();
+              }
+            }}
+          />
+        </label>
+
+        <div className="global-search-results">
+          {!normalizedQuery ? (
+            <div className="global-search-empty">
+              <FileText size={20} />
+              <span>输入关键词搜索文件、书签、批注和当前文档全文。</span>
+            </div>
+          ) : results.length === 0 ? (
+            <div className="global-search-empty">
+              <FileText size={20} />
+              <span>没有找到匹配结果。</span>
+            </div>
+          ) : (
+            results.map((result) => (
+              <button
+                key={result.id}
+                type="button"
+                className="global-search-result"
+                disabled={result.missing}
+                onClick={() => onSelectResult(result)}
+              >
+                <span className={`global-search-source ${result.source}`}>
+                  {sourceLabels[result.source]}
+                </span>
+                <span className="global-search-result-main">
+                  <strong>{result.title}</strong>
+                  <span>{result.subtitle}</span>
+                </span>
+                <span className="global-search-action">{result.actionLabel}</span>
+              </button>
+            ))
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}

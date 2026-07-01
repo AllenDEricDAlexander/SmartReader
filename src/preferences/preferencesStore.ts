@@ -11,6 +11,7 @@ export const defaultReaderPreferences: ReaderPreferences = {
     'find.open': defaultShortcuts.find,
     'find.next': defaultShortcuts.findNext,
     'find.previous': defaultShortcuts.findPrevious,
+    'global.search.open': defaultShortcuts.globalSearch,
     'sidebar.toggle': defaultShortcuts.toggleSidebar,
     'zoom.in': defaultShortcuts.zoomIn,
     'zoom.out': defaultShortcuts.zoomOut,

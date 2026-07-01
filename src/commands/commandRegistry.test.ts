@@ -47,6 +47,7 @@ describe('CommandRegistry', () => {
       previousTab: 'Shift+Control+Tab',
       addBookmark: 'Meta+D',
       addNote: 'Shift+Meta+N',
+      globalSearch: 'Meta+K',
       openPreferences: 'Meta+,',
     });
   });

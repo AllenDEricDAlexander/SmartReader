@@ -9,7 +9,11 @@ import {
 import type { DocumentSession } from '../documents/documentModels';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import { HomeDashboard } from '../home/HomeDashboard';
-import type { PersistedDocument } from '../persistence/persistenceApi';
+import type {
+  PersistedAnnotationRecord,
+  PersistedBookmarkRecord,
+  PersistedDocument,
+} from '../persistence/persistenceApi';
 import { defaultReaderPreferences, mergeReaderPreferences } from '../preferences/preferencesStore';
 import { SettingsWorkspace } from '../settings/SettingsWorkspace';
 import type { Tag } from '../tags/tagModels';
@@ -29,6 +33,8 @@ import { ReaderStatusBar } from '../reader/ReaderStatusBar';
 import { ReaderTabs } from '../reader/ReaderTabs';
 import { ReaderToolbar } from '../reader/ReaderToolbar';
 import { ReaderWorkspace } from '../reader/ReaderWorkspace';
+import { GlobalSearchPanel } from '../search/GlobalSearchPanel';
+import type { GlobalSearchResult } from '../search/globalSearch';
 import { PdfViewerBridge } from '../viewer/PdfViewerBridge';
 import { ViewerController } from '../viewer/viewerController';
 import type { ViewerSource } from '../viewer/viewerTypes';
@@ -73,6 +79,16 @@ export function ReaderApp({
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [recentDocuments, setRecentDocuments] = useState<PersistedDocument[]>([]);
   const [favoriteDocuments, setFavoriteDocuments] = useState<FavoriteDocument[]>([]);
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [globalSearchBookmarks, setGlobalSearchBookmarks] = useState<PersistedBookmarkRecord[]>([]);
+  const [globalSearchAnnotations, setGlobalSearchAnnotations] = useState<
+    PersistedAnnotationRecord[]
+  >([]);
+  const [pendingGlobalSearchJump, setPendingGlobalSearchJump] = useState<{
+    documentKey: string;
+    page: number;
+  } | null>(null);
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<number | null>(null);
   const tagsMutatedRef = useRef(false);
@@ -234,12 +250,29 @@ export function ReaderApp({
     setViewerSource,
   });
 
+  const refreshGlobalSearchCollections = useCallback(() => {
+    void persistence
+      .listAllBookmarks()
+      .then((bookmarks) => setGlobalSearchBookmarks(bookmarks))
+      .catch(() => undefined);
+    void persistence
+      .listAllAnnotations()
+      .then((annotations) => setGlobalSearchAnnotations(annotations))
+      .catch(() => undefined);
+  }, [persistence]);
+
+  const openGlobalSearch = useCallback(() => {
+    setGlobalSearchOpen(true);
+    refreshGlobalSearchCollections();
+  }, [refreshGlobalSearchCollections]);
+
   const { commandRegistry } = useReaderCommands({
     activeSession,
     activeViewerController,
     addBookmarkForActivePage,
     addPageNote,
     closeActiveTab,
+    openGlobalSearch,
     openPdf,
     selectNextSession: selectNextReaderSession,
     selectPreviousSession: selectPreviousReaderSession,
@@ -367,6 +400,67 @@ export function ReaderApp({
     setSearchText('');
     runSearch('');
   }, [runSearch]);
+
+  const handleGlobalSearchResult = useCallback(
+    async (result: GlobalSearchResult) => {
+      setGlobalSearchOpen(false);
+
+      if (result.source === 'fullText' && result.query) {
+        setSearchText(result.query);
+        runSearch(result.query);
+        activeViewerController.openSearch();
+        return;
+      }
+
+      if (!result.documentKey || result.missing) {
+        return;
+      }
+
+      if (activeSession?.documentKey === result.documentKey) {
+        if (result.page) {
+          jumpToActiveDocumentPage(result.page);
+        }
+        return;
+      }
+
+      const recentDocument = recentDocuments.find(
+        (document) =>
+          document.documentKey === result.documentKey ||
+          (Boolean(result.path) && document.path === result.path),
+      );
+
+      if (!recentDocument) {
+        return;
+      }
+
+      await reopenRecentDocument(recentDocument);
+
+      if (result.page) {
+        setPendingGlobalSearchJump({ documentKey: result.documentKey, page: result.page });
+      }
+    },
+    [
+      activeSession,
+      activeViewerController,
+      jumpToActiveDocumentPage,
+      recentDocuments,
+      reopenRecentDocument,
+      runSearch,
+    ],
+  );
+
+  useEffect(() => {
+    if (
+      !pendingGlobalSearchJump ||
+      !activeSession ||
+      activeSession.documentKey !== pendingGlobalSearchJump.documentKey
+    ) {
+      return;
+    }
+
+    jumpToActiveDocumentPage(pendingGlobalSearchJump.page);
+    setPendingGlobalSearchJump(null);
+  }, [activeSession, jumpToActiveDocumentPage, pendingGlobalSearchJump]);
 
   const handleSavePreferences = useCallback(
     async (preferences: typeof readerPreferences) => {
@@ -564,10 +658,30 @@ export function ReaderApp({
           onReopenRecentDocument={reopenRecentDocument}
           onToggleFavorite={handleToggleFavorite}
           canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
+          onOpenGlobalSearch={openGlobalSearch}
           onOpenSettings={() => setWorkspaceOverride('settings')}
           onOpenTags={() => setWorkspaceOverride('tags')}
         />
       ) : null}
+      <GlobalSearchPanel
+        open={globalSearchOpen}
+        query={globalSearchQuery}
+        recentDocuments={recentDocuments}
+        favoriteDocuments={favoriteDocuments}
+        bookmarks={globalSearchBookmarks}
+        annotations={globalSearchAnnotations}
+        activeSession={
+          activeSession
+            ? {
+                documentKey: activeSession.documentKey,
+                title: activeSession.title,
+              }
+            : null
+        }
+        onQueryChange={setGlobalSearchQuery}
+        onSelectResult={(result) => void handleGlobalSearchResult(result)}
+        onClose={() => setGlobalSearchOpen(false)}
+      />
     </main>
   );
 }
