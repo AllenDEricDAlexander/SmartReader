@@ -34,6 +34,7 @@ const sourceLabels: Record<GlobalSearchSource, string> = {
   annotation: '批注',
   fullText: '全文',
 };
+const focusRestoreMarker = 'globalSearchRestoreFocus';
 
 export function GlobalSearchPanel({
   open,
@@ -82,7 +83,13 @@ export function GlobalSearchPanel({
       previousFocusRef.current = null;
 
       if (previousFocus?.isConnected) {
+        previousFocus.dataset[focusRestoreMarker] = 'true';
         previousFocus.focus();
+        queueMicrotask(() => {
+          if (previousFocus.dataset[focusRestoreMarker] === 'true') {
+            delete previousFocus.dataset[focusRestoreMarker];
+          }
+        });
       }
     };
   }, [open]);

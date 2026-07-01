@@ -8,7 +8,7 @@ import {
   Search,
   Settings,
 } from 'lucide-react';
-import { useRef, type KeyboardEvent, type MouseEvent } from 'react';
+import { useRef, type FocusEvent, type KeyboardEvent, type MouseEvent } from 'react';
 
 type HomeTopBarProps = {
   onOpenPdf(): void;
@@ -19,6 +19,8 @@ type HomeTopBarProps = {
   onOpenBookmarks(): void;
   onOpenSettings(): void;
 };
+
+const focusRestoreMarker = 'globalSearchRestoreFocus';
 
 export function HomeTopBar({
   onOpenPdf,
@@ -33,7 +35,12 @@ export function HomeTopBar({
   const ignoreNextSearchClickRef = useRef(false);
   const suppressNextSearchFocusRef = useRef(false);
 
-  const handleSearchFocus = () => {
+  const handleSearchFocus = (event: FocusEvent<HTMLInputElement>) => {
+    if (event.currentTarget.dataset[focusRestoreMarker] === 'true') {
+      delete event.currentTarget.dataset[focusRestoreMarker];
+      return;
+    }
+
     if (suppressNextSearchFocusRef.current) {
       suppressNextSearchFocusRef.current = false;
       return;

@@ -148,17 +148,19 @@ export function useDocumentOpening({
   const reopenRecentDocument = useCallback(
     async (document: PersistedDocument) => {
       if (!document.path) {
-        return;
+        return false;
       }
 
       try {
         await openDesktopPath(document.path);
+        return true;
       } catch (error) {
         setRecentDocuments((current) =>
           current.map((item) =>
             item.documentKey === document.documentKey ? { ...item, missing: true } : item,
           ),
         );
+        return false;
       }
     },
     [openDesktopPath, setRecentDocuments],

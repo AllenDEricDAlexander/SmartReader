@@ -460,6 +460,7 @@ export function ReaderApp({
       setGlobalSearchOpen(false);
 
       if (result.source === 'fullText' && result.query) {
+        setWorkspaceOverride(null);
         setSearchText(result.query);
         runSearch(result.query);
         activeViewerController.openSearch();
@@ -471,6 +472,7 @@ export function ReaderApp({
       }
 
       if (activeSession?.documentKey === result.documentKey) {
+        setWorkspaceOverride(null);
         if (result.page) {
           jumpToActiveDocumentPage(result.page);
         }
@@ -483,11 +485,17 @@ export function ReaderApp({
           (Boolean(result.path) && document.path === result.path),
       );
 
-      if (!recentDocument) {
+      if (!recentDocument?.path) {
         return;
       }
 
-      await reopenRecentDocument(recentDocument);
+      const opened = await reopenRecentDocument(recentDocument);
+
+      if (!opened) {
+        return;
+      }
+
+      setWorkspaceOverride(null);
 
       if (result.page) {
         setPendingGlobalSearchJump({ documentKey: result.documentKey, page: result.page });
@@ -776,7 +784,7 @@ export function ReaderApp({
               searchText={searchText}
               lastSearchCommand={lastSearchCommand}
               onJumpToPage={jumpToActiveDocumentPage}
-              onReopenRecentDocument={reopenRecentDocument}
+              onReopenRecentDocument={(document) => void reopenRecentDocument(document)}
               onAddBookmark={addBookmarkForActivePage}
               onAddNote={addPageNote}
               onSelectAnnotation={(annotation) => setSelectedAnnotationId(annotation.id)}
@@ -834,7 +842,7 @@ export function ReaderApp({
           favoriteDocuments={favoriteDocuments}
           onOpenPdf={openPdf}
           onBrowserFileChange={handleBrowserFileChange}
-          onReopenRecentDocument={reopenRecentDocument}
+          onReopenRecentDocument={(document) => void reopenRecentDocument(document)}
           onToggleFavorite={handleToggleFavorite}
           canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
           onOpenGlobalSearch={openGlobalSearch}

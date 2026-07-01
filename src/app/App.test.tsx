@@ -1957,6 +1957,140 @@ describe('App', () => {
     expect(trigger).toHaveFocus();
   });
 
+  it('does not reopen global search after Meta+K closes back to a focused search trigger', async () => {
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    const trigger = screen.getByLabelText('全局搜索');
+
+    trigger.focus();
+    const focusDialog = await screen.findByRole('dialog', { name: '全局搜索' });
+    fireEvent.keyDown(focusDialog, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '全局搜索' })).not.toBeInTheDocument();
+    });
+    expect(trigger).toHaveFocus();
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const keyboardDialog = await screen.findByRole('dialog', { name: '全局搜索' });
+    fireEvent.keyDown(keyboardDialog, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '全局搜索' })).not.toBeInTheDocument();
+    });
+    expect(trigger).toHaveFocus();
+  });
+
+  it('returns to the reader workspace after opening a global search result from settings', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:settings-global-search');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const readDesktopPdf = vi.fn().mockResolvedValue({
+      source: {
+        kind: 'desktop-path',
+        path: '/tmp/settings-result.pdf',
+        name: 'settings-result.pdf',
+      },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-07-01T00:00:00Z',
+    });
+    const persistence = {
+      ...createEmptyPersistence(),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/settings-result.pdf',
+          path: '/tmp/settings-result.pdf',
+          displayName: 'settings-result.pdf',
+          fileSize: 2048,
+          modifiedAt: '2026-07-01T00:00:00Z',
+          pageCount: 20,
+          lastPage: 4,
+          progress: 0.2,
+          missing: false,
+        },
+      ]),
+      loadReaderSession: vi.fn().mockResolvedValue(null),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
+    expect(await screen.findByLabelText('设置工作区')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: '全局搜索' });
+    fireEvent.change(within(dialog).getByPlaceholderText('搜索文件、书签、批注...'), {
+      target: { value: 'settings-result' },
+    });
+    fireEvent.click(await within(dialog).findByRole('button', { name: /settings-result\.pdf/ }));
+
+    await waitFor(() => {
+      expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/settings-result.pdf');
+    });
+    expect(await screen.findByRole('tab', { name: 'settings-result.pdf' })).toBeInTheDocument();
+    expect(screen.getByLabelText('阅读工作区')).toBeInTheDocument();
+    expect(screen.queryByLabelText('设置工作区')).not.toBeInTheDocument();
+  });
+
+  it('keeps a tool workspace visible when a global search result cannot reopen', async () => {
+    const persistence = {
+      ...createEmptyPersistence(),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/missing-from-search.pdf',
+          path: '/tmp/missing-from-search.pdf',
+          displayName: 'missing-from-search.pdf',
+          fileSize: 2048,
+          modifiedAt: '2026-07-01T00:00:00Z',
+          pageCount: 20,
+          lastPage: 4,
+          progress: 0.2,
+          missing: false,
+        },
+      ]),
+      loadReaderSession: vi.fn().mockResolvedValue(null),
+    };
+    const readDesktopPdf = vi.fn().mockRejectedValue(new Error('file does not exist'));
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
+    expect(await screen.findByLabelText('设置工作区')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: '全局搜索' });
+    fireEvent.change(within(dialog).getByPlaceholderText('搜索文件、书签、批注...'), {
+      target: { value: 'missing-from-search' },
+    });
+    fireEvent.click(
+      await within(dialog).findByRole('button', { name: /missing-from-search\.pdf/ }),
+    );
+
+    await waitFor(() => {
+      expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/missing-from-search.pdf');
+    });
+    expect(screen.getByLabelText('设置工作区')).toBeInTheDocument();
+    expect(screen.queryByLabelText('阅读工作区')).not.toBeInTheDocument();
+  });
+
   it('keeps focus inside global search when tabbing past dialog controls', async () => {
     renderApp(
       <App
