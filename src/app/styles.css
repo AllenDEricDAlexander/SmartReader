@@ -192,14 +192,23 @@ button:disabled,
   outline-offset: 2px;
 }
 
-.global-search-copy {
+.global-search-trigger:focus-within {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  outline-offset: 2px;
+}
+
+.global-search-trigger input {
   min-width: 0;
   width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
   color: var(--sr-text);
   overflow: hidden;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .global-search-trigger kbd {

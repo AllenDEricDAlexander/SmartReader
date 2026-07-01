@@ -35,7 +35,7 @@ export function createTauriBridge(
 ): TauriBridge {
   const open = dependencies.open ?? tauriOpen;
   const invoke = dependencies.invoke ?? tauriInvoke;
-  const hasInjectedDependencies = Boolean(dependencies.open || dependencies.invoke);
+  const hasInjectedDependencies = Boolean(dependencies.open && dependencies.invoke);
 
   return {
     canOpenNativePdf() {

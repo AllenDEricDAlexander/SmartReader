@@ -8,7 +8,7 @@ import {
   Search,
   Settings,
 } from 'lucide-react';
-import type { KeyboardEvent } from 'react';
+import type { KeyboardEvent, MouseEvent } from 'react';
 
 type HomeTopBarProps = {
   onOpenPdf(): void;
@@ -29,7 +29,15 @@ export function HomeTopBar({
   onOpenBookmarks,
   onOpenSettings,
 }: HomeTopBarProps) {
-  const handleSearchKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+  const handleSearchClick = (event: MouseEvent<HTMLInputElement>) => {
+    if (document.activeElement === event.currentTarget) {
+      return;
+    }
+
+    onOpenGlobalSearch();
+  };
+
+  const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       onOpenGlobalSearch();
@@ -55,16 +63,19 @@ export function HomeTopBar({
         </button>
       </div>
 
-      <button
-        type="button"
-        className="global-search-trigger"
-        onClick={onOpenGlobalSearch}
-        onKeyDown={handleSearchKeyDown}
-      >
+      <label className="global-search-trigger">
         <Search size={18} />
-        <span className="global-search-copy">搜索文件、书签、批注...</span>
+        <input
+          aria-label="全局搜索"
+          placeholder="搜索文件、书签、批注..."
+          readOnly
+          type="search"
+          onClick={handleSearchClick}
+          onFocus={onOpenGlobalSearch}
+          onKeyDown={handleSearchKeyDown}
+        />
         <kbd>⌘K</kbd>
-      </button>
+      </label>
 
       <nav className="top-shortcuts" aria-label="全局快捷入口">
         <button type="button" onClick={onOpenImport}>

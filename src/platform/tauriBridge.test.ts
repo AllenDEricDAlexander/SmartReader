@@ -44,4 +44,14 @@ describe('tauriBridge', () => {
 
     expect(bridge.canOpenNativePdf?.()).toBe(false);
   });
+
+  it('requires both injected native dependencies for test-time availability', () => {
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+
+    const bridge = createTauriBridge({
+      open: vi.fn().mockResolvedValue(null),
+    });
+
+    expect(bridge.canOpenNativePdf?.()).toBe(false);
+  });
 });

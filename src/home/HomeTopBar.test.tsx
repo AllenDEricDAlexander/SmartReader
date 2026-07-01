@@ -25,9 +25,10 @@ describe('HomeTopBar', () => {
     expect(screen.getByText('SmartReader')).toBeInTheDocument();
     expect(screen.getByText('本地优先的 PDF 阅读器')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '打开文件' })).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: /搜索文件、书签、批注\.\.\./ }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: '全局搜索' })).toHaveAttribute(
+      'placeholder',
+      '搜索文件、书签、批注...',
+    );
     expect(screen.getByText('⌘K')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '导入文献' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '对比阅读' })).toBeInTheDocument();
@@ -40,7 +41,7 @@ describe('HomeTopBar', () => {
     const props = renderTopBar();
 
     fireEvent.click(screen.getByRole('button', { name: '打开文件' }));
-    fireEvent.click(screen.getByRole('button', { name: /搜索文件、书签、批注\.\.\./ }));
+    fireEvent.click(screen.getByRole('searchbox', { name: '全局搜索' }));
     fireEvent.click(screen.getByRole('button', { name: '导入文献' }));
     fireEvent.click(screen.getByRole('button', { name: '对比阅读' }));
     fireEvent.click(screen.getByRole('button', { name: '批注管理' }));
@@ -56,11 +57,17 @@ describe('HomeTopBar', () => {
     expect(props.onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
+  it('opens global search from input focus', () => {
+    const props = renderTopBar();
+
+    fireEvent.focus(screen.getByRole('searchbox', { name: '全局搜索' }));
+
+    expect(props.onOpenGlobalSearch).toHaveBeenCalledTimes(1);
+  });
+
   it('opens global search from keyboard activation', () => {
     const props = renderTopBar();
-    const searchTrigger = screen.getByRole('button', {
-      name: /搜索文件、书签、批注\.\.\./,
-    });
+    const searchTrigger = screen.getByRole('searchbox', { name: '全局搜索' });
 
     expect(searchTrigger).toBeInTheDocument();
 
