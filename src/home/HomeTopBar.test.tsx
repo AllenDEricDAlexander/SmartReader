@@ -57,12 +57,23 @@ describe('HomeTopBar', () => {
     expect(props.onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
-  it('opens global search from input focus', () => {
+  it('does not open global search from input focus alone', () => {
     const props = renderTopBar();
 
     fireEvent.focus(screen.getByRole('searchbox', { name: '全局搜索' }));
 
-    expect(props.onOpenGlobalSearch).toHaveBeenCalledTimes(1);
+    expect(props.onOpenGlobalSearch).not.toHaveBeenCalled();
+  });
+
+  it('opens global search from input click including when focused', () => {
+    const props = renderTopBar();
+    const searchTrigger = screen.getByRole('searchbox', { name: '全局搜索' });
+
+    fireEvent.click(searchTrigger);
+    fireEvent.focus(searchTrigger);
+    fireEvent.click(searchTrigger);
+
+    expect(props.onOpenGlobalSearch).toHaveBeenCalledTimes(2);
   });
 
   it('opens global search from keyboard activation', () => {
