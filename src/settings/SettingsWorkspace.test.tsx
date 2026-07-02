@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { CommandRegistry } from '../commands/commandRegistry';
 import { defaultReaderPreferences } from '../preferences/preferencesStore';
@@ -51,5 +51,26 @@ describe('SettingsWorkspace', () => {
 
     expect(screen.getByRole('heading', { name: '缓存' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '快捷键' })).not.toBeInTheDocument();
+  });
+
+  it('keeps manual section navigation when the initial section value is unchanged', () => {
+    const { rerender } = renderSettingsWorkspace('cache');
+
+    fireEvent.click(screen.getByRole('button', { name: '快捷键' }));
+
+    rerender(
+      <SettingsWorkspace
+        commandRegistry={new CommandRegistry()}
+        preferences={defaultReaderPreferences}
+        openSessionCount={2}
+        recentDocumentCount={3}
+        initialSection="cache"
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: '快捷键' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '缓存' })).not.toBeInTheDocument();
   });
 });
