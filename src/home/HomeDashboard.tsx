@@ -1,10 +1,11 @@
-import { BookOpen, FileText, Settings, Tags } from 'lucide-react';
 import { useCallback, useRef, type ChangeEventHandler } from 'react';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { PersistedDocument } from '../persistence/persistenceApi';
+import { HomeBlankPage } from './HomeBlankPage';
 import { HomeFavorites } from './HomeFavorites';
 import { HomeQuickStart } from './HomeQuickStart';
 import { HomeRecentSessions } from './HomeRecentSessions';
+import { HomeSidebar, type HomeSidebarPage, type HomeSidebarProps } from './HomeSidebar';
 import { HomeStatusPanel } from './HomeStatusPanel';
 import { HomeTopBar } from './HomeTopBar';
 
@@ -13,6 +14,9 @@ const noop = () => undefined;
 type HomeDashboardProps = {
   recentDocuments: PersistedDocument[];
   favoriteDocuments: FavoriteDocument[];
+  activeSidebarPage?: HomeSidebarPage;
+  counts?: HomeSidebarProps['counts'];
+  cacheStats?: HomeSidebarProps['cacheStats'];
   onOpenPdf(): void | Promise<unknown>;
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
   onReopenRecentDocument(document: PersistedDocument): void | Promise<void>;
@@ -23,6 +27,15 @@ type HomeDashboardProps = {
   onOpenCompare?(): void;
   onOpenAnnotations?(): void;
   onOpenBookmarks?(): void;
+  onOpenHome?(): void;
+  onOpenRecentFiles?(): void;
+  onOpenFavoriteFiles?(): void;
+  onOpenSessionRestore?(): void;
+  onOpenMyDocuments?(): void;
+  onOpenFolders?(): void;
+  onOpenNotes?(): void;
+  onOpenFullTextSearch?(): void;
+  onOpenCacheManagement?(): void;
   onOpenSettings(): void;
   onOpenTags(): void;
 };
@@ -30,6 +43,17 @@ type HomeDashboardProps = {
 export function HomeDashboard({
   recentDocuments,
   favoriteDocuments,
+  activeSidebarPage = 'home',
+  counts = {
+    recentFiles: recentDocuments.length,
+    favoriteFiles: favoriteDocuments.length,
+    restorableSessions: recentDocuments.length,
+  },
+  cacheStats = {
+    usedBytes: 0,
+    totalBytes: 0,
+    fileCount: 0,
+  },
   onOpenPdf,
   onBrowserFileChange,
   onReopenRecentDocument,
@@ -40,6 +64,15 @@ export function HomeDashboard({
   onOpenCompare = noop,
   onOpenAnnotations = noop,
   onOpenBookmarks = noop,
+  onOpenHome = noop,
+  onOpenRecentFiles = noop,
+  onOpenFavoriteFiles = noop,
+  onOpenSessionRestore = noop,
+  onOpenMyDocuments = noop,
+  onOpenFolders = noop,
+  onOpenNotes = noop,
+  onOpenFullTextSearch = noop,
+  onOpenCacheManagement = noop,
   onOpenSettings,
   onOpenTags,
 }: HomeDashboardProps) {
@@ -62,6 +95,22 @@ export function HomeDashboard({
     }
   }, [canOpenNativePdf, onOpenPdf, openBrowserFilePicker]);
 
+  const mainContent =
+    activeSidebarPage === 'home' ? (
+      <div className="home-content">
+        <div className="home-primary">
+          <HomeQuickStart onOpenPdf={handleOpenPdf} onPickBrowserFile={openBrowserFilePicker} />
+          <HomeRecentSessions documents={recentDocuments} onReopenDocument={onReopenRecentDocument} />
+          <HomeFavorites documents={favoriteDocuments} onToggleFavorite={onToggleFavorite} />
+        </div>
+        <HomeStatusPanel />
+      </div>
+    ) : (
+      <div className="home-content home-blank-content">
+        <HomeBlankPage page={activeSidebarPage} />
+      </div>
+    );
+
   return (
     <div className="home-dashboard-shell">
       <HomeTopBar
@@ -83,29 +132,24 @@ export function HomeDashboard({
         onChange={onBrowserFileChange}
       />
       <section className="home-dashboard" aria-label="SmartReader 首页内容">
-        <aside className="home-sidebar">
-          <div className="brand-lockup">
-            <FileText size={22} />
-            <div>
-              <strong>SmartReader</strong>
-              <span>本地 PDF 工作台</span>
-            </div>
-          </div>
-          <nav aria-label="主导航" className="home-nav">
-            <button type="button" className="active">
-              <BookOpen size={16} />
-              <span>首页</span>
-            </button>
-            <button type="button" onClick={onOpenTags}>
-              <Tags size={16} />
-              <span>标签管理</span>
-            </button>
-            <button type="button" onClick={onOpenSettings}>
-              <Settings size={16} />
-              <span>设置</span>
-            </button>
-          </nav>
-        </aside>
+        <HomeSidebar
+          activePage={activeSidebarPage}
+          counts={counts}
+          cacheStats={cacheStats}
+          onOpenHome={onOpenHome}
+          onOpenRecentFiles={onOpenRecentFiles}
+          onOpenFavoriteFiles={onOpenFavoriteFiles}
+          onOpenSessionRestore={onOpenSessionRestore}
+          onOpenMyDocuments={onOpenMyDocuments}
+          onOpenFolders={onOpenFolders}
+          onOpenTags={onOpenTags}
+          onOpenNotes={onOpenNotes}
+          onOpenFullTextSearch={onOpenFullTextSearch}
+          onOpenAnnotations={onOpenAnnotations}
+          onOpenBookmarks={onOpenBookmarks}
+          onOpenCompare={onOpenCompare}
+          onOpenCacheManagement={onOpenCacheManagement}
+        />
         <div className="home-main">
           <header className="home-header">
             <div>
@@ -114,17 +158,7 @@ export function HomeDashboard({
             </div>
             <span>离线优先 · 桌面工作区</span>
           </header>
-          <div className="home-content">
-            <div className="home-primary">
-              <HomeQuickStart onOpenPdf={handleOpenPdf} onPickBrowserFile={openBrowserFilePicker} />
-              <HomeRecentSessions
-                documents={recentDocuments}
-                onReopenDocument={onReopenRecentDocument}
-              />
-              <HomeFavorites documents={favoriteDocuments} onToggleFavorite={onToggleFavorite} />
-            </div>
-            <HomeStatusPanel />
-          </div>
+          {mainContent}
         </div>
       </section>
     </div>

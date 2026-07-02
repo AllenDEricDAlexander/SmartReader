@@ -5,7 +5,7 @@ import { renderApp } from '../test/renderApp';
 import { HomeDashboard } from './HomeDashboard';
 
 function renderDashboard(overrides: Partial<ComponentProps<typeof HomeDashboard>> = {}) {
-  const props = {
+  const props: ComponentProps<typeof HomeDashboard> = {
     recentDocuments: [],
     favoriteDocuments: [],
     onOpenPdf: vi.fn(),
@@ -13,8 +13,28 @@ function renderDashboard(overrides: Partial<ComponentProps<typeof HomeDashboard>
     onReopenRecentDocument: vi.fn(),
     onToggleFavorite: vi.fn(),
     canOpenNativePdf: () => true,
+    activeSidebarPage: 'home',
+    counts: {
+      recentFiles: 2,
+      favoriteFiles: 1,
+      restorableSessions: 0,
+    },
+    cacheStats: {
+      usedBytes: 512 * 1024 * 1024,
+      totalBytes: 2 * 1024 * 1024 * 1024,
+      fileCount: 4,
+    },
+    onOpenHome: vi.fn(),
+    onOpenRecentFiles: vi.fn(),
+    onOpenFavoriteFiles: vi.fn(),
+    onOpenSessionRestore: vi.fn(),
+    onOpenMyDocuments: vi.fn(),
+    onOpenFolders: vi.fn(),
     onOpenSettings: vi.fn(),
     onOpenTags: vi.fn(),
+    onOpenNotes: vi.fn(),
+    onOpenFullTextSearch: vi.fn(),
+    onOpenCacheManagement: vi.fn(),
     ...overrides,
   };
 
@@ -26,6 +46,39 @@ function renderDashboard(overrides: Partial<ComponentProps<typeof HomeDashboard>
 }
 
 describe('HomeDashboard', () => {
+  it('keeps the home dashboard content and sidebar navigation active for the home page', () => {
+    renderDashboard({ activeSidebarPage: 'home' });
+
+    expect(screen.getByText('快速开始')).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '首页' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: '最近文件 2' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '收藏文件 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '标签管理' })).toBeInTheDocument();
+  });
+
+  it('shows an accessible blank page and keeps the sidebar visible for recent files', () => {
+    renderDashboard({ activeSidebarPage: 'recentFiles' });
+
+    expect(screen.queryByText('快速开始')).not.toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '最近文件 2' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.getByRole('region', { name: '最近文件' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '最近文件' })).toBeInTheDocument();
+  });
+
+  it('forwards recent files navigation from the sidebar', () => {
+    const onOpenRecentFiles = vi.fn();
+    renderDashboard({ onOpenRecentFiles });
+
+    fireEvent.click(screen.getByRole('button', { name: '最近文件 2' }));
+
+    expect(onOpenRecentFiles).toHaveBeenCalledTimes(1);
+  });
+
   it('owns a single hidden PDF file input for home open actions', () => {
     const { input } = renderDashboard();
 
