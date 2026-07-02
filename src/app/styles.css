@@ -1868,6 +1868,7 @@ select {
   .home-nav-heading,
   .home-nav-label,
   .home-nav-count,
+  .home-nav button span,
   .home-cache-card {
     display: none;
   }

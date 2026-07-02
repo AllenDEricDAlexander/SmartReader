@@ -111,6 +111,10 @@ describe('HomeSidebar', () => {
 
     expect(screen.getByText('本地缓存')).toBeInTheDocument();
     expect(screen.getByText('1.24 GB / 5 GB')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: '本地缓存使用量' })).toHaveAttribute(
+      'aria-valuenow',
+      '25',
+    );
   });
 
   it('formats cache capacity and clamps the progress value', () => {
