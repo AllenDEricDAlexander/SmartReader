@@ -22,7 +22,7 @@ type HomeSidebarPage =
   | 'recentFiles'
   | 'favoriteFiles'
   | 'sessionRestore'
-  | 'library'
+  | 'myDocuments'
   | 'folders'
   | 'tags'
   | 'notes'
@@ -51,7 +51,7 @@ type HomeSidebarProps = {
   onOpenRecentFiles(): void;
   onOpenFavoriteFiles(): void;
   onOpenSessionRestore(): void;
-  onOpenLibrary(): void;
+  onOpenMyDocuments(): void;
   onOpenFolders(): void;
   onOpenTags(): void;
   onOpenNotes(): void;
@@ -143,7 +143,7 @@ export function HomeSidebar({
   onOpenRecentFiles,
   onOpenFavoriteFiles,
   onOpenSessionRestore,
-  onOpenLibrary,
+  onOpenMyDocuments,
   onOpenFolders,
   onOpenTags,
   onOpenNotes,
@@ -190,10 +190,10 @@ export function HomeSidebar({
 
   const libraryItems: SidebarItem[] = [
     {
-      page: 'library',
+      page: 'myDocuments',
       label: '我的文献',
       Icon: Library,
-      onClick: onOpenLibrary,
+      onClick: onOpenMyDocuments,
     },
     {
       page: 'folders',

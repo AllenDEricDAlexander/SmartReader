@@ -21,7 +21,7 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof HomeSidebar>> = 
     onOpenRecentFiles: vi.fn(),
     onOpenFavoriteFiles: vi.fn(),
     onOpenSessionRestore: vi.fn(),
-    onOpenLibrary: vi.fn(),
+    onOpenMyDocuments: vi.fn(),
     onOpenFolders: vi.fn(),
     onOpenTags: vi.fn(),
     onOpenNotes: vi.fn(),
@@ -95,7 +95,7 @@ describe('HomeSidebar', () => {
     expect(props.onOpenRecentFiles).toHaveBeenCalledTimes(1);
     expect(props.onOpenFavoriteFiles).toHaveBeenCalledTimes(1);
     expect(props.onOpenSessionRestore).toHaveBeenCalledTimes(1);
-    expect(props.onOpenLibrary).toHaveBeenCalledTimes(1);
+    expect(props.onOpenMyDocuments).toHaveBeenCalledTimes(1);
     expect(props.onOpenFolders).toHaveBeenCalledTimes(1);
     expect(props.onOpenTags).toHaveBeenCalledTimes(1);
     expect(props.onOpenNotes).toHaveBeenCalledTimes(1);
@@ -104,6 +104,13 @@ describe('HomeSidebar', () => {
     expect(props.onOpenBookmarks).toHaveBeenCalledTimes(1);
     expect(props.onOpenCompare).toHaveBeenCalledTimes(1);
     expect(props.onOpenCacheManagement).toHaveBeenCalledTimes(1);
+  });
+
+  it('formats default cache capacity', () => {
+    renderSidebar();
+
+    expect(screen.getByText('本地缓存')).toBeInTheDocument();
+    expect(screen.getByText('1.24 GB / 5 GB')).toBeInTheDocument();
   });
 
   it('formats cache capacity and clamps the progress value', () => {
@@ -115,7 +122,6 @@ describe('HomeSidebar', () => {
       },
     });
 
-    expect(screen.getByText('本地缓存')).toBeInTheDocument();
     expect(screen.getByText('8 GB / 5 GB')).toBeInTheDocument();
     expect(screen.getByText('已缓存 12 个文件')).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: '本地缓存使用量' })).toHaveAttribute(
