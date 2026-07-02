@@ -20,6 +20,7 @@ const MIGRATIONS: &[Migration] = &[
     },
 ];
 const READER_PREFERENCES_KEY: &str = "reader_preferences";
+pub const DEFAULT_CACHE_TOTAL_BYTES: i64 = 5 * 1024 * 1024 * 1024;
 
 struct Migration {
     version: &'static str,
@@ -151,6 +152,14 @@ pub struct PersistedAnnotationRecord {
     pub tag_ids: Option<Vec<i64>>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheStats {
+    pub used_bytes: i64,
+    pub total_bytes: i64,
+    pub file_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -363,6 +372,12 @@ pub fn load_preferences(
 ) -> Result<Option<serde_json::Value>, DbError> {
     let connection = state.connection.lock().expect("database mutex poisoned");
     load_preferences_tx(&connection)
+}
+
+#[tauri::command]
+pub fn load_cache_stats(state: State<'_, DatabaseState>) -> Result<CacheStats, DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    load_cache_stats_tx(&connection)
 }
 
 #[tauri::command]
@@ -793,6 +808,22 @@ pub fn load_preferences_tx(connection: &Connection) -> Result<Option<serde_json:
 
     let value_json: String = row.get(0)?;
     Ok(Some(serde_json::from_str(&value_json)?))
+}
+
+pub fn load_cache_stats_tx(connection: &Connection) -> Result<CacheStats, DbError> {
+    connection
+        .query_row(
+            "SELECT COALESCE(SUM(file_size), 0), COUNT(*) FROM cache_entries",
+            [],
+            |row| {
+                Ok(CacheStats {
+                    used_bytes: row.get(0)?,
+                    total_bytes: DEFAULT_CACHE_TOTAL_BYTES,
+                    file_count: row.get(1)?,
+                })
+            },
+        )
+        .map_err(DbError::from)
 }
 
 fn document_id_for_key(
@@ -1483,6 +1514,64 @@ mod tests {
             )
             .expect("column count");
         assert_eq!(favorite_column_count, 1);
+    }
+
+    #[test]
+    fn cache_stats_returns_empty_totals_without_cache_entries() {
+        let connection = migrated_test_connection();
+
+        let stats = load_cache_stats_tx(&connection).expect("cache stats");
+
+        assert_eq!(
+            stats,
+            CacheStats {
+                used_bytes: 0,
+                total_bytes: DEFAULT_CACHE_TOTAL_BYTES,
+                file_count: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn cache_stats_sums_cache_entry_sizes_and_counts_files() {
+        let connection = migrated_test_connection();
+        connection
+            .execute(
+                r#"
+                INSERT INTO cache_entries (
+                    document_key, source_path, cache_path, file_size, modified_at, created_at,
+                    last_used_at
+                )
+                VALUES
+                    (?1, ?2, ?3, ?4, ?5, ?6, ?6),
+                    (?7, ?8, ?9, ?10, ?11, ?6, ?6)
+                "#,
+                params![
+                    "desktop:/tmp/one.pdf",
+                    "/tmp/one.pdf",
+                    "/cache/one.pdf",
+                    1024,
+                    "2026-07-02T00:00:00Z",
+                    "2026-07-02T00:01:00Z",
+                    "desktop:/tmp/two.pdf",
+                    "/tmp/two.pdf",
+                    "/cache/two.pdf",
+                    2048,
+                    "2026-07-02T00:02:00Z",
+                ],
+            )
+            .expect("insert cache entries");
+
+        let stats = load_cache_stats_tx(&connection).expect("cache stats");
+
+        assert_eq!(
+            stats,
+            CacheStats {
+                used_bytes: 3072,
+                total_bytes: DEFAULT_CACHE_TOTAL_BYTES,
+                file_count: 2,
+            }
+        );
     }
 
     #[test]

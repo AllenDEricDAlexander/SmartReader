@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createPersistenceApi, type PersistedDocument } from './persistenceApi';
+import { createPersistenceApi, type CacheStats, type PersistedDocument } from './persistenceApi';
 
 describe('persistenceApi', () => {
   it('saves a document through Tauri invoke', async () => {
@@ -148,6 +148,20 @@ describe('persistenceApi', () => {
 
     expect(invoke).toHaveBeenCalledWith('save_preferences', { preferences });
     expect(invoke).toHaveBeenCalledWith('load_preferences');
+  });
+
+  it('loads cache stats through Tauri invoke', async () => {
+    const cacheStats: CacheStats = {
+      usedBytes: 4096,
+      totalBytes: 5 * 1024 * 1024 * 1024,
+      fileCount: 2,
+    };
+    const invoke = vi.fn().mockResolvedValue(cacheStats);
+    const api = createPersistenceApi(invoke);
+
+    await expect(api.loadCacheStats()).resolves.toEqual(cacheStats);
+
+    expect(invoke).toHaveBeenCalledWith('load_cache_stats');
   });
 
   it('persists favorites and tags through Tauri invoke', async () => {

@@ -80,6 +80,12 @@ export type PersistedAnnotationRecord = PersistedAnnotation & {
   documentMissing: boolean;
 };
 
+export type CacheStats = {
+  usedBytes: number;
+  totalBytes: number;
+  fileCount: number;
+};
+
 export type CorePersistenceApi = {
   saveDocument(document: PersistedDocument): Promise<void>;
   listRecentDocuments(): Promise<PersistedDocument[]>;
@@ -95,6 +101,7 @@ export type CorePersistenceApi = {
   deleteAnnotation(id: number): Promise<void>;
   savePreferences(preferences: ReaderPreferences): Promise<void>;
   loadPreferences(): Promise<ReaderPreferences | null>;
+  loadCacheStats(): Promise<CacheStats>;
 };
 
 export type FavoritesTagsPersistenceApi = {
@@ -156,6 +163,9 @@ export function createPersistenceApi(invoke: Invoke = tauriInvoke): PersistenceA
     },
     loadPreferences() {
       return invoke<ReaderPreferences | null>('load_preferences');
+    },
+    loadCacheStats() {
+      return invoke<CacheStats>('load_cache_stats');
     },
     setDocumentFavorite(documentKey, favorite) {
       return invoke<void>('set_document_favorite', { documentKey, favorite });

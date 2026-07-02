@@ -39,6 +39,7 @@ pub fn run() {
             db::load_reader_session,
             db::save_preferences,
             db::load_preferences,
+            db::load_cache_stats,
             db::save_bookmark,
             db::list_bookmarks,
             db::list_all_bookmarks,
