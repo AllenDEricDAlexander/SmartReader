@@ -7,15 +7,16 @@ const blankPageLabels = {
   myDocuments: '我的文献',
   folders: '文件夹',
   notes: '笔记管理',
-  fullTextSearch: '全文搜索',
-  annotations: '批注管理',
-  bookmarks: '书签管理',
-  compare: '对比阅读',
-  tags: '标签管理',
 } satisfies Partial<Record<HomeSidebarPage, string>>;
 
+export type HomeBlankPageId = keyof typeof blankPageLabels;
+
+export function isHomeBlankPageId(page: HomeSidebarPage): page is HomeBlankPageId {
+  return page in blankPageLabels;
+}
+
 type HomeBlankPageProps = {
-  page: Exclude<HomeSidebarPage, 'home'>;
+  page: HomeBlankPageId;
 };
 
 export function HomeBlankPage({ page }: HomeBlankPageProps) {

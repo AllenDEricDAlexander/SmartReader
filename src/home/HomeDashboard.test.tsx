@@ -70,6 +70,28 @@ describe('HomeDashboard', () => {
     expect(screen.getByRole('heading', { name: '最近文件' })).toBeInTheDocument();
   });
 
+  it('falls back to normal home content instead of a blank page for workspace-only sidebar pages', () => {
+    renderDashboard({ activeSidebarPage: 'tags' });
+
+    expect(screen.getByText('快速开始')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '标签管理' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.queryByRole('region', { name: '标签管理' })).not.toBeInTheDocument();
+  });
+
+  it('does not render full-text search as a home blank page', () => {
+    renderDashboard({ activeSidebarPage: 'fullTextSearch' });
+
+    expect(screen.getByText('快速开始')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '全文搜索' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.queryByRole('region', { name: '全文搜索' })).not.toBeInTheDocument();
+  });
+
   it('forwards recent files navigation from the sidebar', () => {
     const onOpenRecentFiles = vi.fn();
     renderDashboard({ onOpenRecentFiles });

@@ -1,7 +1,7 @@
 import { useCallback, useRef, type ChangeEventHandler } from 'react';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { PersistedDocument } from '../persistence/persistenceApi';
-import { HomeBlankPage } from './HomeBlankPage';
+import { HomeBlankPage, isHomeBlankPageId } from './HomeBlankPage';
 import { HomeFavorites } from './HomeFavorites';
 import { HomeQuickStart } from './HomeQuickStart';
 import { HomeRecentSessions } from './HomeRecentSessions';
@@ -95,21 +95,24 @@ export function HomeDashboard({
     }
   }, [canOpenNativePdf, onOpenPdf, openBrowserFilePicker]);
 
-  const mainContent =
-    activeSidebarPage === 'home' ? (
-      <div className="home-content">
-        <div className="home-primary">
-          <HomeQuickStart onOpenPdf={handleOpenPdf} onPickBrowserFile={openBrowserFilePicker} />
-          <HomeRecentSessions documents={recentDocuments} onReopenDocument={onReopenRecentDocument} />
-          <HomeFavorites documents={favoriteDocuments} onToggleFavorite={onToggleFavorite} />
-        </div>
-        <HomeStatusPanel />
+  const homeContent = (
+    <div className="home-content">
+      <div className="home-primary">
+        <HomeQuickStart onOpenPdf={handleOpenPdf} onPickBrowserFile={openBrowserFilePicker} />
+        <HomeRecentSessions documents={recentDocuments} onReopenDocument={onReopenRecentDocument} />
+        <HomeFavorites documents={favoriteDocuments} onToggleFavorite={onToggleFavorite} />
       </div>
-    ) : (
-      <div className="home-content home-blank-content">
-        <HomeBlankPage page={activeSidebarPage} />
-      </div>
-    );
+      <HomeStatusPanel />
+    </div>
+  );
+
+  const mainContent = isHomeBlankPageId(activeSidebarPage) ? (
+    <div className="home-content home-blank-content">
+      <HomeBlankPage page={activeSidebarPage} />
+    </div>
+  ) : (
+    homeContent
+  );
 
   return (
     <div className="home-dashboard-shell">
