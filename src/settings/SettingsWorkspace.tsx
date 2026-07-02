@@ -8,13 +8,14 @@ import { DesktopIntegrationSettings } from './DesktopIntegrationSettings';
 import { SessionRestoreSettings } from './SessionRestoreSettings';
 import { ShortcutSettings } from './ShortcutSettings';
 
-type SettingsSection = 'shortcuts' | 'cache' | 'desktop' | 'restore';
+export type SettingsSection = 'shortcuts' | 'cache' | 'desktop' | 'restore';
 
 type SettingsWorkspaceProps = {
   commandRegistry: CommandRegistry;
   preferences: ReaderPreferences;
   openSessionCount: number;
   recentDocumentCount: number;
+  initialSection?: SettingsSection;
   saving?: boolean;
   onClose(): void;
   onSave(preferences: ReaderPreferences): void | Promise<void>;
@@ -32,13 +33,18 @@ export function SettingsWorkspace({
   preferences,
   openSessionCount,
   recentDocumentCount,
+  initialSection = 'shortcuts',
   saving,
   onClose,
   onSave,
 }: SettingsWorkspaceProps) {
-  const [activeSection, setActiveSection] = useState<SettingsSection>('shortcuts');
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
   const [draftPreferences, setDraftPreferences] = useState(preferences);
   const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    setActiveSection(initialSection);
+  }, [initialSection]);
 
   useEffect(() => {
     if (!dirty) {
