@@ -15,6 +15,7 @@ import type {
   PersistedAnnotationRecord,
   PersistedBookmarkRecord,
   PersistedDocument,
+  PersistedSessionTab,
 } from '../persistence/persistenceApi';
 import { defaultReaderPreferences, mergeReaderPreferences } from '../preferences/preferencesStore';
 import { SettingsWorkspace, type SettingsSection } from '../settings/SettingsWorkspace';
@@ -69,6 +70,22 @@ function mapSessionToPersistedDocument(session: DocumentSession): PersistedDocum
     progress: session.progress,
     missing: false,
   };
+}
+
+function mapSessionsToPersistedTabs(sessions: DocumentSession[]): PersistedSessionTab[] {
+  return sessions
+    .filter((session) => session.source.kind === 'desktop-path')
+    .map((session, tabOrder) => ({
+      documentKey: session.documentKey,
+      tabOrder,
+      page: session.page,
+      zoom: session.zoom,
+      history: session.history,
+    }));
+}
+
+function countRestorablePersistedTabs(tabs: PersistedSessionTab[]) {
+  return tabs.filter((tab) => tab.documentKey.startsWith('desktop:')).length;
 }
 
 export function ReaderApp({
@@ -208,7 +225,7 @@ export function ReaderApp({
       .loadReaderSession()
       .then((session) => {
         if (!cancelled) {
-          setSessionRestoreCount(session?.tabs.length ?? 0);
+          setSessionRestoreCount(session ? countRestorablePersistedTabs(session.tabs) : 0);
         }
       })
       .catch(() => {
@@ -237,18 +254,13 @@ export function ReaderApp({
       hadReaderSessionsRef.current = true;
     }
 
+    const persistedTabs = mapSessionsToPersistedTabs(documents.sessions);
+    setSessionRestoreCount(persistedTabs.length);
+
     sessionPersistence.schedule({
       activeDocumentKey: activeSession?.documentKey ?? null,
       sidebarOpen,
-      tabs: documents.sessions
-        .filter((session) => session.source.kind === 'desktop-path')
-        .map((session, tabOrder) => ({
-          documentKey: session.documentKey,
-          tabOrder,
-          page: session.page,
-          zoom: session.zoom,
-          history: session.history,
-        })),
+      tabs: persistedTabs,
     });
   }, [documents, activeSession, sidebarOpen, sessionPersistence]);
 

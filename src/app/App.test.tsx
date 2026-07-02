@@ -763,6 +763,78 @@ describe('App', () => {
     );
   });
 
+  it('keeps session restore count in sync with restorable persisted desktop tabs', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:book');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadReaderSession: vi.fn().mockResolvedValue({
+        activeDocumentKey: null,
+        sidebarOpen: true,
+        tabs: [
+          {
+            documentKey: 'desktop:/tmp/old-one.pdf',
+            tabOrder: 0,
+            page: 1,
+            zoom: 1,
+            history: { currentPage: 1, backStack: [], forwardStack: [] },
+          },
+          {
+            documentKey: 'desktop:/tmp/old-two.pdf',
+            tabOrder: 1,
+            page: 1,
+            zoom: 1,
+            history: { currentPage: 1, backStack: [], forwardStack: [] },
+          },
+          {
+            documentKey: 'browser:old-browser.pdf:5:1783296000000',
+            tabOrder: 2,
+            page: 1,
+            zoom: 1,
+            history: { currentPage: 1, backStack: [], forwardStack: [] },
+          },
+        ],
+      }),
+    };
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/book.pdf', name: 'book.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-16T00:00:00Z',
+    });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    expect(await screen.findByRole('button', { name: '会话恢复 2' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+
+    expect(await screen.findByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(persistence.saveReaderSession).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          tabs: [
+            expect.objectContaining({
+              documentKey: 'desktop:/tmp/book.pdf',
+            }),
+          ],
+        }),
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close active tab' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '会话恢复 0' })).toBeInTheDocument();
+    });
+  });
+
   it('keeps the fallback PDF visible after closing the active tab', async () => {
     let blobIndex = 0;
     vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {

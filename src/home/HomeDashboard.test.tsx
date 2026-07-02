@@ -70,6 +70,14 @@ describe('HomeDashboard', () => {
     expect(screen.getByRole('heading', { name: '最近文件' })).toBeInTheDocument();
   });
 
+  it('marks blank sidebar page content for single-column layout', () => {
+    renderDashboard({ activeSidebarPage: 'recentFiles' });
+
+    expect(screen.getByRole('region', { name: '最近文件' }).parentElement).toHaveClass(
+      'home-blank-content',
+    );
+  });
+
   it('falls back to normal home content instead of a blank page for workspace-only sidebar pages', () => {
     renderDashboard({ activeSidebarPage: 'tags' });
 

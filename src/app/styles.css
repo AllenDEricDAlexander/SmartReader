@@ -677,6 +677,10 @@ button:disabled,
   overflow: auto;
 }
 
+.home-blank-content {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .home-primary,
 .home-status {
   min-width: 0;
