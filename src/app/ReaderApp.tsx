@@ -9,13 +9,15 @@ import {
 import type { DocumentSession } from '../documents/documentModels';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import { HomeDashboard } from '../home/HomeDashboard';
+import type { HomeSidebarPage } from '../home/HomeSidebar';
 import type {
+  CacheStats,
   PersistedAnnotationRecord,
   PersistedBookmarkRecord,
   PersistedDocument,
 } from '../persistence/persistenceApi';
 import { defaultReaderPreferences, mergeReaderPreferences } from '../preferences/preferencesStore';
-import { SettingsWorkspace } from '../settings/SettingsWorkspace';
+import { SettingsWorkspace, type SettingsSection } from '../settings/SettingsWorkspace';
 import type { Tag } from '../tags/tagModels';
 import { TagManager } from '../tags/TagManager';
 import type { ReaderAnnotation } from '../annotations/annotationModels';
@@ -46,6 +48,11 @@ import type { AppWorkspace, ReaderAppProps } from './appTypes';
 
 const bookmarkProviderErrorMessage = '书签加载失败，请重试。';
 const annotationProviderErrorMessage = '批注加载失败，请重试。';
+const defaultCacheStats: CacheStats = {
+  usedBytes: 0,
+  totalBytes: 5 * 1024 ** 3,
+  fileCount: 0,
+};
 
 function mapSessionToPersistedDocument(session: DocumentSession): PersistedDocument {
   return {
@@ -81,11 +88,16 @@ export function ReaderApp({
   const [lastSearchCommand, setLastSearchCommand] = useState('');
   const [pageInput, setPageInput] = useState('');
   const [workspaceOverride, setWorkspaceOverride] = useState<AppWorkspace | null>(null);
+  const [homeSidebarPage, setHomeSidebarPage] = useState<HomeSidebarPage>('home');
+  const [settingsInitialSection, setSettingsInitialSection] =
+    useState<SettingsSection>('shortcuts');
   const [readerPreferences, setReaderPreferences] = useState(defaultReaderPreferences);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [recentDocuments, setRecentDocuments] = useState<PersistedDocument[]>([]);
   const [favoriteDocuments, setFavoriteDocuments] = useState<FavoriteDocument[]>([]);
+  const [sessionRestoreCount, setSessionRestoreCount] = useState(0);
+  const [cacheStats, setCacheStats] = useState(defaultCacheStats);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [globalSearchBookmarks, setGlobalSearchBookmarks] = useState<PersistedBookmarkRecord[]>([]);
@@ -178,6 +190,32 @@ export function ReaderApp({
         }
       })
       .catch(() => undefined);
+
+    persistence
+      .loadCacheStats()
+      .then((stats) => {
+        if (!cancelled) {
+          setCacheStats(stats);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCacheStats(defaultCacheStats);
+        }
+      });
+
+    persistence
+      .loadReaderSession()
+      .then((session) => {
+        if (!cancelled) {
+          setSessionRestoreCount(session?.tabs.length ?? 0);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSessionRestoreCount(0);
+        }
+      });
 
     return () => {
       cancelled = true;
@@ -304,6 +342,11 @@ export function ReaderApp({
     refreshGlobalSearchCollections();
   }, [refreshGlobalSearchCollections]);
 
+  const openSettingsWorkspace = useCallback((initialSection: SettingsSection = 'shortcuts') => {
+    setSettingsInitialSection(initialSection);
+    setWorkspaceOverride('settings');
+  }, []);
+
   const closeToolWorkspace = useCallback(() => {
     setWorkspaceOverride(null);
   }, []);
@@ -318,6 +361,10 @@ export function ReaderApp({
     },
     [refreshGlobalSearchCollections],
   );
+  const openHomeSidebarPage = useCallback((page: HomeSidebarPage) => {
+    setWorkspaceOverride(null);
+    setHomeSidebarPage(page);
+  }, []);
   const openPdfAndIgnoreResult = useCallback(() => {
     void openPdf().catch(() => undefined);
   }, [openPdf]);
@@ -334,7 +381,7 @@ export function ReaderApp({
     selectPreviousSession: selectPreviousReaderSession,
     setPreferencesOpen: (open) => {
       if (open) {
-        setWorkspaceOverride('settings');
+        openSettingsWorkspace();
       } else {
         setWorkspaceOverride(null);
       }
@@ -683,6 +730,7 @@ export function ReaderApp({
           preferences={readerPreferences}
           openSessionCount={documents.sessions.length}
           recentDocumentCount={recentDocuments.length}
+          initialSection={settingsInitialSection}
           saving={settingsSaving}
           onClose={() => setWorkspaceOverride(null)}
           onSave={handleSavePreferences}
@@ -788,7 +836,7 @@ export function ReaderApp({
               onAddNote={addPageNote}
               isFavorite={activeSessionIsFavorite}
               onToggleFavorite={handleToggleActiveFavorite}
-              onOpenPreferences={() => setWorkspaceOverride('settings')}
+              onOpenPreferences={() => openSettingsWorkspace()}
             />
           }
           leftPanel={
@@ -857,6 +905,13 @@ export function ReaderApp({
         <HomeDashboard
           recentDocuments={recentDocuments}
           favoriteDocuments={favoriteDocuments}
+          activeSidebarPage={homeSidebarPage}
+          counts={{
+            recentFiles: recentDocuments.length,
+            favoriteFiles: favoriteDocuments.length,
+            restorableSessions: sessionRestoreCount,
+          }}
+          cacheStats={cacheStats}
           onOpenPdf={openPdf}
           onBrowserFileChange={handleBrowserFileChange}
           onReopenRecentDocument={(document) => void reopenRecentDocument(document)}
@@ -867,7 +922,16 @@ export function ReaderApp({
           onOpenCompare={() => openShortcutWorkspace('compare')}
           onOpenAnnotations={() => openShortcutWorkspace('annotations')}
           onOpenBookmarks={() => openShortcutWorkspace('bookmarks')}
-          onOpenSettings={() => setWorkspaceOverride('settings')}
+          onOpenHome={() => openHomeSidebarPage('home')}
+          onOpenRecentFiles={() => openHomeSidebarPage('recentFiles')}
+          onOpenFavoriteFiles={() => openHomeSidebarPage('favoriteFiles')}
+          onOpenSessionRestore={() => openHomeSidebarPage('sessionRestore')}
+          onOpenMyDocuments={() => openHomeSidebarPage('myDocuments')}
+          onOpenFolders={() => openHomeSidebarPage('folders')}
+          onOpenNotes={() => openHomeSidebarPage('notes')}
+          onOpenFullTextSearch={openGlobalSearch}
+          onOpenCacheManagement={() => openSettingsWorkspace('cache')}
+          onOpenSettings={() => openSettingsWorkspace()}
           onOpenTags={() => setWorkspaceOverride('tags')}
         />
       ) : null}

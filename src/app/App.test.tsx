@@ -40,6 +40,11 @@ function createEmptyPersistence(): PersistenceApi {
     deleteAnnotation: vi.fn(),
     savePreferences: vi.fn(),
     loadPreferences: vi.fn().mockResolvedValue(null),
+    loadCacheStats: vi.fn().mockResolvedValue({
+      usedBytes: 0,
+      totalBytes: 5 * 1024 ** 3,
+      fileCount: 0,
+    }),
     setDocumentFavorite: vi.fn(),
     listFavoriteDocuments: vi.fn().mockResolvedValue([]),
     createTag: vi.fn(),
@@ -104,6 +109,143 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '打开本地 PDF' })).toBeInTheDocument();
     expect(screen.getByText('拖拽到这里')).toBeInTheDocument();
     expect(screen.getByText('AI 助手')).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('shows sidebar data from recent files, favorites, session restore, and cache stats', async () => {
+    const persistence = {
+      ...createEmptyPersistence(),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/recent-one.pdf',
+          path: '/tmp/recent-one.pdf',
+          displayName: 'one.pdf',
+          fileSize: 2048,
+          modifiedAt: '2026-07-01T00:00:00Z',
+          pageCount: 20,
+          lastPage: 4,
+          progress: 0.2,
+          missing: false,
+        },
+        {
+          documentKey: 'desktop:/tmp/recent-two.pdf',
+          path: '/tmp/recent-two.pdf',
+          displayName: 'two.pdf',
+          fileSize: 4096,
+          modifiedAt: '2026-07-01T00:00:00Z',
+          pageCount: 30,
+          lastPage: 9,
+          progress: 0.3,
+          missing: false,
+        },
+      ]),
+      listFavoriteDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/favorite.pdf',
+          displayName: 'favorite.pdf',
+          path: '/tmp/favorite.pdf',
+          lastPage: 3,
+          progress: 0.15,
+        },
+      ]),
+      loadReaderSession: vi.fn().mockResolvedValue({
+        activeDocumentKey: null,
+        sidebarOpen: true,
+        tabs: [
+          {
+            documentKey: 'desktop:/tmp/one.pdf',
+            tabOrder: 0,
+            page: 4,
+            zoom: 1,
+            history: { currentPage: 4, backStack: [], forwardStack: [] },
+          },
+          {
+            documentKey: 'desktop:/tmp/two.pdf',
+            tabOrder: 1,
+            page: 9,
+            zoom: 1,
+            history: { currentPage: 9, backStack: [], forwardStack: [] },
+          },
+          {
+            documentKey: 'desktop:/tmp/three.pdf',
+            tabOrder: 2,
+            page: 1,
+            zoom: 1,
+            history: { currentPage: 1, backStack: [], forwardStack: [] },
+          },
+        ],
+      }),
+      loadCacheStats: vi.fn().mockResolvedValue({
+        usedBytes: 1.24 * 1024 ** 3,
+        totalBytes: 5 * 1024 ** 3,
+        fileCount: 128,
+      }),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    expect(await screen.findByRole('button', { name: '最近文件 2' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '收藏文件 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '会话恢复 3' })).toBeInTheDocument();
+    expect(screen.getByText('1.24 GB / 5 GB')).toBeInTheDocument();
+    expect(screen.getByText('已缓存 128 个文件')).toBeInTheDocument();
+  });
+
+  it('routes blank sidebar pages and returns to the home quick start', async () => {
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '最近文件 0' }));
+
+    expect(await screen.findByRole('heading', { name: '最近文件' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开本地 PDF' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '首页' }));
+
+    expect(await screen.findByRole('button', { name: '打开本地 PDF' })).toBeInTheDocument();
+  });
+
+  it('opens cache settings from the sidebar cache management entry', async () => {
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '管理缓存' }));
+
+    expect(await screen.findByLabelText('设置工作区')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '缓存' })).toBeInTheDocument();
+  });
+
+  it('falls back to empty cache stats when cache stats fail to load', async () => {
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadCacheStats: vi.fn().mockRejectedValue(new Error('cache unavailable')),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    expect(await screen.findByText('0 B / 5 GB')).toBeInTheDocument();
+    expect(screen.getByText('已缓存 0 个文件')).toBeInTheDocument();
   });
 
   it('falls back to the home browser picker when native open rejects', async () => {
@@ -1294,7 +1436,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(mainNavigation().getByRole('button', { name: '设置' }));
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
 
     expect(screen.getByRole('heading', { name: '快捷键' })).toBeInTheDocument();
 
@@ -1316,7 +1458,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(mainNavigation().getByRole('button', { name: '设置' }));
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
     fireEvent.click(screen.getByRole('button', { name: '会话恢复' }));
     fireEvent.click(screen.getByRole('button', { name: '当前文档' }));
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
@@ -1343,7 +1485,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(mainNavigation().getByRole('button', { name: '设置' }));
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
     fireEvent.click(screen.getByRole('button', { name: '会话恢复' }));
     fireEvent.click(screen.getByRole('button', { name: '当前文档' }));
 
@@ -1447,11 +1589,11 @@ describe('App', () => {
     expect(screen.getByLabelText('文献导入工作区')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '返回首页' }));
-    fireEvent.click(screen.getByRole('button', { name: '对比阅读' }));
+    fireEvent.click(topShortcuts().getByRole('button', { name: '对比阅读' }));
     expect(screen.getByLabelText('对比阅读工作区')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '返回首页' }));
-    fireEvent.click(screen.getByRole('button', { name: '批注管理' }));
+    fireEvent.click(topShortcuts().getByRole('button', { name: '批注管理' }));
     expect(screen.getByLabelText('批注管理工作区')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '返回首页' }));
@@ -1627,7 +1769,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '对比阅读' }));
+    fireEvent.click(topShortcuts().getByRole('button', { name: '对比阅读' }));
     fireEvent.click((await screen.findAllByRole('button', { name: /compare\.pdf/ }))[0]);
 
     await waitFor(() => {
@@ -1664,7 +1806,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '对比阅读' }));
+    fireEvent.click(topShortcuts().getByRole('button', { name: '对比阅读' }));
     expect(await screen.findByLabelText('对比阅读工作区')).toBeInTheDocument();
     fireEvent.click((await screen.findAllByRole('button', { name: /missing-compare\.pdf/ }))[0]);
 
@@ -1755,7 +1897,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '批注管理' }));
+    fireEvent.click(topShortcuts().getByRole('button', { name: '批注管理' }));
     expect(await screen.findByText('关键批注')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /关键批注/ }));
 
@@ -2355,7 +2497,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '批注管理' }));
+    fireEvent.click(topShortcuts().getByRole('button', { name: '批注管理' }));
     expect(await screen.findByText('批注加载失败，请重试。')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '返回首页' }));
