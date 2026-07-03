@@ -684,6 +684,28 @@ export function ReaderApp({
   );
   const activeWorkspace: AppWorkspace =
     workspaceOverride ?? (activeSession ? 'reader' : 'home');
+  const handleWorkbenchDragOver = useCallback(
+    (event: React.DragEvent<HTMLElement>) => {
+      event.preventDefault();
+
+      if (activeWorkspace === 'home') {
+        return;
+      }
+    },
+    [activeWorkspace],
+  );
+  const handleWorkbenchDrop = useCallback(
+    (event: React.DragEvent<HTMLElement>) => {
+      event.preventDefault();
+
+      if (activeWorkspace === 'home') {
+        return;
+      }
+
+      void handleDrop(event);
+    },
+    [activeWorkspace, handleDrop],
+  );
 
   const viewerContent = activeSession ? (
     activeSession.status === 'error' ? (
@@ -733,8 +755,8 @@ export function ReaderApp({
     <main
       className={`app-shell ${activeWorkspace}-mode`}
       aria-label="SmartReader workbench"
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={handleDrop}
+      onDragOver={handleWorkbenchDragOver}
+      onDrop={handleWorkbenchDrop}
     >
       {activeWorkspace === 'settings' ? (
         <SettingsWorkspace

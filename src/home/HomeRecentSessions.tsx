@@ -1,4 +1,5 @@
 import { FileText } from 'lucide-react';
+import type { MouseEvent } from 'react';
 import type { PersistedDocument } from '../persistence/persistenceApi';
 import { formatDateTime, formatPageProgress, getDirectoryPath } from './homeDisplayUtils';
 
@@ -19,6 +20,10 @@ export function HomeRecentSessions({
     void onReopenDocument(document);
   };
 
+  const stopRowClickPropagation = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+  };
+
   return (
     <section className="home-panel home-session-restore" aria-labelledby="home-recent-title">
       <div className="section-heading horizontal">
@@ -37,12 +42,16 @@ export function HomeRecentSessions({
               key={document.documentKey}
               className={document.missing ? 'session-row missing' : 'session-row'}
               title={document.path ?? ''}
+              onClick={() => reopenDocument(document)}
             >
               <button
                 type="button"
                 className="session-row-main-button"
                 aria-label={`恢复会话 ${document.displayName}`}
-                onClick={() => reopenDocument(document)}
+                onClick={(event) => {
+                  stopRowClickPropagation(event);
+                  reopenDocument(document);
+                }}
               >
                 <span className="pdf-file-icon" aria-hidden="true">
                   <FileText size={18} />
@@ -60,7 +69,10 @@ export function HomeRecentSessions({
                 type="button"
                 className="session-continue-button"
                 aria-label={`继续阅读 ${document.displayName}`}
-                onClick={() => reopenDocument(document)}
+                onClick={(event) => {
+                  stopRowClickPropagation(event);
+                  reopenDocument(document);
+                }}
               >
                 继续阅读
               </button>

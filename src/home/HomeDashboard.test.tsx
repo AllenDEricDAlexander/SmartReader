@@ -126,8 +126,10 @@ function padDatePart(value: number) {
   return String(value).padStart(2, '0');
 }
 
-function renderDashboard(overrides: Partial<ComponentProps<typeof HomeDashboard>> = {}) {
-  const props: ComponentProps<typeof HomeDashboard> = {
+function createDashboardProps(
+  overrides: Partial<ComponentProps<typeof HomeDashboard>> = {},
+): ComponentProps<typeof HomeDashboard> {
+  return {
     recentDocuments: [],
     favoriteDocuments: [],
     onOpenPdf: vi.fn(),
@@ -160,6 +162,10 @@ function renderDashboard(overrides: Partial<ComponentProps<typeof HomeDashboard>
     onOpenCacheManagement: vi.fn(),
     ...overrides,
   };
+}
+
+function renderDashboard(overrides: Partial<ComponentProps<typeof HomeDashboard>> = {}) {
+  const props = createDashboardProps(overrides);
 
   renderApp(<HomeDashboard {...props} />);
   const input = screen.getByLabelText('选择 PDF 文件') as HTMLInputElement;
@@ -344,6 +350,26 @@ describe('HomeDashboard', () => {
     });
 
     expect(onDropPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks non-drop-card home drops from reaching the PDF or parent drop handlers', () => {
+    const onDropPdf = vi.fn((event) => event.preventDefault());
+    const onParentDrop = vi.fn();
+    const props = createDashboardProps({ onDropPdf });
+    renderApp(
+      <div onDrop={onParentDrop}>
+        <HomeDashboard {...props} />
+      </div>,
+    );
+
+    fireEvent.drop(screen.getByRole('region', { name: '欢迎使用 SmartReader' }), {
+      dataTransfer: {
+        files: [new File(['pdf'], 'drop.pdf', { type: 'application/pdf' })],
+      },
+    });
+
+    expect(onDropPdf).not.toHaveBeenCalled();
+    expect(onParentDrop).not.toHaveBeenCalled();
   });
 
   it('renders the restore last session module heading and subtitle', () => {
@@ -579,7 +605,11 @@ describe('HomeDashboard', () => {
     const onReopenRecentDocument = vi.fn();
     renderDashboard({ recentDocuments: recentSessionDocuments, onReopenRecentDocument });
 
-    fireEvent.click(screen.getByRole('button', { name: '恢复会话 Design Notes.pdf' }));
+    const restoreRegion = screen.getByRole('region', { name: '恢复上次会话' });
+    const row = within(restoreRegion).getByText('Design Notes.pdf').closest('.session-row');
+    expect(row).not.toBeNull();
+
+    fireEvent.click(row as HTMLElement);
 
     expect(onReopenRecentDocument).toHaveBeenCalledTimes(1);
     expect(onReopenRecentDocument).toHaveBeenCalledWith(recentSessionDocuments[0]);

@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   PersistedAnnotationRecord,
@@ -372,18 +372,27 @@ describe('App', () => {
     });
   });
 
-  it('opens a dropped browser PDF file', async () => {
-    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:drop');
+  it('opens a dropped browser PDF file from the reader workspace', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValueOnce('blob:book').mockReturnValue('blob:drop');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/book.pdf', name: 'book.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-15T00:00:00Z',
+    });
     const file = new File(['%PDF-1.7'], 'drop.pdf', { type: 'application/pdf' });
 
     renderApp(
       <App
-        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
         persistence={createEmptyPersistence()}
         viewerRenderer={testViewerRenderer}
       />,
     );
+
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
+    await screen.findByRole('tab', { name: 'book.pdf' });
 
     fireEvent.drop(screen.getByLabelText('SmartReader workbench'), {
       dataTransfer: {
@@ -394,6 +403,75 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: 'drop.pdf' })).toBeInTheDocument();
     });
+  });
+
+  it('ignores workbench-level drops from the home workspace', async () => {
+    const createObjectURL = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockReturnValue('blob:home-workbench-drop');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const file = new File(['%PDF-1.7'], 'home-workbench-drop.pdf', { type: 'application/pdf' });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    const workbench = screen.getByLabelText('SmartReader workbench');
+    const dragOverEvent = createEvent.dragOver(workbench, {
+      dataTransfer: {
+        files: [file],
+      },
+    });
+    const dropEvent = createEvent.drop(workbench, {
+      dataTransfer: {
+        files: [file],
+      },
+    });
+
+    fireEvent(workbench, dragOverEvent);
+    fireEvent(workbench, dropEvent);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(dragOverEvent.defaultPrevented).toBe(true);
+    expect(dropEvent.defaultPrevented).toBe(true);
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(screen.queryByRole('tab', { name: 'home-workbench-drop.pdf' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /打开本地 PDF/ })).toBeInTheDocument();
+  });
+
+  it('ignores home drops outside the quick-start drop card', async () => {
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:home-drop');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const file = new File(['%PDF-1.7'], 'home-drop.pdf', { type: 'application/pdf' });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.drop(screen.getByRole('region', { name: '欢迎使用 SmartReader' }), {
+      dataTransfer: {
+        files: [file],
+      },
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(screen.queryByRole('tab', { name: 'home-drop.pdf' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /打开本地 PDF/ })).toBeInTheDocument();
   });
 
   it('runs viewer zoom shortcuts', () => {

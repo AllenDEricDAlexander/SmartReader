@@ -127,8 +127,13 @@ export function HomeDashboard({
     setNotice({ title, message });
   }, []);
 
+  const blockHomeDrop: DragEventHandler<HTMLElement> = useCallback((event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
   const homeContent = (
-    <div className="home-content">
+    <div className="home-content" onDragOver={blockHomeDrop} onDrop={blockHomeDrop}>
       <div className="home-primary">
         <HomeWelcomeBanner />
         <HomeQuickStart
