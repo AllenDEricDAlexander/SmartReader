@@ -1295,11 +1295,15 @@ button:disabled,
   background: var(--sr-surface-muted);
 }
 
+.home-favorites-panel {
+  display: grid;
+  gap: 14px;
+}
+
 .favorite-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px;
-  margin-top: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .favorite-card,
@@ -1313,20 +1317,71 @@ button:disabled,
   background: var(--sr-surface-muted);
 }
 
-.favorite-card-header {
+.favorite-card {
+  min-height: 128px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 16px;
+  background: var(--sr-surface);
+}
+
+.favorite-card-main {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.favorite-card-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.favorite-card-copy strong {
+  min-width: 0;
+  color: var(--sr-text);
+}
+
+.favorite-card-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.favorite-card-footer {
   min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
 }
 
-.favorite-card-header strong {
+.favorite-card-footer span {
   min-width: 0;
+  overflow: hidden;
+  color: var(--sr-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-favorites-panel .favorite-toggle {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  flex: 0 0 auto;
 }
 
 .empty-block {
   margin-top: 14px;
+}
+
+.home-favorites-panel .empty-block {
+  margin-top: 0;
 }
 
 .empty-block.compact {
@@ -1709,11 +1764,22 @@ select {
   overflow: hidden;
 }
 
-.tag-chip.selected,
+.tag-chip.selected {
+  border-color: rgba(37, 99, 235, 0.3);
+  background: #eff6ff;
+  color: var(--sr-primary);
+}
+
 .favorite-toggle.active {
   border-color: rgba(37, 99, 235, 0.3);
   background: #eff6ff;
   color: var(--sr-primary);
+}
+
+.home-favorites-panel .favorite-toggle.active {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: #fffbeb;
+  color: var(--sr-warning);
 }
 
 .annotation-quote {
@@ -2438,6 +2504,10 @@ select {
   }
 
   .home-status {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .favorite-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 

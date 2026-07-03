@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { PersistedDocument } from '../persistence/persistenceApi';
 import { renderApp } from '../test/renderApp';
 import { HomeDashboard } from './HomeDashboard';
@@ -75,6 +76,37 @@ const recentTableDocuments: PersistedDocument[] = [
     lastPage: 8,
     progress: 0.125,
     missing: false,
+  },
+];
+
+const favoriteCardDocuments: FavoriteDocument[] = [
+  {
+    documentKey: 'desktop:/Users/mario/Documents/Design Notes.pdf',
+    path: '/Users/mario/Documents/Design Notes.pdf',
+    displayName: 'Design Notes.pdf',
+    lastPage: 12,
+    progress: 0.14,
+  },
+  {
+    documentKey: 'desktop:/Users/mario/Research/Reader Spec.pdf',
+    path: '/Users/mario/Research/Reader Spec.pdf',
+    displayName: 'Reader Spec.pdf',
+    lastPage: 8,
+    progress: 0.19,
+  },
+  {
+    documentKey: 'desktop:/Users/mario/Archive/UX Review.pdf',
+    path: '/Users/mario/Archive/UX Review.pdf',
+    displayName: 'UX Review.pdf',
+    lastPage: 64,
+    progress: 0.5,
+  },
+  {
+    documentKey: 'desktop:/Users/mario/Archive/Hidden Fourth.pdf',
+    path: '/Users/mario/Archive/Hidden Fourth.pdf',
+    displayName: 'Hidden Fourth.pdf',
+    lastPage: 100,
+    progress: 0.5,
   },
 ];
 
@@ -359,6 +391,60 @@ describe('HomeDashboard', () => {
     );
 
     expect(onOpenRecentFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders favorite files as three prototype cards', () => {
+    renderDashboard({ favoriteDocuments: favoriteCardDocuments });
+
+    const favoritesRegion = screen.getByRole('region', { name: '收藏文件' });
+
+    expect(within(favoritesRegion).getByRole('heading', { name: '收藏文件' })).toBeInTheDocument();
+    expect(
+      within(favoritesRegion).getByRole('button', { name: '查看全部（4）' }),
+    ).toBeInTheDocument();
+    expect(within(favoritesRegion).getByText('Design Notes.pdf')).toBeInTheDocument();
+    expect(within(favoritesRegion).getByText('/Users/mario/Documents/')).toBeInTheDocument();
+    expect(within(favoritesRegion).getByText('第 12 页')).toBeInTheDocument();
+    expect(within(favoritesRegion).getAllByLabelText(/^取消收藏 /)).toHaveLength(3);
+    expect(within(favoritesRegion).queryByText('Hidden Fourth.pdf')).not.toBeInTheDocument();
+    expect(within(favoritesRegion).queryByText(/^Page /)).not.toBeInTheDocument();
+  });
+
+  it('forwards favorite files view-all from the card module header', () => {
+    const onOpenFavoriteFiles = vi.fn();
+    renderDashboard({ favoriteDocuments: favoriteCardDocuments, onOpenFavoriteFiles });
+
+    fireEvent.click(
+      within(screen.getByRole('region', { name: '收藏文件' })).getByRole('button', {
+        name: '查看全部（4）',
+      }),
+    );
+
+    expect(onOpenFavoriteFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it('unfavorites a favorite file from its card star button', () => {
+    const onToggleFavorite = vi.fn();
+    renderDashboard({ favoriteDocuments: favoriteCardDocuments, onToggleFavorite });
+
+    fireEvent.click(
+      within(screen.getByRole('region', { name: '收藏文件' })).getByRole('button', {
+        name: '取消收藏 Design Notes.pdf',
+      }),
+    );
+
+    expect(onToggleFavorite).toHaveBeenCalledWith(favoriteCardDocuments[0].documentKey, false);
+  });
+
+  it('shows the new empty state for favorite files', () => {
+    renderDashboard({ favoriteDocuments: [] });
+
+    const favoritesRegion = screen.getByRole('region', { name: '收藏文件' });
+
+    expect(within(favoritesRegion).getByText('暂无收藏文件')).toBeInTheDocument();
+    expect(within(favoritesRegion).getByText('收藏文件后会显示在这里。')).toBeInTheDocument();
+    expect(screen.queryByText('重点文档')).not.toBeInTheDocument();
+    expect(screen.queryByText('暂无收藏')).not.toBeInTheDocument();
   });
 
   it('handles recent files menu actions and local fallback notices', () => {

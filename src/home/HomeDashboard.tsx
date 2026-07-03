@@ -154,7 +154,11 @@ export function HomeDashboard({
             showNotice('移除最近记录功能待补充', '从最近记录移除将在最近文件管理功能中补充。')
           }
         />
-        <HomeFavorites documents={favoriteDocuments} onToggleFavorite={onToggleFavorite} />
+        <HomeFavorites
+          documents={favoriteDocuments}
+          onOpenAll={onOpenFavoriteFiles}
+          onToggleFavorite={onToggleFavorite}
+        />
       </div>
       <HomeStatusPanel />
     </div>

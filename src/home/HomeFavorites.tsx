@@ -1,27 +1,44 @@
-import { Star } from 'lucide-react';
+import { FileText, Star } from 'lucide-react';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
+import { getDirectoryPath } from './homeDisplayUtils';
 
 type HomeFavoritesProps = {
   documents: FavoriteDocument[];
+  onOpenAll(): void;
   onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
 };
 
-export function HomeFavorites({ documents, onToggleFavorite }: HomeFavoritesProps) {
+export function HomeFavorites({ documents, onOpenAll, onToggleFavorite }: HomeFavoritesProps) {
+  const favoriteDocuments = documents.slice(0, 3);
+
   return (
-    <section className="home-panel" aria-labelledby="home-favorites-title">
+    <section
+      className="home-panel home-favorites-panel"
+      aria-labelledby="home-favorites-title"
+    >
       <div className="section-heading horizontal">
         <div>
-          <p>收藏</p>
-          <h2 id="home-favorites-title">重点文档</h2>
+          <p>收藏的 PDF 文件</p>
+          <h2 id="home-favorites-title">收藏文件</h2>
         </div>
-        <Star size={16} />
+        <button type="button" className="text-link-button" onClick={onOpenAll}>
+          查看全部（{documents.length}）
+        </button>
       </div>
-      {documents.length > 0 ? (
+      {favoriteDocuments.length > 0 ? (
         <div className="favorite-grid">
-          {documents.map((document) => (
+          {favoriteDocuments.map((document) => (
             <article key={document.documentKey} className="favorite-card">
-              <div className="favorite-card-header">
-                <strong>{document.displayName}</strong>
+              <div className="favorite-card-main">
+                <span className="pdf-file-icon" aria-hidden="true">
+                  <FileText size={18} />
+                </span>
+                <span className="favorite-card-copy">
+                  <strong title={document.displayName}>{document.displayName}</strong>
+                  <span title={document.path ?? '本地浏览器文件'}>
+                    {getDirectoryPath(document.path)}
+                  </span>
+                </span>
                 <button
                   type="button"
                   className="favorite-toggle active"
@@ -29,20 +46,20 @@ export function HomeFavorites({ documents, onToggleFavorite }: HomeFavoritesProp
                   aria-pressed="true"
                   onClick={() => void onToggleFavorite(document.documentKey, false)}
                 >
-                  <Star size={14} fill="currentColor" />
+                  <Star size={15} fill="currentColor" />
                 </button>
               </div>
-              <span>{document.path ?? '本地浏览器文件'}</span>
-              <span>
-                Page {document.lastPage} · {Math.round(document.progress * 100)}%
-              </span>
+              <div className="favorite-card-footer">
+                <span>第 {document.lastPage} 页</span>
+                <span>日期未知</span>
+              </div>
             </article>
           ))}
         </div>
       ) : (
         <div className="empty-block compact">
-          <strong>暂无收藏</strong>
-          <span>收藏文档后会显示在这里。</span>
+          <strong>暂无收藏文件</strong>
+          <span>收藏文件后会显示在这里。</span>
         </div>
       )}
     </section>
