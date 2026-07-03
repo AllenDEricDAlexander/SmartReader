@@ -84,17 +84,17 @@ export function HomeTopBar({
   return (
     <header className="home-top-bar" aria-label="SmartReader 顶部栏">
       <div className="home-top-brand">
-        <div className="window-controls" aria-label="macOS 窗口控制">
-          <span className="window-dot close" />
-          <span className="window-dot minimize" />
-          <span className="window-dot maximize" />
-        </div>
         <BookOpenCheck size={28} strokeWidth={1.8} />
         <div className="home-top-title">
           <strong>SmartReader</strong>
           <span>本地优先的 PDF 阅读器</span>
         </div>
-        <button type="button" className="top-open-button" onClick={onOpenPdf}>
+        <button
+          type="button"
+          className="top-open-button"
+          aria-label="打开文件"
+          onClick={onOpenPdf}
+        >
           <FolderOpen size={18} />
           <span>打开文件</span>
         </button>
@@ -118,23 +118,23 @@ export function HomeTopBar({
       </label>
 
       <nav className="top-shortcuts" aria-label="全局快捷入口">
-        <button type="button" onClick={onOpenImport}>
+        <button type="button" aria-label="导入文献" onClick={onOpenImport}>
           <FileInput size={18} />
           <span>导入文献</span>
         </button>
-        <button type="button" onClick={onOpenCompare}>
+        <button type="button" aria-label="对比阅读" onClick={onOpenCompare}>
           <Columns2 size={18} />
           <span>对比阅读</span>
         </button>
-        <button type="button" onClick={onOpenAnnotations}>
+        <button type="button" aria-label="批注管理" onClick={onOpenAnnotations}>
           <LibraryBig size={18} />
           <span>批注管理</span>
         </button>
-        <button type="button" onClick={onOpenBookmarks}>
+        <button type="button" aria-label="书签" onClick={onOpenBookmarks}>
           <BookMarked size={18} />
           <span>书签</span>
         </button>
-        <button type="button" onClick={onOpenSettings}>
+        <button type="button" aria-label="设置" onClick={onOpenSettings}>
           <Settings size={18} />
           <span>设置</span>
         </button>

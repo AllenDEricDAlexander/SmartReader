@@ -1,6 +1,14 @@
+/// <reference types="node" />
+
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { HomeTopBar } from './HomeTopBar';
+
+function readAppStyles() {
+  return readFileSync(join(process.cwd(), 'src/app/styles.css'), 'utf8');
+}
 
 function renderTopBar() {
   const props = {
@@ -18,10 +26,30 @@ function renderTopBar() {
 }
 
 describe('HomeTopBar', () => {
+  it('keeps the top bar in one elastic row', () => {
+    const styles = readAppStyles();
+
+    expect(styles).toMatch(/\.home-dashboard-shell\s*{[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\);/s);
+    expect(styles).toMatch(/\.home-top-bar\s*{[^}]*min-height:\s*56px;/s);
+    expect(styles).toMatch(/\.home-top-bar\s*{[^}]*display:\s*flex;/s);
+    expect(styles).not.toMatch(/\.home-top-bar\s*{[^}]*grid-template-columns:/s);
+    expect(styles).toMatch(/\.home-top-bar\s*{[^}]*flex-wrap:\s*nowrap;/s);
+    expect(styles).toMatch(/\.global-search-trigger\s*{[^}]*flex:\s*1 1 0;/s);
+    expect(styles).toMatch(/\.top-shortcuts\s*{[^}]*flex:\s*0 0 auto;/s);
+    expect(styles).toMatch(/\.top-shortcuts\s*{[^}]*max-width:\s*252px;/s);
+    expect(styles).toMatch(/\.top-shortcuts\s*{[^}]*flex-wrap:\s*nowrap;/s);
+    expect(styles).toMatch(/\.top-shortcuts button\s*{[^}]*width:\s*44px;/s);
+    expect(styles).toMatch(/\.top-shortcuts button\s*{[^}]*height:\s*44px;/s);
+    expect(styles).toMatch(/\.top-shortcuts button\s*{[^}]*flex:\s*0 0 44px;/s);
+    expect(styles).toMatch(/\.top-shortcuts button span\s*{[^}]*display:\s*none;/s);
+    expect(styles).not.toMatch(/\.top-shortcuts\s*{[^}]*grid-column:\s*1 \/ -1;/s);
+    expect(styles).toMatch(/@media \(max-width: 720px\)\s*{[^@]*\.home-top-bar\s*{[^}]*min-height:\s*48px;/s);
+  });
+
   it('renders desktop app chrome and shortcut entries', () => {
     renderTopBar();
 
-    expect(screen.getByLabelText('macOS 窗口控制')).toBeInTheDocument();
+    expect(screen.queryByLabelText('macOS 窗口控制')).not.toBeInTheDocument();
     expect(screen.getByText('SmartReader')).toBeInTheDocument();
     expect(screen.getByText('本地优先的 PDF 阅读器')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '打开文件' })).toBeInTheDocument();

@@ -98,17 +98,18 @@ button:disabled,
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: 80px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   background: var(--sr-bg);
 }
 
 .home-top-bar {
   min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(300px, 1fr) minmax(280px, 420px) minmax(360px, 1fr);
+  min-height: 56px;
+  display: flex;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 16px;
-  padding: 10px 18px;
+  gap: 12px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--sr-border);
   background: rgba(255, 255, 255, 0.96);
 }
@@ -121,33 +122,13 @@ button:disabled,
 }
 
 .home-top-brand {
+  flex: 0 1 auto;
   gap: 12px;
+  overflow: hidden;
 }
 
-.window-controls {
-  display: flex;
-  align-items: center;
-  gap: 7px;
+.home-top-brand svg {
   flex: 0 0 auto;
-}
-
-.window-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-}
-
-.window-dot.close {
-  background: #ff5f57;
-}
-
-.window-dot.minimize {
-  background: #ffbd2e;
-}
-
-.window-dot.maximize {
-  background: #28c840;
 }
 
 .home-top-title {
@@ -157,23 +138,34 @@ button:disabled,
 }
 
 .home-top-title strong {
+  min-width: 0;
+  overflow: hidden;
   font-size: 15px;
   line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .home-top-title span {
+  min-width: 0;
+  overflow: hidden;
   color: var(--sr-text-muted);
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .top-open-button {
+  flex: 0 0 auto;
   margin-left: 8px;
   padding: 0 12px;
+  white-space: nowrap;
 }
 
 .global-search-trigger {
+  flex: 1 1 0;
   min-width: 0;
-  height: 42px;
+  height: 38px;
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -223,13 +215,19 @@ button:disabled,
 }
 
 .top-shortcuts {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
+  max-width: 252px;
+  overflow: hidden;
 }
 
 .top-shortcuts button {
-  min-width: 72px;
-  height: 54px;
+  flex: 0 0 44px;
+  width: 44px;
+  min-width: 0;
+  height: 44px;
   display: grid;
   place-items: center;
   align-content: center;
@@ -238,6 +236,18 @@ button:disabled,
   background: transparent;
   color: var(--sr-text);
   font-size: 12px;
+}
+
+.top-shortcuts button svg {
+  flex: 0 0 auto;
+}
+
+.top-shortcuts button span {
+  display: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .top-shortcuts button:hover {
@@ -2377,18 +2387,19 @@ select {
 }
 
 @media (max-width: 1040px) {
-  .home-dashboard-shell {
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
   .home-top-bar {
-    grid-template-columns: minmax(260px, 1fr) minmax(240px, 360px);
+    gap: 12px;
+    padding: 10px 14px;
   }
 
-  .top-shortcuts {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-    overflow-x: auto;
+  .home-top-title span {
+    display: none;
+  }
+
+  .top-shortcuts button {
+    width: 40px;
+    height: 40px;
+    flex-basis: 40px;
   }
 }
 
@@ -2473,15 +2484,42 @@ select {
 
 @media (max-width: 720px) {
   .home-top-bar {
-    grid-template-columns: minmax(0, 1fr);
+    min-height: 48px;
+    gap: 8px;
+    padding: 6px 10px;
   }
 
   .home-top-brand {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    gap: 8px;
   }
 
   .top-open-button {
     margin-left: 0;
+    width: 36px;
+    min-width: 36px;
+    padding: 0;
+  }
+
+  .top-open-button span,
+  .top-shortcuts button span,
+  .global-search-trigger kbd {
+    display: none;
+  }
+
+  .global-search-trigger {
+    height: 34px;
+    padding: 0 8px;
+  }
+
+  .top-shortcuts {
+    gap: 4px;
+  }
+
+  .top-shortcuts button {
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
   }
 
   .home-dashboard {
