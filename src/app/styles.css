@@ -898,6 +898,52 @@ button:disabled,
   font-size: 13px;
 }
 
+.home-notice-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.home-action-notice {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--sr-border);
+  border-radius: var(--sr-radius);
+  background: var(--sr-surface);
+  box-shadow: 0 18px 60px rgba(15, 23, 42, 0.22);
+}
+
+.home-action-notice h2,
+.home-action-notice p {
+  margin: 0;
+}
+
+.home-action-notice h2 {
+  font-size: 18px;
+}
+
+.home-action-notice p {
+  color: var(--sr-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.home-notice-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.home-notice-actions button {
+  padding: 0 12px;
+}
+
 .quick-actions {
   display: flex;
   flex-wrap: wrap;
