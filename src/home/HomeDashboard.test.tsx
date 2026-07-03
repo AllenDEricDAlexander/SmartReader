@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -174,7 +176,25 @@ function renderDashboard(overrides: Partial<ComponentProps<typeof HomeDashboard>
   return { props, input, clickInput };
 }
 
+function readAppStyles() {
+  return readFileSync(join(process.cwd(), 'src/app/styles.css'), 'utf8');
+}
+
 describe('HomeDashboard', () => {
+  it('keeps the wide home layout three-area and degrades recent files on narrow screens', () => {
+    const styles = readAppStyles();
+
+    expect(styles).toMatch(/\.home-content\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 320px;/s);
+    expect(styles).toMatch(/\.home-assist\s*{[^}]*display:\s*grid;/s);
+    expect(styles).toMatch(/@media \(max-width: 1180px\)\s*{[^@]*\.home-content\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
+    expect(styles).toMatch(/@media \(max-width: 720px\)\s*{[^@]*\.recent-files-table\s*{[^}]*min-width:\s*0;/s);
+    expect(styles).toMatch(/@media \(max-width: 720px\)\s*{[^@]*\.recent-files-table td::before\s*{[^}]*content:\s*attr\(data-label\);/s);
+    expect(styles).toMatch(/@media \(max-width: 720px\)\s*{[^@]*\.recent-files-table \.recent-file-menu\s*{[^}]*grid-column:\s*1 \/ -1;[^}]*justify-self:\s*stretch;[^}]*width:\s*100%;/s);
+    expect(styles).not.toMatch(/span:nth-of-type\(3\)/);
+    expect(styles).toMatch(/\.home-status-left span\[aria-hidden="true"\]:not\(\.local-mode-dot\),\s*\.home-status-left svg\s*{[^}]*display:\s*none;/s);
+    expect(styles).not.toMatch(/@media \(max-width: 1280px\)\s*{[^@]*\.home-content\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
+  });
+
   it('renders the prototype welcome banner at the top of the home content', () => {
     renderDashboard({ activeSidebarPage: 'home' });
 

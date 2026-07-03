@@ -2631,15 +2631,18 @@ select {
   color: var(--sr-text);
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1180px) {
   .home-content {
     grid-template-columns: minmax(0, 1fr);
     align-content: start;
   }
 
-  .home-status,
   .home-assist {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .home-version-card {
+    grid-column: 1 / -1;
   }
 
   .quick-start-card-grid,
@@ -2806,6 +2809,26 @@ select {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .home-status-bar {
+    min-height: 34px;
+    gap: 8px;
+    padding: 0 10px;
+  }
+
+  .home-status-left {
+    flex: 1 1 0;
+    gap: 6px;
+  }
+
+  .home-status-left span[aria-hidden="true"]:not(.local-mode-dot),
+  .home-status-left svg {
+    display: none;
+  }
+
+  .home-status-right {
+    gap: 4px;
+  }
+
   .home-welcome-banner {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
@@ -2833,6 +2856,84 @@ select {
 
   .welcome-illustration {
     display: none;
+  }
+
+  .recent-files-table-wrap {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .recent-files-table {
+    min-width: 0;
+    display: block;
+    font-size: 13px;
+  }
+
+  .recent-files-table thead {
+    display: none;
+  }
+
+  .recent-files-table tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  .recent-files-table tr {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--sr-border);
+    border-radius: var(--sr-radius);
+    background: var(--sr-surface);
+  }
+
+  .recent-files-table th,
+  .recent-files-table td,
+  .recent-files-table th:nth-child(1),
+  .recent-files-table td:nth-child(1),
+  .recent-files-table th:nth-child(2),
+  .recent-files-table td:nth-child(2),
+  .recent-files-table th:nth-child(3),
+  .recent-files-table td:nth-child(3),
+  .recent-files-table th:nth-child(4),
+  .recent-files-table td:nth-child(4),
+  .recent-files-table th:nth-child(5),
+  .recent-files-table td:nth-child(5) {
+    width: auto;
+  }
+
+  .recent-files-table td {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 0;
+    border-bottom: 0;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .recent-files-table td::before {
+    content: attr(data-label);
+    color: var(--sr-text-muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .recent-files-table .recent-menu-cell {
+    justify-items: end;
+  }
+
+  .recent-files-table .recent-menu-cell::before {
+    justify-self: start;
+  }
+
+  .recent-files-table .recent-file-menu {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    width: 100%;
   }
 
   .settings-workspace,
