@@ -1128,6 +1128,173 @@ button:disabled,
   background: #dbeafe;
 }
 
+.home-recent-files {
+  display: grid;
+  gap: 14px;
+}
+
+.recent-files-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid var(--sr-border);
+  border-radius: var(--sr-radius);
+  background: var(--sr-surface);
+}
+
+.recent-files-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+}
+
+.recent-files-table th,
+.recent-files-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--sr-border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.recent-files-table th {
+  background: var(--sr-surface-muted);
+  color: var(--sr-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recent-files-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.recent-files-table tbody tr:hover {
+  background: #f8fbff;
+}
+
+.recent-files-table th:nth-child(1),
+.recent-files-table td:nth-child(1) {
+  width: 27%;
+}
+
+.recent-files-table th:nth-child(2),
+.recent-files-table td:nth-child(2) {
+  width: 28%;
+}
+
+.recent-files-table th:nth-child(3),
+.recent-files-table td:nth-child(3) {
+  width: 16%;
+  white-space: nowrap;
+}
+
+.recent-files-table th:nth-child(4),
+.recent-files-table td:nth-child(4) {
+  width: 20%;
+}
+
+.recent-files-table th:nth-child(5),
+.recent-files-table td:nth-child(5) {
+  width: 170px;
+  text-align: right;
+}
+
+.recent-file-name {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.recent-file-name .pdf-file-icon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+}
+
+.recent-file-name strong,
+.path-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-file-name strong {
+  display: block;
+}
+
+.path-cell,
+.progress-cell span:first-child {
+  color: var(--sr-text-muted);
+}
+
+.progress-cell {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 40px minmax(72px, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.progress-cell span:first-child {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recent-progress {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.recent-progress span {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: var(--sr-primary);
+}
+
+.recent-menu-cell {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.icon-button {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+}
+
+.recent-file-menu {
+  width: 150px;
+  max-width: 100%;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--sr-border);
+  border-radius: var(--sr-radius);
+  background: var(--sr-surface);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.12);
+}
+
+.recent-file-menu button {
+  justify-content: flex-start;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+}
+
+.recent-file-menu button:hover:not(:disabled) {
+  background: var(--sr-surface-muted);
+}
+
 .favorite-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

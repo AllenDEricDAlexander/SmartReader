@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { PersistedDocument } from '../persistence/persistenceApi';
@@ -48,6 +48,32 @@ const recentSessionDocuments: PersistedDocument[] = [
     pageCount: 200,
     lastPage: 100,
     progress: 0.5,
+    missing: false,
+  },
+];
+
+const recentTableDocuments: PersistedDocument[] = [
+  ...recentSessionDocuments,
+  {
+    documentKey: 'desktop:/Users/mario/Reports/Product Metrics.pdf',
+    path: '/Users/mario/Reports/Product Metrics.pdf',
+    displayName: 'Product Metrics.pdf',
+    fileSize: 4096,
+    modifiedAt: '2026-07-02T11:15:00+08:00',
+    pageCount: 64,
+    lastPage: 32,
+    progress: 0.5,
+    missing: false,
+  },
+  {
+    documentKey: 'desktop:/Users/mario/Reports/Sixth Hidden.pdf',
+    path: '/Users/mario/Reports/Sixth Hidden.pdf',
+    displayName: 'Sixth Hidden.pdf',
+    fileSize: 4096,
+    modifiedAt: '2026-07-02T12:15:00+08:00',
+    pageCount: 64,
+    lastPage: 8,
+    progress: 0.125,
     missing: false,
   },
 ];
@@ -276,21 +302,169 @@ describe('HomeDashboard', () => {
   it('shows the first restore session file details', () => {
     renderDashboard({ recentDocuments: recentSessionDocuments });
 
-    expect(screen.getByText('Design Notes.pdf')).toBeInTheDocument();
-    expect(screen.getByText('/Users/mario/Documents/')).toBeInTheDocument();
-    expect(screen.getByText('上次阅读到 第 12 / 86 页')).toBeInTheDocument();
+    const restoreRegion = screen.getByRole('region', { name: '恢复上次会话' });
+
+    expect(within(restoreRegion).getByText('Design Notes.pdf')).toBeInTheDocument();
+    expect(within(restoreRegion).getByText('/Users/mario/Documents/')).toBeInTheDocument();
+    expect(within(restoreRegion).getByText('上次阅读到 第 12 / 86 页')).toBeInTheDocument();
     expect(
-      screen.getByText(expectedLocalDateTime(recentSessionDocuments[0].modifiedAt)),
+      within(restoreRegion).getByText(expectedLocalDateTime(recentSessionDocuments[0].modifiedAt)),
     ).toBeInTheDocument();
   });
 
   it('limits restore session rows to the first three documents', () => {
     renderDashboard({ recentDocuments: recentSessionDocuments });
 
-    expect(screen.getByText('Design Notes.pdf')).toBeInTheDocument();
-    expect(screen.getByText('Reader Spec.pdf')).toBeInTheDocument();
-    expect(screen.getByText('UX Review.pdf')).toBeInTheDocument();
-    expect(screen.queryByText('Hidden Fourth.pdf')).not.toBeInTheDocument();
+    const restoreRegion = screen.getByRole('region', { name: '恢复上次会话' });
+
+    expect(within(restoreRegion).getByText('Design Notes.pdf')).toBeInTheDocument();
+    expect(within(restoreRegion).getByText('Reader Spec.pdf')).toBeInTheDocument();
+    expect(within(restoreRegion).getByText('UX Review.pdf')).toBeInTheDocument();
+    expect(within(restoreRegion).queryByText('Hidden Fourth.pdf')).not.toBeInTheDocument();
+  });
+
+  it('renders the recent files table with the first five documents', () => {
+    renderDashboard({ recentDocuments: recentTableDocuments });
+
+    const recentFilesRegion = screen.getByRole('region', { name: '最近文件' });
+
+    expect(within(recentFilesRegion).getByRole('heading', { name: '最近文件' })).toBeInTheDocument();
+    expect(within(recentFilesRegion).getByRole('button', { name: '查看全部（6）' })).toBeInTheDocument();
+    expect(within(recentFilesRegion).getByRole('columnheader', { name: '文件名' })).toBeInTheDocument();
+    expect(within(recentFilesRegion).getByRole('columnheader', { name: '路径' })).toBeInTheDocument();
+    expect(within(recentFilesRegion).getByRole('columnheader', { name: '上次打开' })).toBeInTheDocument();
+    expect(within(recentFilesRegion).getByRole('columnheader', { name: '阅读进度' })).toBeInTheDocument();
+    expect(within(recentFilesRegion).getByRole('columnheader', { name: '操作' })).toBeInTheDocument();
+    expect(within(recentFilesRegion).getByText('Design Notes.pdf')).toBeInTheDocument();
+    expect(within(recentFilesRegion).getByText('/Users/mario/Documents/')).toBeInTheDocument();
+    expect(
+      within(recentFilesRegion).getByText(expectedLocalDateTime(recentTableDocuments[0].modifiedAt)),
+    ).toBeInTheDocument();
+    expect(within(recentFilesRegion).getByText('Product Metrics.pdf')).toBeInTheDocument();
+    expect(within(recentFilesRegion).queryByText('Sixth Hidden.pdf')).not.toBeInTheDocument();
+    expect(within(recentFilesRegion).getAllByRole('progressbar')).toHaveLength(5);
+    expect(
+      within(recentFilesRegion).getByRole('progressbar', { name: '阅读进度 Design Notes.pdf' }),
+    ).toHaveAttribute('aria-valuenow', '14');
+  });
+
+  it('forwards recent files view-all from the table header', () => {
+    const onOpenRecentFiles = vi.fn();
+    renderDashboard({ recentDocuments: recentTableDocuments, onOpenRecentFiles });
+
+    fireEvent.click(
+      within(screen.getByRole('region', { name: '最近文件' })).getByRole('button', {
+        name: '查看全部（6）',
+      }),
+    );
+
+    expect(onOpenRecentFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles recent files menu actions and local fallback notices', () => {
+    const onReopenRecentDocument = vi.fn();
+    const onToggleFavorite = vi.fn();
+    renderDashboard({
+      recentDocuments: recentTableDocuments,
+      favoriteDocuments: [
+        {
+          documentKey: recentTableDocuments[1].documentKey,
+          displayName: recentTableDocuments[1].displayName,
+          path: recentTableDocuments[1].path,
+          lastPage: recentTableDocuments[1].lastPage,
+          progress: recentTableDocuments[1].progress,
+        },
+      ],
+      onReopenRecentDocument,
+      onToggleFavorite,
+    });
+
+    const recentFilesRegion = screen.getByRole('region', { name: '最近文件' });
+
+    fireEvent.click(
+      within(recentFilesRegion).getByRole('button', { name: '更多操作 Design Notes.pdf' }),
+    );
+    fireEvent.click(within(recentFilesRegion).getByRole('menuitem', { name: '打开' }));
+    expect(onReopenRecentDocument).toHaveBeenCalledTimes(1);
+    expect(onReopenRecentDocument).toHaveBeenCalledWith(recentTableDocuments[0]);
+
+    fireEvent.click(
+      within(recentFilesRegion).getByRole('button', { name: '更多操作 Design Notes.pdf' }),
+    );
+    fireEvent.click(within(recentFilesRegion).getByRole('menuitem', { name: '收藏' }));
+    expect(onToggleFavorite).toHaveBeenCalledWith(recentTableDocuments[0].documentKey, true);
+
+    fireEvent.click(
+      within(recentFilesRegion).getByRole('button', { name: '更多操作 Reader Spec.pdf' }),
+    );
+    fireEvent.click(within(recentFilesRegion).getByRole('menuitem', { name: '取消收藏' }));
+    expect(onToggleFavorite).toHaveBeenCalledWith(recentTableDocuments[1].documentKey, false);
+
+    fireEvent.click(
+      within(recentFilesRegion).getByRole('button', { name: '更多操作 Design Notes.pdf' }),
+    );
+    fireEvent.click(within(recentFilesRegion).getByRole('menuitem', { name: '定位文件' }));
+    expect(screen.getByRole('dialog', { name: '定位文件功能待补充' })).toBeInTheDocument();
+    expect(screen.getByText('定位文件将在最近文件管理功能中补充。')).toBeInTheDocument();
+  });
+
+  it('shows the deferred remove-recent notice from the recent files menu', () => {
+    renderDashboard({ recentDocuments: recentTableDocuments });
+
+    const recentFilesRegion = screen.getByRole('region', { name: '最近文件' });
+
+    fireEvent.click(
+      within(recentFilesRegion).getByRole('button', { name: '更多操作 Design Notes.pdf' }),
+    );
+    fireEvent.click(within(recentFilesRegion).getByRole('menuitem', { name: '从最近记录移除' }));
+
+    expect(screen.getByRole('dialog', { name: '移除最近记录功能待补充' })).toBeInTheDocument();
+    expect(screen.getByText('从最近记录移除将在最近文件管理功能中补充。')).toBeInTheDocument();
+  });
+
+  it('closes the recent files menu with Escape and returns focus to its trigger', () => {
+    renderDashboard({ recentDocuments: recentTableDocuments });
+
+    const recentFilesRegion = screen.getByRole('region', { name: '最近文件' });
+    const menuButton = within(recentFilesRegion).getByRole('button', {
+      name: '更多操作 Design Notes.pdf',
+    });
+
+    fireEvent.click(menuButton);
+    const menu = within(recentFilesRegion).getByRole('menu');
+
+    expect(within(menu).getByRole('menuitem', { name: '打开' })).toHaveFocus();
+
+    fireEvent.keyDown(menu, { key: 'Escape' });
+
+    expect(within(recentFilesRegion).queryByRole('menu')).not.toBeInTheDocument();
+    expect(menuButton).toHaveFocus();
+  });
+
+  it('cycles recent files menu item focus with arrow keys', () => {
+    renderDashboard({ recentDocuments: recentTableDocuments });
+
+    const recentFilesRegion = screen.getByRole('region', { name: '最近文件' });
+
+    fireEvent.click(
+      within(recentFilesRegion).getByRole('button', { name: '更多操作 Design Notes.pdf' }),
+    );
+
+    const menu = within(recentFilesRegion).getByRole('menu');
+    const openItem = within(menu).getByRole('menuitem', { name: '打开' });
+    const favoriteItem = within(menu).getByRole('menuitem', { name: '收藏' });
+    const removeItem = within(menu).getByRole('menuitem', { name: '从最近记录移除' });
+
+    expect(openItem).toHaveFocus();
+
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(favoriteItem).toHaveFocus();
+
+    fireEvent.keyDown(menu, { key: 'ArrowUp' });
+    expect(openItem).toHaveFocus();
+
+    fireEvent.keyDown(menu, { key: 'ArrowUp' });
+    expect(removeItem).toHaveFocus();
   });
 
   it('reopens a recent document when clicking its restore session row area', () => {

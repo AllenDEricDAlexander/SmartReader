@@ -5,6 +5,7 @@ import { HomeActionNotice } from './HomeActionNotice';
 import { HomeBlankPage, isHomeBlankPageId } from './HomeBlankPage';
 import { HomeFavorites } from './HomeFavorites';
 import { HomeQuickStart } from './HomeQuickStart';
+import { HomeRecentFiles } from './HomeRecentFiles';
 import { HomeRecentSessions } from './HomeRecentSessions';
 import { HomeSidebar, type HomeSidebarPage, type HomeSidebarProps } from './HomeSidebar';
 import { HomeStatusPanel } from './HomeStatusPanel';
@@ -89,6 +90,7 @@ export function HomeDashboard({
 }: HomeDashboardProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [notice, setNotice] = useState<HomeNoticeState | null>(null);
+  const favoriteDocumentKeys = new Set(favoriteDocuments.map((document) => document.documentKey));
 
   const openBrowserFilePicker = useCallback(() => {
     fileInputRef.current?.click();
@@ -121,6 +123,10 @@ export function HomeDashboard({
     });
   }, []);
 
+  const showNotice = useCallback((title: string, message: string) => {
+    setNotice({ title, message });
+  }, []);
+
   const homeContent = (
     <div className="home-content">
       <div className="home-primary">
@@ -134,6 +140,19 @@ export function HomeDashboard({
           documents={recentDocuments}
           onReopenDocument={onReopenRecentDocument}
           onClearRecords={showClearRecordNotice}
+        />
+        <HomeRecentFiles
+          documents={recentDocuments}
+          favoriteDocumentKeys={favoriteDocumentKeys}
+          onOpenAll={onOpenRecentFiles}
+          onReopenDocument={onReopenRecentDocument}
+          onToggleFavorite={onToggleFavorite}
+          onLocateFile={() =>
+            showNotice('定位文件功能待补充', '定位文件将在最近文件管理功能中补充。')
+          }
+          onRemoveRecent={() =>
+            showNotice('移除最近记录功能待补充', '从最近记录移除将在最近文件管理功能中补充。')
+          }
         />
         <HomeFavorites documents={favoriteDocuments} onToggleFavorite={onToggleFavorite} />
       </div>
