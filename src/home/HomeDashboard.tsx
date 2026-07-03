@@ -9,6 +9,7 @@ import { HomeQuickStart } from './HomeQuickStart';
 import { HomeRecentFiles } from './HomeRecentFiles';
 import { HomeRecentSessions } from './HomeRecentSessions';
 import { HomeSidebar, type HomeSidebarPage, type HomeSidebarProps } from './HomeSidebar';
+import { HomeStatusBar } from './HomeStatusBar';
 import { HomeTopBar } from './HomeTopBar';
 import { HomeWelcomeBanner } from './HomeWelcomeBanner';
 import type { HomeAppVersion, HomeTaskStatus } from './homeTypes';
@@ -160,6 +161,10 @@ export function HomeDashboard({
     showNotice('检查更新能力待接入', '当前版本暂未接入自动检查更新。');
   }, [onCheckUpdates, showNotice]);
 
+  const handleOpenViewControls = useCallback(() => {
+    showNotice('首页视图控制待接入', '当前版本暂未接入首页视图控制。');
+  }, [showNotice]);
+
   const blockHomeDrop: DragEventHandler<HTMLElement> = useCallback((event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -260,6 +265,7 @@ export function HomeDashboard({
         />
         <div className="home-main">{mainContent}</div>
       </section>
+      <HomeStatusBar taskStatus={taskStatus} onOpenViewControls={handleOpenViewControls} />
       {notice ? (
         <HomeActionNotice
           key={notice.title}

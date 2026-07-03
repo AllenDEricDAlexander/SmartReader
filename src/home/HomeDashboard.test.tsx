@@ -242,6 +242,26 @@ describe('HomeDashboard', () => {
     expect(screen.queryByRole('heading', { name: '阅读流程' })).not.toBeInTheDocument();
   });
 
+  it('renders the fixed home status bar on the home page', () => {
+    renderDashboard({ activeSidebarPage: 'home' });
+
+    const statusBar = screen.getByRole('contentinfo', { name: '首页状态栏' });
+
+    expect(within(statusBar).getByText('本地模式')).toBeInTheDocument();
+    expect(within(statusBar).getByText('所有数据保存在本地')).toBeInTheDocument();
+    expect(within(statusBar).getByText('125%')).toBeInTheDocument();
+    expect(within(statusBar).getByText('无任务运行中')).toBeInTheDocument();
+  });
+
+  it('shows a deferred notice when opening status bar view controls', () => {
+    renderDashboard({ activeSidebarPage: 'home' });
+
+    fireEvent.click(screen.getByRole('button', { name: '打开首页视图控制，当前缩放 125%' }));
+
+    expect(screen.getByRole('dialog', { name: '首页视图控制待接入' })).toBeInTheDocument();
+    expect(screen.getByText('当前版本暂未接入首页视图控制。')).toBeInTheDocument();
+  });
+
   it('does not render the home assist rail for blank sidebar pages', () => {
     renderDashboard({ activeSidebarPage: 'recentFiles' });
 

@@ -98,7 +98,7 @@ button:disabled,
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   background: var(--sr-bg);
 }
 
@@ -685,6 +685,86 @@ button:disabled,
   gap: 16px;
   padding: 16px;
   overflow: auto;
+}
+
+.home-status-bar {
+  min-width: 0;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 16px;
+  border-top: 1px solid var(--sr-border);
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--sr-text-muted);
+  font-size: 12px;
+}
+
+.home-status-left,
+.home-status-right,
+.home-task-status,
+.home-view-scale {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.home-status-left {
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.home-status-left span,
+.home-task-status span {
+  white-space: nowrap;
+}
+
+.local-mode-dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #22c55e;
+}
+
+.home-status-right {
+  flex: 0 0 auto;
+}
+
+.home-view-scale,
+.home-status-icon-button {
+  min-height: 28px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--sr-text-muted);
+}
+
+.home-view-scale {
+  padding: 0 4px;
+}
+
+.home-status-icon-button {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+}
+
+.home-view-scale:hover:not(:disabled),
+.home-status-icon-button:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.16);
+  background: #f8fbff;
+  color: var(--sr-primary);
+}
+
+.home-task-status svg {
+  color: var(--sr-text-muted);
+}
+
+.home-task-status.error,
+.home-task-status.error svg {
+  color: var(--sr-danger);
 }
 
 .home-blank-content {

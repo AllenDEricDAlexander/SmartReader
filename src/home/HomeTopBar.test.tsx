@@ -29,7 +29,7 @@ describe('HomeTopBar', () => {
   it('keeps the top bar in one elastic row', () => {
     const styles = readAppStyles();
 
-    expect(styles).toMatch(/\.home-dashboard-shell\s*{[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\);/s);
+    expect(styles).toMatch(/\.home-dashboard-shell\s*{[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\) auto;/s);
     expect(styles).toMatch(/\.home-top-bar\s*{[^}]*min-height:\s*56px;/s);
     expect(styles).toMatch(/\.home-top-bar\s*{[^}]*display:\s*flex;/s);
     expect(styles).not.toMatch(/\.home-top-bar\s*{[^}]*grid-template-columns:/s);
