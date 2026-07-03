@@ -47,6 +47,28 @@ describe('HomeQuickStart', () => {
     expect(dropCard).not.toHaveClass('drag-active');
   });
 
+  it('rejects non-PDF drops without forwarding to the reader drop handler', () => {
+    const onDropPdf = vi.fn();
+    const onRejectDrop = vi.fn();
+    renderApp(
+      <HomeQuickStart
+        onOpenPdf={vi.fn()}
+        onDropPdf={onDropPdf}
+        onRejectDrop={onRejectDrop}
+        onOpenFolder={vi.fn()}
+      />,
+    );
+
+    fireEvent.drop(screen.getByRole('button', { name: /拖拽到这里/ }), {
+      dataTransfer: {
+        files: [new File(['text'], 'notes.txt', { type: 'text/plain' })],
+      },
+    });
+
+    expect(onDropPdf).not.toHaveBeenCalled();
+    expect(onRejectDrop).toHaveBeenCalledWith('仅支持 PDF 文件');
+  });
+
   it('keeps card drops from bubbling to parent drop handlers', () => {
     let defaultPrevented = false;
     const onDropPdf = vi.fn((event) => {

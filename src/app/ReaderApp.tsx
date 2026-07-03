@@ -645,6 +645,30 @@ export function ReaderApp({
     [reopenRecentDocument],
   );
 
+  const openFavoriteDocument = useCallback(
+    async (document: FavoriteDocument) => {
+      const recentDocument =
+        recentDocuments.find(
+          (candidate) =>
+            candidate.documentKey === document.documentKey ||
+            (Boolean(document.path) && candidate.path === document.path),
+        ) ?? null;
+
+      if (!recentDocument) {
+        return false;
+      }
+
+      const opened = await reopenRecentDocument(recentDocument);
+
+      if (opened) {
+        setWorkspaceOverride(null);
+      }
+
+      return opened;
+    },
+    [recentDocuments, reopenRecentDocument],
+  );
+
   const openImportPdf = useCallback(async () => {
     const opened = await openPdf();
 
@@ -955,6 +979,7 @@ export function ReaderApp({
           onDropPdf={handleDrop}
           onBrowserFileChange={handleBrowserFileChange}
           onReopenRecentDocument={(document) => void reopenRecentDocument(document)}
+          onOpenFavoriteDocument={(document) => openFavoriteDocument(document)}
           onToggleFavorite={handleToggleFavorite}
           canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
           onOpenGlobalSearch={openGlobalSearch}

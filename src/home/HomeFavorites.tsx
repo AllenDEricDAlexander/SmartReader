@@ -5,10 +5,16 @@ import { getDirectoryPath } from './homeDisplayUtils';
 type HomeFavoritesProps = {
   documents: FavoriteDocument[];
   onOpenAll(): void;
+  onOpenDocument(document: FavoriteDocument): void | Promise<void>;
   onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
 };
 
-export function HomeFavorites({ documents, onOpenAll, onToggleFavorite }: HomeFavoritesProps) {
+export function HomeFavorites({
+  documents,
+  onOpenAll,
+  onOpenDocument,
+  onToggleFavorite,
+}: HomeFavoritesProps) {
   const favoriteDocuments = documents.slice(0, 3);
 
   return (
@@ -30,15 +36,22 @@ export function HomeFavorites({ documents, onOpenAll, onToggleFavorite }: HomeFa
           {favoriteDocuments.map((document) => (
             <article key={document.documentKey} className="favorite-card">
               <div className="favorite-card-main">
-                <span className="pdf-file-icon" aria-hidden="true">
-                  <FileText size={18} />
-                </span>
-                <span className="favorite-card-copy">
-                  <strong title={document.displayName}>{document.displayName}</strong>
-                  <span title={document.path ?? '本地浏览器文件'}>
-                    {getDirectoryPath(document.path)}
+                <button
+                  type="button"
+                  className="favorite-card-open"
+                  aria-label={`打开收藏文件 ${document.displayName}`}
+                  onClick={() => void onOpenDocument(document)}
+                >
+                  <span className="pdf-file-icon" aria-hidden="true">
+                    <FileText size={18} />
                   </span>
-                </span>
+                  <span className="favorite-card-copy">
+                    <strong title={document.displayName}>{document.displayName}</strong>
+                    <span title={document.path ?? '本地浏览器文件'}>
+                      {getDirectoryPath(document.path)}
+                    </span>
+                  </span>
+                </button>
                 <button
                   type="button"
                   className="favorite-toggle active"

@@ -35,6 +35,7 @@ type HomeDashboardProps = {
   onDropPdf: DragEventHandler<HTMLElement>;
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
   onReopenRecentDocument(document: PersistedDocument): void | Promise<void>;
+  onOpenFavoriteDocument?(document: FavoriteDocument): boolean | void | Promise<boolean | void>;
   onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
   canOpenNativePdf?(): boolean;
   onOpenGlobalSearch?(): void;
@@ -78,6 +79,7 @@ export function HomeDashboard({
   onDropPdf,
   onBrowserFileChange,
   onReopenRecentDocument,
+  onOpenFavoriteDocument,
   onToggleFavorite,
   canOpenNativePdf = () => true,
   onOpenGlobalSearch = noop,
@@ -140,6 +142,26 @@ export function HomeDashboard({
     setNotice({ title, message });
   }, []);
 
+  const handleOpenFavoriteDocument = useCallback(
+    async (document: FavoriteDocument) => {
+      if (!onOpenFavoriteDocument) {
+        showNotice('无法打开收藏文件', '该收藏文件暂无可打开的本地路径。');
+        return;
+      }
+
+      try {
+        const opened = await onOpenFavoriteDocument(document);
+
+        if (opened === false) {
+          showNotice('无法打开收藏文件', '该收藏文件暂无可打开的本地路径。');
+        }
+      } catch {
+        showNotice('无法打开收藏文件', '该收藏文件暂无可打开的本地路径。');
+      }
+    },
+    [onOpenFavoriteDocument, showNotice],
+  );
+
   const handleSetupFileAssociation = useCallback(() => {
     if (onSetupFileAssociation) {
       void onSetupFileAssociation();
@@ -177,6 +199,7 @@ export function HomeDashboard({
         <HomeQuickStart
           onOpenPdf={handleOpenPdf}
           onDropPdf={onDropPdf}
+          onRejectDrop={(message) => showNotice('无法打开文件', message)}
           onOpenFolder={onOpenFolders}
         />
         <HomeRecentSessions
@@ -200,6 +223,7 @@ export function HomeDashboard({
         <HomeFavorites
           documents={favoriteDocuments}
           onOpenAll={onOpenFavoriteFiles}
+          onOpenDocument={handleOpenFavoriteDocument}
           onToggleFavorite={onToggleFavorite}
         />
       </div>

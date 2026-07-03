@@ -438,6 +438,21 @@ describe('HomeDashboard', () => {
     expect(onDropPdf).toHaveBeenCalledTimes(1);
   });
 
+  it('shows a notice for non-PDF drops without calling the reader drop handler', () => {
+    const onDropPdf = vi.fn();
+    renderDashboard({ onDropPdf });
+
+    fireEvent.drop(screen.getByRole('button', { name: /拖拽到这里/ }), {
+      dataTransfer: {
+        files: [new File(['text'], 'notes.txt', { type: 'text/plain' })],
+      },
+    });
+
+    expect(onDropPdf).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: '无法打开文件' })).toBeInTheDocument();
+    expect(screen.getByText('仅支持 PDF 文件')).toBeInTheDocument();
+  });
+
   it('blocks non-drop-card home drops from reaching the PDF or parent drop handlers', () => {
     const onDropPdf = vi.fn((event) => event.preventDefault());
     const onParentDrop = vi.fn();
@@ -493,6 +508,7 @@ describe('HomeDashboard', () => {
     renderDashboard({ recentDocuments: recentTableDocuments });
 
     const recentFilesRegion = screen.getByRole('region', { name: '最近文件' });
+    const designNotesRow = within(recentFilesRegion).getByText('Design Notes.pdf').closest('tr');
 
     expect(within(recentFilesRegion).getByRole('heading', { name: '最近文件' })).toBeInTheDocument();
     expect(within(recentFilesRegion).getByRole('button', { name: '查看全部（6）' })).toBeInTheDocument();
@@ -512,6 +528,30 @@ describe('HomeDashboard', () => {
     expect(
       within(recentFilesRegion).getByRole('progressbar', { name: '阅读进度 Design Notes.pdf' }),
     ).toHaveAttribute('aria-valuenow', '14');
+    expect(designNotesRow).not.toBeNull();
+    expect(
+      within(designNotesRow as HTMLTableRowElement).getByText('Design Notes.pdf').closest('td'),
+    ).toHaveAttribute('data-label', '文件名');
+    expect(
+      within(designNotesRow as HTMLTableRowElement)
+        .getByText('/Users/mario/Documents/')
+        .closest('td'),
+    ).toHaveAttribute('data-label', '路径');
+    expect(
+      within(designNotesRow as HTMLTableRowElement)
+        .getByText(expectedLocalDateTime(recentTableDocuments[0].modifiedAt))
+        .closest('td'),
+    ).toHaveAttribute('data-label', '上次打开');
+    expect(
+      within(designNotesRow as HTMLTableRowElement)
+        .getByRole('progressbar', { name: '阅读进度 Design Notes.pdf' })
+        .closest('td'),
+    ).toHaveAttribute('data-label', '阅读进度');
+    expect(
+      within(designNotesRow as HTMLTableRowElement)
+        .getByRole('button', { name: '更多操作 Design Notes.pdf' })
+        .closest('td'),
+    ).toHaveAttribute('data-label', '操作');
   });
 
   it('forwards recent files view-all from the table header', () => {
@@ -568,6 +608,49 @@ describe('HomeDashboard', () => {
     );
 
     expect(onToggleFavorite).toHaveBeenCalledWith(favoriteCardDocuments[0].documentKey, false);
+  });
+
+  it('opens a favorite file from its card body', () => {
+    const onOpenFavoriteDocument = vi.fn();
+    renderDashboard({ favoriteDocuments: favoriteCardDocuments, onOpenFavoriteDocument });
+
+    fireEvent.click(
+      within(screen.getByRole('region', { name: '收藏文件' })).getByRole('button', {
+        name: '打开收藏文件 Design Notes.pdf',
+      }),
+    );
+
+    expect(onOpenFavoriteDocument).toHaveBeenCalledTimes(1);
+    expect(onOpenFavoriteDocument).toHaveBeenCalledWith(favoriteCardDocuments[0]);
+  });
+
+  it('shows a fallback notice when favorite open has no callback', () => {
+    renderDashboard({ favoriteDocuments: favoriteCardDocuments });
+
+    fireEvent.click(
+      within(screen.getByRole('region', { name: '收藏文件' })).getByRole('button', {
+        name: '打开收藏文件 Design Notes.pdf',
+      }),
+    );
+
+    expect(screen.getByRole('dialog', { name: '无法打开收藏文件' })).toBeInTheDocument();
+    expect(screen.getByText('该收藏文件暂无可打开的本地路径。')).toBeInTheDocument();
+  });
+
+  it('shows a fallback notice when favorite open callback cannot resolve a file', async () => {
+    const onOpenFavoriteDocument = vi.fn().mockResolvedValue(false);
+    renderDashboard({ favoriteDocuments: favoriteCardDocuments, onOpenFavoriteDocument });
+
+    fireEvent.click(
+      within(screen.getByRole('region', { name: '收藏文件' })).getByRole('button', {
+        name: '打开收藏文件 Design Notes.pdf',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: '无法打开收藏文件' })).toBeInTheDocument();
+    });
+    expect(screen.getByText('该收藏文件暂无可打开的本地路径。')).toBeInTheDocument();
   });
 
   it('shows the new empty state for favorite files', () => {

@@ -1,18 +1,32 @@
 import { CloudUpload, FolderOpen, FolderPlus } from 'lucide-react';
 import { useState, type DragEventHandler } from 'react';
+import { getPdfFilesFromDrop } from '../platform/dropZone';
 
 type HomeQuickStartProps = {
   onOpenPdf(): void;
   onDropPdf: DragEventHandler<HTMLElement>;
+  onRejectDrop?(message: string): void;
   onOpenFolder(): void;
 };
 
-export function HomeQuickStart({ onOpenPdf, onDropPdf, onOpenFolder }: HomeQuickStartProps) {
+export function HomeQuickStart({
+  onOpenPdf,
+  onDropPdf,
+  onRejectDrop,
+  onOpenFolder,
+}: HomeQuickStartProps) {
   const [dragActive, setDragActive] = useState(false);
 
   const handleDrop: DragEventHandler<HTMLButtonElement> = (event) => {
     setDragActive(false);
+    event.preventDefault();
     event.stopPropagation();
+
+    if (getPdfFilesFromDrop(event.dataTransfer.files).length === 0) {
+      onRejectDrop?.('仅支持 PDF 文件');
+      return;
+    }
+
     onDropPdf(event);
   };
 

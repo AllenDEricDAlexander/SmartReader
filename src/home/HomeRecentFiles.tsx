@@ -153,7 +153,7 @@ export function HomeRecentFiles({
 
                 return (
                   <tr key={document.documentKey}>
-                    <td>
+                    <td data-label="文件名">
                       <span className="recent-file-name">
                         <span className="pdf-file-icon" aria-hidden="true">
                           <FileText size={16} />
@@ -161,11 +161,15 @@ export function HomeRecentFiles({
                         <strong title={document.displayName}>{document.displayName}</strong>
                       </span>
                     </td>
-                    <td className="path-cell" title={document.path ?? '本地浏览器文件'}>
+                    <td
+                      className="path-cell"
+                      data-label="路径"
+                      title={document.path ?? '本地浏览器文件'}
+                    >
                       {getDirectoryPath(document.path)}
                     </td>
-                    <td>{formatDateTime(document.modifiedAt)}</td>
-                    <td>
+                    <td data-label="上次打开">{formatDateTime(document.modifiedAt)}</td>
+                    <td data-label="阅读进度">
                       <span className="progress-cell">
                         <span>{progressPercent}%</span>
                         <span
@@ -180,7 +184,7 @@ export function HomeRecentFiles({
                         </span>
                       </span>
                     </td>
-                    <td className="recent-menu-cell">
+                    <td className="recent-menu-cell" data-label="操作">
                       <button
                         type="button"
                         ref={(element) => setTriggerRef(document.documentKey, element)}

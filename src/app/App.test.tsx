@@ -108,7 +108,9 @@ describe('App', () => {
     expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /打开本地 PDF/ })).toBeInTheDocument();
     expect(screen.getByText('拖拽到这里')).toBeInTheDocument();
-    expect(screen.getByText('AI 助手')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('complementary', { name: '辅助信息' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+    expect(screen.queryByText('AI 助手')).not.toBeInTheDocument();
   });
 
   it('shows sidebar data from recent files, favorites, session restore, and cache stats', async () => {
@@ -224,7 +226,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '管理缓存' }));
+    fireEvent.click(within(screen.getByLabelText('本地缓存')).getByRole('button', { name: '管理缓存' }));
 
     expect(await screen.findByLabelText('设置工作区')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '缓存' })).toBeInTheDocument();
@@ -1543,6 +1545,87 @@ describe('App', () => {
       expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/book.pdf');
     });
     expect(await screen.findByText('PDF blob:recent')).toBeInTheDocument();
+  });
+
+  it('opens a favorite file through its matching recent document', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:favorite-recent');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const readDesktopPdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/favorite.pdf', name: 'favorite.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-16T00:00:00Z',
+    });
+    const persistence = {
+      ...createEmptyPersistence(),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/favorite.pdf',
+          path: '/tmp/favorite.pdf',
+          displayName: 'favorite.pdf',
+          fileSize: 2048,
+          modifiedAt: '2026-06-16T00:00:00Z',
+          pageCount: 20,
+          lastPage: 5,
+          progress: 0.25,
+          missing: false,
+        },
+      ]),
+      listFavoriteDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/favorite.pdf',
+          displayName: 'favorite.pdf',
+          path: '/tmp/favorite.pdf',
+          lastPage: 5,
+          progress: 0.25,
+        },
+      ]),
+      loadReaderSession: vi.fn().mockResolvedValue(null),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '打开收藏文件 favorite.pdf' }));
+
+    await waitFor(() => {
+      expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/favorite.pdf');
+    });
+    expect(await screen.findByText('PDF blob:favorite-recent')).toBeInTheDocument();
+  });
+
+  it('shows a notice when a favorite file has no matching recent document', async () => {
+    const persistence = {
+      ...createEmptyPersistence(),
+      listFavoriteDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/tmp/missing-favorite.pdf',
+          displayName: 'missing-favorite.pdf',
+          path: '/tmp/missing-favorite.pdf',
+          lastPage: 1,
+          progress: 0.1,
+        },
+      ]),
+      loadReaderSession: vi.fn().mockResolvedValue(null),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '打开收藏文件 missing-favorite.pdf' }));
+
+    expect(await screen.findByRole('dialog', { name: '无法打开收藏文件' })).toBeInTheDocument();
+    expect(screen.getByText('该收藏文件暂无可打开的本地路径。')).toBeInTheDocument();
   });
 
   it('opens PDF paths from desktop Open With events', async () => {
