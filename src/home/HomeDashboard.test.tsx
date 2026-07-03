@@ -46,6 +46,26 @@ function renderDashboard(overrides: Partial<ComponentProps<typeof HomeDashboard>
 }
 
 describe('HomeDashboard', () => {
+  it('renders the prototype welcome banner at the top of the home content', () => {
+    renderDashboard({ activeSidebarPage: 'home' });
+
+    expect(screen.getByRole('region', { name: '欢迎使用 SmartReader' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 1, name: '欢迎使用 SmartReader' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('本地优先 · 隐私安全 · 高效阅读')).toBeInTheDocument();
+    expect(
+      screen.getByText('所有文件和数据仅存储在您的设备上，完全掌控您的知识。'),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('本地安全阅读插画')).toBeInTheDocument();
+  });
+
+  it('does not show the old dashboard title header on the home page', () => {
+    renderDashboard({ activeSidebarPage: 'home' });
+
+    expect(screen.queryByRole('heading', { name: '阅读仪表盘' })).not.toBeInTheDocument();
+  });
+
   it('keeps the home dashboard content and sidebar navigation active for the home page', () => {
     renderDashboard({ activeSidebarPage: 'home' });
 

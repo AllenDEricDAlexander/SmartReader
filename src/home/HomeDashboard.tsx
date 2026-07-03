@@ -8,6 +8,7 @@ import { HomeRecentSessions } from './HomeRecentSessions';
 import { HomeSidebar, type HomeSidebarPage, type HomeSidebarProps } from './HomeSidebar';
 import { HomeStatusPanel } from './HomeStatusPanel';
 import { HomeTopBar } from './HomeTopBar';
+import { HomeWelcomeBanner } from './HomeWelcomeBanner';
 
 const noop = () => undefined;
 
@@ -98,6 +99,7 @@ export function HomeDashboard({
   const homeContent = (
     <div className="home-content">
       <div className="home-primary">
+        <HomeWelcomeBanner />
         <HomeQuickStart onOpenPdf={handleOpenPdf} onPickBrowserFile={openBrowserFilePicker} />
         <HomeRecentSessions documents={recentDocuments} onReopenDocument={onReopenRecentDocument} />
         <HomeFavorites documents={favoriteDocuments} onToggleFavorite={onToggleFavorite} />
@@ -153,16 +155,7 @@ export function HomeDashboard({
           onOpenCompare={onOpenCompare}
           onOpenCacheManagement={onOpenCacheManagement}
         />
-        <div className="home-main">
-          <header className="home-header">
-            <div>
-              <p>SmartReader</p>
-              <h1>阅读仪表盘</h1>
-            </div>
-            <span>离线优先 · 桌面工作区</span>
-          </header>
-          {mainContent}
-        </div>
+        <div className="home-main">{mainContent}</div>
       </section>
     </div>
   );

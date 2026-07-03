@@ -701,6 +701,121 @@ button:disabled,
   padding: 16px;
 }
 
+.home-welcome-banner {
+  min-width: 0;
+  min-height: 132px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(220px, 320px);
+  align-items: center;
+  gap: 28px;
+  padding: 26px 32px;
+  border: 1px solid var(--sr-border);
+  border-radius: var(--sr-radius);
+  background: var(--sr-surface);
+}
+
+.welcome-brand-icon {
+  width: 78px;
+  height: 78px;
+  display: grid;
+  place-items: center;
+  border-radius: 20px;
+  background: #eaf3ff;
+  color: var(--sr-text);
+}
+
+.welcome-copy {
+  min-width: 0;
+}
+
+.welcome-copy h1,
+.welcome-copy h2 {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.2;
+}
+
+.welcome-subtitle,
+.welcome-description {
+  margin: 8px 0 0;
+  color: var(--sr-text-muted);
+}
+
+.welcome-subtitle {
+  font-size: 16px;
+}
+
+.welcome-description {
+  font-size: 13px;
+}
+
+.welcome-illustration {
+  position: relative;
+  min-height: 104px;
+  display: grid;
+  place-items: center;
+}
+
+.welcome-document-card {
+  width: 150px;
+  min-height: 104px;
+  display: grid;
+  gap: 8px;
+  padding: 18px 18px 14px;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: var(--sr-radius);
+  background: #f8fbff;
+  color: #93b4e8;
+  box-shadow: 20px 12px 0 rgba(37, 99, 235, 0.08);
+}
+
+.document-line {
+  height: 5px;
+  border-radius: 999px;
+  background: #cbd5e1;
+}
+
+.document-line.strong {
+  background: #8ab4f8;
+}
+
+.document-line.short {
+  width: 76%;
+}
+
+.document-line.accent {
+  width: 44%;
+  background: #f5c044;
+}
+
+.welcome-shield {
+  position: absolute;
+  right: 34px;
+  bottom: 8px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--sr-primary);
+  color: #fff;
+}
+
+.welcome-sparkle {
+  position: absolute;
+  color: #9cc3ff;
+}
+
+.welcome-sparkle.one {
+  left: 38px;
+  bottom: 22px;
+}
+
+.welcome-sparkle.two {
+  right: 4px;
+  top: 18px;
+}
+
 .section-heading {
   min-width: 0;
 }
@@ -1964,6 +2079,16 @@ select {
 
   .home-status {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-welcome-banner {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    padding: 22px;
+  }
+
+  .welcome-illustration {
+    display: none;
   }
 
   .settings-workspace,
