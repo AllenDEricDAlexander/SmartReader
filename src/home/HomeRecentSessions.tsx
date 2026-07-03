@@ -1,61 +1,75 @@
-import { AlertTriangle, Clock3 } from 'lucide-react';
-import { mapDocumentsToRecentFiles } from '../library/recentFiles';
+import { FileText } from 'lucide-react';
 import type { PersistedDocument } from '../persistence/persistenceApi';
+import { formatDateTime, formatPageProgress, getDirectoryPath } from './homeDisplayUtils';
 
 type HomeRecentSessionsProps = {
   documents: PersistedDocument[];
   onReopenDocument(document: PersistedDocument): void | Promise<void>;
+  onClearRecords(): void;
 };
 
-export function HomeRecentSessions({ documents, onReopenDocument }: HomeRecentSessionsProps) {
-  const recentFiles = mapDocumentsToRecentFiles(documents);
+export function HomeRecentSessions({
+  documents,
+  onReopenDocument,
+  onClearRecords,
+}: HomeRecentSessionsProps) {
+  const restorableDocuments = documents.slice(0, 3);
+
+  const reopenDocument = (document: PersistedDocument) => {
+    void onReopenDocument(document);
+  };
 
   return (
-    <section className="home-panel" aria-labelledby="home-recent-title">
+    <section className="home-panel home-session-restore" aria-labelledby="home-recent-title">
       <div className="section-heading horizontal">
         <div>
-          <p>最近阅读</p>
-          <h2 id="home-recent-title">继续上次会话</h2>
+          <p>继续您上次阅读的内容</p>
+          <h2 id="home-recent-title">恢复上次会话</h2>
         </div>
-        <span>{recentFiles.length} 个文件</span>
+        <button type="button" className="text-link-button" onClick={onClearRecords}>
+          清除记录
+        </button>
       </div>
-      {recentFiles.length > 0 ? (
+      {restorableDocuments.length > 0 ? (
         <div className="session-list">
-          {recentFiles.map((file) => {
-            const document = documents.find((candidate) => candidate.documentKey === file.documentKey);
-
-            return (
+          {restorableDocuments.map((document) => (
+            <div
+              key={document.documentKey}
+              className={document.missing ? 'session-row missing' : 'session-row'}
+              title={document.path ?? ''}
+            >
               <button
-                key={file.documentKey}
                 type="button"
-                className={file.missing ? 'session-row missing' : 'session-row'}
-                aria-label={`Open recent ${file.title}`}
-                title={file.path ?? ''}
-                onClick={() => {
-                  if (document) {
-                    void onReopenDocument(document);
-                  }
-                }}
+                className="session-row-main-button"
+                aria-label={`恢复会话 ${document.displayName}`}
+                onClick={() => reopenDocument(document)}
               >
-                <span className="session-icon" aria-hidden="true">
-                  {file.missing ? <AlertTriangle size={16} /> : <Clock3 size={16} />}
+                <span className="pdf-file-icon" aria-hidden="true">
+                  <FileText size={18} />
                 </span>
                 <span className="session-main">
-                  <strong>{file.title}</strong>
-                  <span>{file.path ?? '浏览器导入文件'}</span>
+                  <strong>{document.displayName}</strong>
+                  <span>{getDirectoryPath(document.path)}</span>
                 </span>
                 <span className="session-meta">
-                  <span>{file.progressLabel}</span>
-                  <span>{file.lastPageLabel}</span>
-                  <span>{file.fileSizeLabel}</span>
+                  <span className="session-progress">{formatPageProgress(document)}</span>
+                  <span className="session-time">{formatDateTime(document.modifiedAt)}</span>
                 </span>
               </button>
-            );
-          })}
+              <button
+                type="button"
+                className="session-continue-button"
+                aria-label={`继续阅读 ${document.displayName}`}
+                onClick={() => reopenDocument(document)}
+              >
+                继续阅读
+              </button>
+            </div>
+          ))}
         </div>
       ) : (
         <div className="empty-block">
-          <strong>还没有最近会话</strong>
+          <strong>暂无可恢复会话</strong>
           <span>打开 PDF 后，SmartReader 会在这里保留阅读进度。</span>
         </div>
       )}

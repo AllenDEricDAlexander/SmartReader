@@ -1,6 +1,7 @@
-import { useCallback, useRef, type ChangeEventHandler, type DragEventHandler } from 'react';
+import { useCallback, useRef, useState, type ChangeEventHandler, type DragEventHandler } from 'react';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { PersistedDocument } from '../persistence/persistenceApi';
+import { HomeActionNotice } from './HomeActionNotice';
 import { HomeBlankPage, isHomeBlankPageId } from './HomeBlankPage';
 import { HomeFavorites } from './HomeFavorites';
 import { HomeQuickStart } from './HomeQuickStart';
@@ -11,6 +12,13 @@ import { HomeTopBar } from './HomeTopBar';
 import { HomeWelcomeBanner } from './HomeWelcomeBanner';
 
 const noop = () => undefined;
+
+type HomeNoticeState = {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  onConfirm?(): void;
+};
 
 type HomeDashboardProps = {
   recentDocuments: PersistedDocument[];
@@ -80,6 +88,7 @@ export function HomeDashboard({
   onOpenTags,
 }: HomeDashboardProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [notice, setNotice] = useState<HomeNoticeState | null>(null);
 
   const openBrowserFilePicker = useCallback(() => {
     fileInputRef.current?.click();
@@ -98,6 +107,20 @@ export function HomeDashboard({
     }
   }, [canOpenNativePdf, onOpenPdf, openBrowserFilePicker]);
 
+  const showClearRecordNotice = useCallback(() => {
+    setNotice({
+      title: '清除记录',
+      message: '当前版本不会直接清空记录。确认后将展示功能待补充说明。',
+      confirmLabel: '确认',
+      onConfirm: () => {
+        setNotice({
+          title: '清除记录功能待补充',
+          message: '清除记录将在会话恢复管理功能中补充。',
+        });
+      },
+    });
+  }, []);
+
   const homeContent = (
     <div className="home-content">
       <div className="home-primary">
@@ -107,7 +130,11 @@ export function HomeDashboard({
           onDropPdf={onDropPdf}
           onOpenFolder={onOpenFolders}
         />
-        <HomeRecentSessions documents={recentDocuments} onReopenDocument={onReopenRecentDocument} />
+        <HomeRecentSessions
+          documents={recentDocuments}
+          onReopenDocument={onReopenRecentDocument}
+          onClearRecords={showClearRecordNotice}
+        />
         <HomeFavorites documents={favoriteDocuments} onToggleFavorite={onToggleFavorite} />
       </div>
       <HomeStatusPanel />
@@ -163,6 +190,16 @@ export function HomeDashboard({
         />
         <div className="home-main">{mainContent}</div>
       </section>
+      {notice ? (
+        <HomeActionNotice
+          key={notice.title}
+          title={notice.title}
+          message={notice.message}
+          confirmLabel={notice.confirmLabel}
+          onConfirm={notice.onConfirm}
+          onClose={() => setNotice(null)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -1,8 +1,72 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import type { PersistedDocument } from '../persistence/persistenceApi';
 import { renderApp } from '../test/renderApp';
 import { HomeDashboard } from './HomeDashboard';
+
+const recentSessionDocuments: PersistedDocument[] = [
+  {
+    documentKey: 'desktop:/Users/mario/Documents/Design Notes.pdf',
+    path: '/Users/mario/Documents/Design Notes.pdf',
+    displayName: 'Design Notes.pdf',
+    fileSize: 1024,
+    modifiedAt: '2026-07-01T10:30:00+08:00',
+    pageCount: 86,
+    lastPage: 12,
+    progress: 0.14,
+    missing: false,
+  },
+  {
+    documentKey: 'desktop:/Users/mario/Research/Reader Spec.pdf',
+    path: '/Users/mario/Research/Reader Spec.pdf',
+    displayName: 'Reader Spec.pdf',
+    fileSize: 2048,
+    modifiedAt: '2026-07-01T12:00:00+08:00',
+    pageCount: 42,
+    lastPage: 8,
+    progress: 0.19,
+    missing: false,
+  },
+  {
+    documentKey: 'desktop:/Users/mario/Archive/UX Review.pdf',
+    path: '/Users/mario/Archive/UX Review.pdf',
+    displayName: 'UX Review.pdf',
+    fileSize: 4096,
+    modifiedAt: '2026-07-02T09:15:00+08:00',
+    pageCount: 128,
+    lastPage: 64,
+    progress: 0.5,
+    missing: false,
+  },
+  {
+    documentKey: 'desktop:/Users/mario/Archive/Hidden Fourth.pdf',
+    path: '/Users/mario/Archive/Hidden Fourth.pdf',
+    displayName: 'Hidden Fourth.pdf',
+    fileSize: 8192,
+    modifiedAt: '2026-07-02T10:15:00+08:00',
+    pageCount: 200,
+    lastPage: 100,
+    progress: 0.5,
+    missing: false,
+  },
+];
+
+function expectedLocalDateTime(value: string | null) {
+  if (!value) {
+    return '时间未知';
+  }
+
+  const date = new Date(value);
+
+  return `${date.getFullYear()}/${padDatePart(date.getMonth() + 1)}/${padDatePart(
+    date.getDate(),
+  )} ${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}`;
+}
+
+function padDatePart(value: number) {
+  return String(value).padStart(2, '0');
+}
 
 function renderDashboard(overrides: Partial<ComponentProps<typeof HomeDashboard>> = {}) {
   const props: ComponentProps<typeof HomeDashboard> = {
@@ -200,5 +264,123 @@ describe('HomeDashboard', () => {
     });
 
     expect(onDropPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the restore last session module heading and subtitle', () => {
+    renderDashboard({ recentDocuments: recentSessionDocuments });
+
+    expect(screen.getByRole('heading', { name: '恢复上次会话' })).toBeInTheDocument();
+    expect(screen.getByText('继续您上次阅读的内容')).toBeInTheDocument();
+  });
+
+  it('shows the first restore session file details', () => {
+    renderDashboard({ recentDocuments: recentSessionDocuments });
+
+    expect(screen.getByText('Design Notes.pdf')).toBeInTheDocument();
+    expect(screen.getByText('/Users/mario/Documents/')).toBeInTheDocument();
+    expect(screen.getByText('上次阅读到 第 12 / 86 页')).toBeInTheDocument();
+    expect(
+      screen.getByText(expectedLocalDateTime(recentSessionDocuments[0].modifiedAt)),
+    ).toBeInTheDocument();
+  });
+
+  it('limits restore session rows to the first three documents', () => {
+    renderDashboard({ recentDocuments: recentSessionDocuments });
+
+    expect(screen.getByText('Design Notes.pdf')).toBeInTheDocument();
+    expect(screen.getByText('Reader Spec.pdf')).toBeInTheDocument();
+    expect(screen.getByText('UX Review.pdf')).toBeInTheDocument();
+    expect(screen.queryByText('Hidden Fourth.pdf')).not.toBeInTheDocument();
+  });
+
+  it('reopens a recent document when clicking its restore session row area', () => {
+    const onReopenRecentDocument = vi.fn();
+    renderDashboard({ recentDocuments: recentSessionDocuments, onReopenRecentDocument });
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复会话 Design Notes.pdf' }));
+
+    expect(onReopenRecentDocument).toHaveBeenCalledTimes(1);
+    expect(onReopenRecentDocument).toHaveBeenCalledWith(recentSessionDocuments[0]);
+  });
+
+  it('reopens once when keyboard activation clicks a restore session row area', () => {
+    const onReopenRecentDocument = vi.fn();
+    renderDashboard({ recentDocuments: recentSessionDocuments, onReopenRecentDocument });
+
+    const rowAreaButton = screen.getByRole('button', { name: '恢复会话 Design Notes.pdf' });
+
+    fireEvent.keyDown(rowAreaButton, { key: 'Enter' });
+    fireEvent.click(rowAreaButton);
+    expect(onReopenRecentDocument).toHaveBeenCalledTimes(1);
+    expect(onReopenRecentDocument).toHaveBeenCalledWith(recentSessionDocuments[0]);
+
+    onReopenRecentDocument.mockClear();
+
+    fireEvent.keyDown(rowAreaButton, { key: ' ' });
+    fireEvent.click(rowAreaButton);
+    expect(onReopenRecentDocument).toHaveBeenCalledTimes(1);
+    expect(onReopenRecentDocument).toHaveBeenCalledWith(recentSessionDocuments[0]);
+  });
+
+  it('reopens once when clicking a restore session continue button', () => {
+    const onReopenRecentDocument = vi.fn();
+    renderDashboard({ recentDocuments: recentSessionDocuments, onReopenRecentDocument });
+
+    fireEvent.click(screen.getByRole('button', { name: '继续阅读 Design Notes.pdf' }));
+
+    expect(onReopenRecentDocument).toHaveBeenCalledTimes(1);
+    expect(onReopenRecentDocument).toHaveBeenCalledWith(recentSessionDocuments[0]);
+  });
+
+  it('reopens once when keyboard activation clicks a restore session continue button', () => {
+    const onReopenRecentDocument = vi.fn();
+    renderDashboard({ recentDocuments: recentSessionDocuments, onReopenRecentDocument });
+
+    const continueButton = screen.getByRole('button', { name: '继续阅读 Design Notes.pdf' });
+
+    fireEvent.keyDown(continueButton, { key: 'Enter' });
+    fireEvent.click(continueButton);
+    expect(onReopenRecentDocument).toHaveBeenCalledTimes(1);
+    expect(onReopenRecentDocument).toHaveBeenCalledWith(recentSessionDocuments[0]);
+
+    onReopenRecentDocument.mockClear();
+
+    fireEvent.keyDown(continueButton, { key: ' ' });
+    fireEvent.click(continueButton);
+    expect(onReopenRecentDocument).toHaveBeenCalledTimes(1);
+    expect(onReopenRecentDocument).toHaveBeenCalledWith(recentSessionDocuments[0]);
+  });
+
+  it('opens clear-record confirmation and then shows the deferred clear-record notice', () => {
+    renderDashboard({ recentDocuments: recentSessionDocuments });
+
+    fireEvent.click(screen.getByRole('button', { name: '清除记录' }));
+
+    expect(screen.getByRole('dialog', { name: '清除记录' })).toBeInTheDocument();
+    expect(
+      screen.getByText('当前版本不会直接清空记录。确认后将展示功能待补充说明。'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    expect(screen.getByRole('dialog', { name: '清除记录功能待补充' })).toBeInTheDocument();
+    expect(screen.getByText('清除记录将在会话恢复管理功能中补充。')).toBeInTheDocument();
+  });
+
+  it('refocuses and traps focus when clear-record confirmation changes to deferred notice', () => {
+    renderDashboard({ recentDocuments: recentSessionDocuments });
+
+    fireEvent.click(screen.getByRole('button', { name: '清除记录' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    const dialog = screen.getByRole('dialog', { name: '清除记录功能待补充' });
+    const closeButton = screen.getByRole('button', { name: '关闭' });
+
+    expect(dialog).toBeInTheDocument();
+    expect(closeButton).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: 'Tab' });
+
+    expect(closeButton).toHaveFocus();
   });
 });
