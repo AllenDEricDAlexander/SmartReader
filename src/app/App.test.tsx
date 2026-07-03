@@ -106,7 +106,7 @@ describe('App', () => {
     );
 
     expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '打开本地 PDF' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /打开本地 PDF/ })).toBeInTheDocument();
     expect(screen.getByText('拖拽到这里')).toBeInTheDocument();
     expect(screen.getByText('AI 助手')).toHaveAttribute('aria-disabled', 'true');
   });
@@ -208,11 +208,11 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '最近文件 0' }));
 
     expect(await screen.findByRole('heading', { name: '最近文件' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '打开本地 PDF' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /打开本地 PDF/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '首页' }));
 
-    expect(await screen.findByRole('button', { name: '打开本地 PDF' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /打开本地 PDF/ })).toBeInTheDocument();
   });
 
   it('opens cache settings from the sidebar cache management entry', async () => {
@@ -290,7 +290,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
 
     expect(await screen.findByLabelText('阅读工作区')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
@@ -314,7 +314,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
 
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
@@ -339,7 +339,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
 
     const viewerSurface = await screen.findByLabelText('PDF viewer surface');
     expect(viewerSurface).toHaveClass('viewer-surface');
@@ -364,8 +364,8 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
-    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
 
     await waitFor(() => {
       expect(screen.getAllByRole('tab', { name: 'book.pdf' })).toHaveLength(1);
@@ -610,7 +610,7 @@ describe('App', () => {
       />,
     );
 
-    expect(await screen.findByRole('button', { name: 'Open recent book.pdf' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '恢复会话 book.pdf' })).toBeInTheDocument();
     expect(readDesktopPdf).not.toHaveBeenCalled();
     expect(screen.queryByRole('tab', { name: 'book.pdf' })).not.toBeInTheDocument();
   });
@@ -745,7 +745,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
     expect(await screen.findByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close active tab' }));
@@ -813,7 +813,7 @@ describe('App', () => {
 
     expect(await screen.findByRole('button', { name: '会话恢复 2' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
 
     expect(await screen.findByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
     await waitFor(() => {
@@ -958,7 +958,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
 
     await waitFor(() => {
       expect(persistence.saveDocument).toHaveBeenCalledWith(
@@ -990,7 +990,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
 
     await waitFor(() => {
       expect(persistence.saveDocument).toHaveBeenCalledTimes(1);
@@ -1459,7 +1459,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Open recent book.pdf' }));
+    fireEvent.click(await screen.findByRole('button', { name: '恢复会话 book.pdf' }));
 
     await waitFor(() => {
       expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/book.pdf');

@@ -189,6 +189,28 @@ describe('HomeDashboard', () => {
     expect(screen.queryByRole('heading', { name: '阅读仪表盘' })).not.toBeInTheDocument();
   });
 
+  it('renders home main modules in prototype order', () => {
+    renderDashboard({
+      activeSidebarPage: 'home',
+      recentDocuments: recentTableDocuments,
+      favoriteDocuments: favoriteCardDocuments,
+    });
+
+    const moduleHeadings = [
+      screen.getByRole('heading', { level: 1, name: '欢迎使用 SmartReader' }),
+      screen.getByRole('heading', { name: '快速开始' }),
+      screen.getByRole('heading', { name: '恢复上次会话' }),
+      screen.getByRole('heading', { name: '最近文件' }),
+      screen.getByRole('heading', { name: '收藏文件' }),
+    ];
+
+    moduleHeadings.slice(1).forEach((heading, index) => {
+      expect(moduleHeadings[index].compareDocumentPosition(heading)).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    });
+  });
+
   it('keeps the home dashboard content and sidebar navigation active for the home page', () => {
     renderDashboard({ activeSidebarPage: 'home' });
 
