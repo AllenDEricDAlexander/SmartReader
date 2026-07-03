@@ -1,39 +1,65 @@
-import { FileDown, FolderOpen, HardDriveUpload } from 'lucide-react';
+import { CloudUpload, FolderOpen, FolderPlus } from 'lucide-react';
+import { useState, type DragEventHandler } from 'react';
 
 type HomeQuickStartProps = {
   onOpenPdf(): void;
-  onPickBrowserFile(): void;
+  onDropPdf: DragEventHandler<HTMLElement>;
+  onOpenFolder(): void;
 };
 
-export function HomeQuickStart({ onOpenPdf, onPickBrowserFile }: HomeQuickStartProps) {
+export function HomeQuickStart({ onOpenPdf, onDropPdf, onOpenFolder }: HomeQuickStartProps) {
+  const [dragActive, setDragActive] = useState(false);
+
+  const handleDrop: DragEventHandler<HTMLButtonElement> = (event) => {
+    setDragActive(false);
+    event.stopPropagation();
+    onDropPdf(event);
+  };
+
   return (
     <section className="home-panel home-quick-start" aria-labelledby="home-quick-start-title">
       <div className="section-heading">
-        <p>快速开始</p>
-        <h2 id="home-quick-start-title">打开或导入 PDF</h2>
+        <h2 id="home-quick-start-title">快速开始</h2>
       </div>
-      <div className="quick-actions">
-        <button type="button" className="primary-action" onClick={onOpenPdf}>
-          <FolderOpen size={18} />
-          打开本地 PDF
+      <div className="quick-start-card-grid">
+        <button type="button" className="quick-start-card" onClick={onOpenPdf}>
+          <span className="quick-start-icon" aria-hidden="true">
+            <FolderOpen size={34} />
+          </span>
+          <span className="quick-start-copy">
+            <strong>打开本地 PDF</strong>
+            <span>浏览并打开本地 PDF 文件</span>
+          </span>
         </button>
         <button
           type="button"
-          className="secondary-action file-picker-button"
-          onClick={onPickBrowserFile}
+          className={
+            dragActive ? 'quick-start-card drop-card drag-active' : 'quick-start-card drop-card'
+          }
+          onDragLeave={() => setDragActive(false)}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDragActive(true);
+          }}
+          onDrop={handleDrop}
         >
-          <FileDown size={18} />
-          选择 PDF 文件
+          <span className="quick-start-icon" aria-hidden="true">
+            <CloudUpload size={34} />
+          </span>
+          <span className="quick-start-copy">
+            <strong>拖拽到这里</strong>
+            <span>将 PDF 文件拖拽到此处打开</span>
+          </span>
         </button>
-        <button type="button" className="secondary-action" disabled aria-disabled="true">
-          <HardDriveUpload size={18} />
-          选择文件夹
+        <button type="button" className="quick-start-card" onClick={onOpenFolder}>
+          <span className="quick-start-icon" aria-hidden="true">
+            <FolderPlus size={34} />
+          </span>
+          <span className="quick-start-copy">
+            <strong>选择文件夹</strong>
+            <span>打开文件夹并批量导入 PDF</span>
+          </span>
         </button>
-      </div>
-      <div className="drop-target" aria-label="PDF 拖拽区域">
-        <FileDown size={20} />
-        <strong>拖拽到这里</strong>
-        <span>支持从桌面拖入单个 PDF，本地文件不会离开你的设备。</span>
       </div>
     </section>
   );

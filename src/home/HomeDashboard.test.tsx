@@ -9,6 +9,7 @@ function renderDashboard(overrides: Partial<ComponentProps<typeof HomeDashboard>
     recentDocuments: [],
     favoriteDocuments: [],
     onOpenPdf: vi.fn(),
+    onDropPdf: vi.fn(),
     onBrowserFileChange: vi.fn(),
     onReopenRecentDocument: vi.fn(),
     onToggleFavorite: vi.fn(),
@@ -148,7 +149,7 @@ describe('HomeDashboard', () => {
     expect(clickInput).toHaveBeenCalledTimes(1);
     expect(onOpenPdf).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
 
     expect(clickInput).toHaveBeenCalledTimes(2);
     expect(onOpenPdf).not.toHaveBeenCalled();
@@ -159,7 +160,7 @@ describe('HomeDashboard', () => {
     const { clickInput } = renderDashboard({ onOpenPdf, canOpenNativePdf: () => true });
 
     fireEvent.click(screen.getByRole('button', { name: '打开文件' }));
-    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
 
     expect(onOpenPdf).toHaveBeenCalledTimes(2);
     await waitFor(() => {
@@ -179,13 +180,25 @@ describe('HomeDashboard', () => {
     expect(clickInput).toHaveBeenCalledTimes(1);
   });
 
-  it('opens the shared PDF input directly from the quick-start chooser', () => {
-    const onOpenPdf = vi.fn();
-    const { clickInput } = renderDashboard({ onOpenPdf });
+  it('forwards quick-start folder selection to the folders blank page callback', () => {
+    const onOpenFolders = vi.fn();
+    renderDashboard({ onOpenFolders });
 
-    fireEvent.click(screen.getByRole('button', { name: '选择 PDF 文件' }));
+    fireEvent.click(screen.getByRole('button', { name: /选择文件夹/ }));
 
-    expect(clickInput).toHaveBeenCalledTimes(1);
-    expect(onOpenPdf).not.toHaveBeenCalled();
+    expect(onOpenFolders).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards quick-start PDF drops to the reader drop handler', () => {
+    const onDropPdf = vi.fn((event) => event.preventDefault());
+    renderDashboard({ onDropPdf });
+
+    fireEvent.drop(screen.getByRole('button', { name: /拖拽到这里/ }), {
+      dataTransfer: {
+        files: [new File(['pdf'], 'drop.pdf', { type: 'application/pdf' })],
+      },
+    });
+
+    expect(onDropPdf).toHaveBeenCalledTimes(1);
   });
 });

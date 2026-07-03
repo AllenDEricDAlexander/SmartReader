@@ -1,4 +1,4 @@
-import { useCallback, useRef, type ChangeEventHandler } from 'react';
+import { useCallback, useRef, type ChangeEventHandler, type DragEventHandler } from 'react';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { PersistedDocument } from '../persistence/persistenceApi';
 import { HomeBlankPage, isHomeBlankPageId } from './HomeBlankPage';
@@ -19,6 +19,7 @@ type HomeDashboardProps = {
   counts?: HomeSidebarProps['counts'];
   cacheStats?: HomeSidebarProps['cacheStats'];
   onOpenPdf(): void | Promise<unknown>;
+  onDropPdf: DragEventHandler<HTMLElement>;
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
   onReopenRecentDocument(document: PersistedDocument): void | Promise<void>;
   onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
@@ -56,6 +57,7 @@ export function HomeDashboard({
     fileCount: 0,
   },
   onOpenPdf,
+  onDropPdf,
   onBrowserFileChange,
   onReopenRecentDocument,
   onToggleFavorite,
@@ -100,7 +102,11 @@ export function HomeDashboard({
     <div className="home-content">
       <div className="home-primary">
         <HomeWelcomeBanner />
-        <HomeQuickStart onOpenPdf={handleOpenPdf} onPickBrowserFile={openBrowserFilePicker} />
+        <HomeQuickStart
+          onOpenPdf={handleOpenPdf}
+          onDropPdf={onDropPdf}
+          onOpenFolder={onOpenFolders}
+        />
         <HomeRecentSessions documents={recentDocuments} onReopenDocument={onReopenRecentDocument} />
         <HomeFavorites documents={favoriteDocuments} onToggleFavorite={onToggleFavorite} />
       </div>

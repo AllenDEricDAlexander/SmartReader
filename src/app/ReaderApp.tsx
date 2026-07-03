@@ -925,6 +925,7 @@ export function ReaderApp({
           }}
           cacheStats={cacheStats}
           onOpenPdf={openPdf}
+          onDropPdf={handleDrop}
           onBrowserFileChange={handleBrowserFileChange}
           onReopenRecentDocument={(document) => void reopenRecentDocument(document)}
           onToggleFavorite={handleToggleFavorite}

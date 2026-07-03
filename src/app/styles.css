@@ -696,7 +696,6 @@ button:disabled,
   background: var(--sr-surface);
 }
 
-.home-quick-start,
 .home-panel {
   padding: 16px;
 }
@@ -832,6 +831,73 @@ button:disabled,
   gap: 12px;
 }
 
+.home-quick-start {
+  display: grid;
+  gap: 16px;
+}
+
+.quick-start-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 32px;
+}
+
+.quick-start-card {
+  min-width: 0;
+  min-height: 92px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  justify-content: stretch;
+  gap: 16px;
+  padding: 18px 22px;
+  border: 1px solid var(--sr-border);
+  border-radius: var(--sr-radius);
+  background: var(--sr-surface);
+  text-align: left;
+}
+
+.quick-start-card:hover,
+.quick-start-card.drag-active {
+  border-color: rgba(37, 99, 235, 0.38);
+  background: #f8fbff;
+}
+
+.quick-start-card.drop-card {
+  border-style: dashed;
+}
+
+.quick-start-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--sr-primary);
+}
+
+.quick-start-copy {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.quick-start-copy strong,
+.quick-start-copy span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quick-start-copy strong {
+  color: var(--sr-text);
+  font-size: 16px;
+}
+
+.quick-start-copy span {
+  color: var(--sr-text-muted);
+  font-size: 13px;
+}
+
 .quick-actions {
   display: flex;
   flex-wrap: wrap;
@@ -873,26 +939,6 @@ button:disabled,
   height: 1px;
   opacity: 0;
   pointer-events: none;
-}
-
-.drop-target {
-  min-height: 112px;
-  display: grid;
-  place-items: center;
-  gap: 6px;
-  margin-top: 14px;
-  padding: 18px;
-  border: 1px dashed rgba(37, 99, 235, 0.35);
-  border-radius: var(--sr-radius);
-  background: #f8fbff;
-  color: var(--sr-primary);
-  text-align: center;
-}
-
-.drop-target span {
-  max-width: 420px;
-  color: var(--sr-text-muted);
-  font-size: 13px;
 }
 
 .session-list {
@@ -2020,6 +2066,10 @@ select {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .quick-start-card-grid {
+    gap: 16px;
+  }
+
   .home-status {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2085,6 +2135,10 @@ select {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
     padding: 22px;
+  }
+
+  .quick-start-card-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .welcome-illustration {

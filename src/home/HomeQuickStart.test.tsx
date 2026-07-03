@@ -4,21 +4,81 @@ import { renderApp } from '../test/renderApp';
 import { HomeQuickStart } from './HomeQuickStart';
 
 describe('HomeQuickStart', () => {
-  it('forwards the visible chooser button to the parent picker bridge', () => {
-    const onPickBrowserFile = vi.fn();
-    renderApp(<HomeQuickStart onOpenPdf={vi.fn()} onPickBrowserFile={onPickBrowserFile} />);
+  it('renders the prototype three-card quick start layout', () => {
+    renderApp(
+      <HomeQuickStart onOpenPdf={vi.fn()} onDropPdf={vi.fn()} onOpenFolder={vi.fn()} />,
+    );
 
-    fireEvent.click(screen.getByRole('button', { name: '选择 PDF 文件' }));
-
-    expect(onPickBrowserFile).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('heading', { name: '快速开始' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /打开本地 PDF/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /拖拽到这里/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /选择文件夹/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText('PDF 拖拽区域')).not.toBeInTheDocument();
   });
 
-  it('forwards the native PDF button to the parent opener', () => {
+  it('opens a local PDF from the first card', () => {
     const onOpenPdf = vi.fn();
-    renderApp(<HomeQuickStart onOpenPdf={onOpenPdf} onPickBrowserFile={vi.fn()} />);
+    renderApp(
+      <HomeQuickStart onOpenPdf={onOpenPdf} onDropPdf={vi.fn()} onOpenFolder={vi.fn()} />,
+    );
 
-    fireEvent.click(screen.getByRole('button', { name: '打开本地 PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
 
     expect(onOpenPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks the drop card active and forwards dropped files', () => {
+    const onDropPdf = vi.fn((event) => event.preventDefault());
+    renderApp(
+      <HomeQuickStart onOpenPdf={vi.fn()} onDropPdf={onDropPdf} onOpenFolder={vi.fn()} />,
+    );
+
+    const dropCard = screen.getByRole('button', { name: /拖拽到这里/ });
+    fireEvent.dragOver(dropCard);
+    expect(dropCard).toHaveClass('drag-active');
+
+    fireEvent.drop(dropCard, {
+      dataTransfer: {
+        files: [new File(['pdf'], 'sample.pdf', { type: 'application/pdf' })],
+      },
+    });
+
+    expect(onDropPdf).toHaveBeenCalledTimes(1);
+    expect(dropCard).not.toHaveClass('drag-active');
+  });
+
+  it('keeps card drops from bubbling to parent drop handlers', () => {
+    let defaultPrevented = false;
+    const onDropPdf = vi.fn((event) => {
+      event.preventDefault();
+      defaultPrevented = event.defaultPrevented;
+    });
+    const onParentDrop = vi.fn();
+    renderApp(
+      <div onDrop={onParentDrop}>
+        <HomeQuickStart onOpenPdf={vi.fn()} onDropPdf={onDropPdf} onOpenFolder={vi.fn()} />
+      </div>,
+    );
+
+    fireEvent.drop(screen.getByRole('button', { name: /拖拽到这里/ }), {
+      dataTransfer: {
+        files: [new File(['pdf'], 'sample.pdf', { type: 'application/pdf' })],
+      },
+    });
+
+    expect(onDropPdf).toHaveBeenCalledTimes(1);
+    expect(defaultPrevented).toBe(true);
+    expect(onParentDrop).not.toHaveBeenCalled();
+  });
+
+  it('routes folder selection through the provided callback', () => {
+    const onOpenFolder = vi.fn();
+    renderApp(
+      <HomeQuickStart onOpenPdf={vi.fn()} onDropPdf={vi.fn()} onOpenFolder={onOpenFolder} />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /选择文件夹/ }));
+
+    expect(onOpenFolder).toHaveBeenCalledTimes(1);
   });
 });
