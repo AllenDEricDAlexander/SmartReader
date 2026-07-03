@@ -54,6 +54,10 @@ const defaultCacheStats: CacheStats = {
   totalBytes: 5 * 1024 ** 3,
   fileCount: 0,
 };
+const appVersion = {
+  version: '0.1.0',
+  build: null,
+};
 
 function mapSessionToPersistedDocument(session: DocumentSession): PersistedDocument {
   return {
@@ -940,6 +944,7 @@ export function ReaderApp({
           recentDocuments={recentDocuments}
           favoriteDocuments={favoriteDocuments}
           activeSidebarPage={homeSidebarPage}
+          appVersion={appVersion}
           counts={{
             recentFiles: recentDocuments.length,
             favoriteFiles: favoriteDocuments.length,
@@ -966,6 +971,7 @@ export function ReaderApp({
           onOpenNotes={() => openHomeSidebarPage('notes')}
           onOpenFullTextSearch={openGlobalSearch}
           onOpenCacheManagement={() => openSettingsWorkspace('cache')}
+          onOpenShortcutSettings={() => openSettingsWorkspace('shortcuts')}
           onOpenSettings={() => openSettingsWorkspace()}
           onOpenTags={() => setWorkspaceOverride('tags')}
         />

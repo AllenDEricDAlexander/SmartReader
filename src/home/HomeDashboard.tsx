@@ -3,14 +3,15 @@ import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { PersistedDocument } from '../persistence/persistenceApi';
 import { HomeActionNotice } from './HomeActionNotice';
 import { HomeBlankPage, isHomeBlankPageId } from './HomeBlankPage';
+import { HomeAssistPanel } from './HomeAssistPanel';
 import { HomeFavorites } from './HomeFavorites';
 import { HomeQuickStart } from './HomeQuickStart';
 import { HomeRecentFiles } from './HomeRecentFiles';
 import { HomeRecentSessions } from './HomeRecentSessions';
 import { HomeSidebar, type HomeSidebarPage, type HomeSidebarProps } from './HomeSidebar';
-import { HomeStatusPanel } from './HomeStatusPanel';
 import { HomeTopBar } from './HomeTopBar';
 import { HomeWelcomeBanner } from './HomeWelcomeBanner';
+import type { HomeAppVersion, HomeTaskStatus } from './homeTypes';
 
 const noop = () => undefined;
 
@@ -27,6 +28,8 @@ type HomeDashboardProps = {
   activeSidebarPage?: HomeSidebarPage;
   counts?: HomeSidebarProps['counts'];
   cacheStats?: HomeSidebarProps['cacheStats'];
+  appVersion?: HomeAppVersion;
+  taskStatus?: HomeTaskStatus;
   onOpenPdf(): void | Promise<unknown>;
   onDropPdf: DragEventHandler<HTMLElement>;
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
@@ -47,6 +50,9 @@ type HomeDashboardProps = {
   onOpenNotes?(): void;
   onOpenFullTextSearch?(): void;
   onOpenCacheManagement?(): void;
+  onOpenShortcutSettings?(): void;
+  onSetupFileAssociation?(): void | Promise<void>;
+  onCheckUpdates?(): void | Promise<void>;
   onOpenSettings(): void;
   onOpenTags(): void;
 };
@@ -65,6 +71,8 @@ export function HomeDashboard({
     totalBytes: 0,
     fileCount: 0,
   },
+  appVersion = { version: '0.1.0', build: null },
+  taskStatus = 'idle',
   onOpenPdf,
   onDropPdf,
   onBrowserFileChange,
@@ -85,12 +93,16 @@ export function HomeDashboard({
   onOpenNotes = noop,
   onOpenFullTextSearch = noop,
   onOpenCacheManagement = noop,
+  onOpenShortcutSettings,
+  onSetupFileAssociation,
+  onCheckUpdates,
   onOpenSettings,
   onOpenTags,
 }: HomeDashboardProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [notice, setNotice] = useState<HomeNoticeState | null>(null);
   const favoriteDocumentKeys = new Set(favoriteDocuments.map((document) => document.documentKey));
+  const openShortcutSettings = onOpenShortcutSettings ?? onOpenSettings;
 
   const openBrowserFilePicker = useCallback(() => {
     fileInputRef.current?.click();
@@ -126,6 +138,27 @@ export function HomeDashboard({
   const showNotice = useCallback((title: string, message: string) => {
     setNotice({ title, message });
   }, []);
+
+  const handleSetupFileAssociation = useCallback(() => {
+    if (onSetupFileAssociation) {
+      void onSetupFileAssociation();
+      return;
+    }
+
+    showNotice(
+      '文件关联不可用',
+      '当前环境不支持自动设置文件关联，请在系统设置中关联 PDF。',
+    );
+  }, [onSetupFileAssociation, showNotice]);
+
+  const handleCheckUpdates = useCallback(() => {
+    if (onCheckUpdates) {
+      void onCheckUpdates();
+      return;
+    }
+
+    showNotice('检查更新能力待接入', '当前版本暂未接入自动检查更新。');
+  }, [onCheckUpdates, showNotice]);
 
   const blockHomeDrop: DragEventHandler<HTMLElement> = useCallback((event) => {
     event.preventDefault();
@@ -165,7 +198,16 @@ export function HomeDashboard({
           onToggleFavorite={onToggleFavorite}
         />
       </div>
-      <HomeStatusPanel />
+      <HomeAssistPanel
+        appVersion={appVersion}
+        onOpenGlobalSearch={onOpenGlobalSearch}
+        onOpenBookmarks={onOpenBookmarks}
+        onOpenAnnotations={onOpenAnnotations}
+        onOpenShortcutSettings={openShortcutSettings}
+        onOpenCacheManagement={onOpenCacheManagement}
+        onSetupFileAssociation={handleSetupFileAssociation}
+        onCheckUpdates={handleCheckUpdates}
+      />
     </div>
   );
 

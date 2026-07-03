@@ -178,11 +178,13 @@ describe('HomeDashboard', () => {
   it('renders the prototype welcome banner at the top of the home content', () => {
     renderDashboard({ activeSidebarPage: 'home' });
 
+    const welcome = screen.getByRole('region', { name: '欢迎使用 SmartReader' });
+
     expect(screen.getByRole('region', { name: '欢迎使用 SmartReader' })).toBeInTheDocument();
     expect(
       screen.getByRole('heading', { level: 1, name: '欢迎使用 SmartReader' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('本地优先 · 隐私安全 · 高效阅读')).toBeInTheDocument();
+    expect(within(welcome).getByText('本地优先 · 隐私安全 · 高效阅读')).toBeInTheDocument();
     expect(
       screen.getByText('所有文件和数据仅存储在您的设备上，完全掌控您的知识。'),
     ).toBeInTheDocument();
@@ -226,6 +228,70 @@ describe('HomeDashboard', () => {
     expect(screen.getByRole('button', { name: '最近文件 2' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '收藏文件 1' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '标签管理' })).toBeInTheDocument();
+  });
+
+  it('renders the home assist rail and removes the temporary status cards', () => {
+    renderDashboard({ activeSidebarPage: 'home' });
+
+    const assist = screen.getByRole('complementary', { name: '辅助信息' });
+
+    expect(within(assist).getByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+    expect(within(assist).getByRole('heading', { name: '桌面集成' })).toBeInTheDocument();
+    expect(within(assist).getByText('版本 0.1.0')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '工作台状态' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '阅读流程' })).not.toBeInTheDocument();
+  });
+
+  it('does not render the home assist rail for blank sidebar pages', () => {
+    renderDashboard({ activeSidebarPage: 'recentFiles' });
+
+    expect(screen.queryByRole('complementary', { name: '辅助信息' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '最近文件' })).toBeInTheDocument();
+  });
+
+  it('forwards assist rail navigation callbacks', () => {
+    const onOpenGlobalSearch = vi.fn();
+    const onOpenBookmarks = vi.fn();
+    const onOpenAnnotations = vi.fn();
+    const onOpenCacheManagement = vi.fn();
+    const onOpenSettings = vi.fn();
+    renderDashboard({
+      onOpenGlobalSearch,
+      onOpenBookmarks,
+      onOpenAnnotations,
+      onOpenCacheManagement,
+      onOpenSettings,
+    });
+
+    const assist = screen.getByRole('complementary', { name: '辅助信息' });
+
+    fireEvent.click(within(assist).getByRole('button', { name: /搜索文件与内容/ }));
+    fireEvent.click(within(assist).getByRole('button', { name: /书签管理/ }));
+    fireEvent.click(within(assist).getByRole('button', { name: /批注与高亮/ }));
+    fireEvent.click(within(assist).getByRole('button', { name: /快捷键总览/ }));
+    fireEvent.click(within(assist).getByRole('button', { name: '更多技巧' }));
+    fireEvent.click(within(assist).getByRole('button', { name: '管理缓存' }));
+
+    expect(onOpenGlobalSearch).toHaveBeenCalledTimes(1);
+    expect(onOpenBookmarks).toHaveBeenCalledTimes(1);
+    expect(onOpenAnnotations).toHaveBeenCalledTimes(1);
+    expect(onOpenSettings).toHaveBeenCalledTimes(2);
+    expect(onOpenCacheManagement).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows fallback notices for unavailable desktop association and update checks', () => {
+    renderDashboard();
+
+    fireEvent.click(screen.getByRole('button', { name: '设置关联' }));
+    expect(screen.getByRole('dialog', { name: '文件关联不可用' })).toBeInTheDocument();
+    expect(
+      screen.getByText('当前环境不支持自动设置文件关联，请在系统设置中关联 PDF。'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
+    expect(screen.getByRole('dialog', { name: '检查更新能力待接入' })).toBeInTheDocument();
+    expect(screen.getByText('当前版本暂未接入自动检查更新。')).toBeInTheDocument();
   });
 
   it('shows an accessible blank page and keeps the sidebar visible for recent files', () => {
