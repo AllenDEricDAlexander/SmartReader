@@ -4,7 +4,6 @@ import {
   Database,
   FileClock,
   FileSearch,
-  FileText,
   FolderOpen,
   GitCompare,
   Highlighter,
@@ -244,13 +243,6 @@ export function HomeSidebar({
 
   return (
     <aside className="home-sidebar">
-      <div className="brand-lockup">
-        <FileText size={22} />
-        <div>
-          <strong>SmartReader</strong>
-          <span>本地 PDF 工作台</span>
-        </div>
-      </div>
       <nav aria-label="主导航" className="home-nav">
         <SidebarGroup activePage={activePage} label="导航" items={navigationItems} />
         <SidebarGroup activePage={activePage} label="知识库" items={libraryItems} />

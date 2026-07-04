@@ -38,11 +38,11 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof HomeSidebar>> = 
 }
 
 describe('HomeSidebar', () => {
-  it('renders brand lockup, grouped navigation, counts, and active home row', () => {
+  it('renders grouped navigation, counts, and active home row without the brand lockup', () => {
     renderSidebar();
 
-    expect(screen.getByText('SmartReader')).toBeInTheDocument();
-    expect(screen.getByText('本地 PDF 工作台')).toBeInTheDocument();
+    expect(screen.queryByText('SmartReader')).not.toBeInTheDocument();
+    expect(screen.queryByText('本地 PDF 工作台')).not.toBeInTheDocument();
 
     const nav = screen.getByRole('navigation', { name: '主导航' });
     expect(within(nav).getByText('导航')).toBeInTheDocument();
