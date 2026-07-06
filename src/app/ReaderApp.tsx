@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type SetStateAction,
+} from 'react';
 import { BlobUrlCache } from '../cache/blobUrlCache';
 import { PdfByteCache } from '../cache/pdfByteCache';
 import {
@@ -203,6 +211,18 @@ export function ReaderApp({
     updateAnnotationForDocument,
   } = useReaderDecorations({ activeSession, persistence });
 
+  const mergeRestoredRecentDocuments = useCallback(
+    (update: SetStateAction<PersistedDocument[]>) => {
+      if (typeof update === 'function') {
+        setRecentDocuments(update);
+        return;
+      }
+
+      setRecentDocuments((current) => mergeRecentDocuments(current, update));
+    },
+    [],
+  );
+
   useSessionRestore({
     bridge,
     blobUrlCache,
@@ -212,14 +232,7 @@ export function ReaderApp({
     preferences: readerPreferences,
     preferencesLoaded,
     setDocuments,
-    setRecentDocuments: (update) => {
-      if (typeof update === 'function') {
-        setRecentDocuments(update);
-        return;
-      }
-
-      setRecentDocuments((current) => mergeRecentDocuments(current, update));
-    },
+    setRecentDocuments: mergeRestoredRecentDocuments,
     setSidebarOpen,
     setViewerSource,
   });

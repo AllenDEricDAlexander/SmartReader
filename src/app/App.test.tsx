@@ -23,7 +23,10 @@ vi.mock('../platform/openWithEvents', () => ({
   }),
 }));
 
-const testViewerRenderer: PdfRenderer = ({ fileUrl, onPageChange }) => {
+function TestPdfRenderer({
+  fileUrl,
+  onPageChange,
+}: Parameters<PdfRenderer>[0]) {
   useEffect(() => {
     if (fileUrl === 'blob:progress-sync') {
       onPageChange(4, 10);
@@ -31,7 +34,9 @@ const testViewerRenderer: PdfRenderer = ({ fileUrl, onPageChange }) => {
   }, [fileUrl, onPageChange]);
 
   return <div>PDF {fileUrl}</div>;
-};
+}
+
+const testViewerRenderer: PdfRenderer = (props) => <TestPdfRenderer {...props} />;
 
 function createEmptyPersistence(): PersistenceApi {
   return {
@@ -216,7 +221,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '最近文件 1' }));
+    fireEvent.click(screen.getByRole('button', { name: '最近文件 0' }));
 
     expect(await screen.findByRole('heading', { name: '最近文件' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /打开本地 PDF/ })).not.toBeInTheDocument();
