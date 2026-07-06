@@ -334,8 +334,8 @@ describe('HomeDashboard', () => {
     expect(screen.getByText('当前版本暂未接入自动检查更新。')).toBeInTheDocument();
   });
 
-  it('shows an accessible blank page and keeps the sidebar visible for recent files', () => {
-    renderDashboard({ activeSidebarPage: 'recentFiles' });
+  it('renders the recent files workspace for the recent files sidebar page', () => {
+    renderDashboard({ activeSidebarPage: 'recentFiles', recentDocuments: recentTableDocuments });
 
     expect(screen.queryByText('快速开始')).not.toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
@@ -345,9 +345,11 @@ describe('HomeDashboard', () => {
     );
     expect(screen.getByRole('region', { name: '最近文件' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '最近文件' })).toBeInTheDocument();
+    expect(screen.getByText('共 6 个最近文件，当前显示 6 个')).toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: '搜索最近文件' })).toBeInTheDocument();
   });
 
-  it('marks blank sidebar page content for single-column layout', () => {
+  it('marks recent files workspace content for single-column layout', () => {
     renderDashboard({ activeSidebarPage: 'recentFiles' });
 
     expect(screen.getByRole('region', { name: '最近文件' }).parentElement).toHaveClass(

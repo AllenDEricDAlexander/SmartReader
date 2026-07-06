@@ -7,6 +7,7 @@ import { HomeAssistPanel } from './HomeAssistPanel';
 import { HomeFavorites } from './HomeFavorites';
 import { HomeQuickStart } from './HomeQuickStart';
 import { HomeRecentFiles } from './HomeRecentFiles';
+import { HomeRecentFilesWorkspace } from './HomeRecentFilesWorkspace';
 import { HomeRecentSessions } from './HomeRecentSessions';
 import { HomeSidebar, type HomeSidebarPage, type HomeSidebarProps } from './HomeSidebar';
 import { HomeStatusBar } from './HomeStatusBar';
@@ -240,13 +241,34 @@ export function HomeDashboard({
     </div>
   );
 
-  const mainContent = isHomeBlankPageId(activeSidebarPage) ? (
+  const recentFilesContent = (
     <div className="home-content home-blank-content">
-      <HomeBlankPage page={activeSidebarPage} />
+      <HomeRecentFilesWorkspace
+        documents={recentDocuments}
+        favoriteDocumentKeys={favoriteDocumentKeys}
+        onOpenPdf={handleOpenPdf}
+        onReopenDocument={onReopenRecentDocument}
+        onToggleFavorite={onToggleFavorite}
+        onLocateFile={() =>
+          showNotice('定位文件功能待补充', '定位文件将在最近文件管理功能中补充。')
+        }
+        onRemoveRecent={() =>
+          showNotice('移除最近记录功能待补充', '从最近记录移除将在最近文件管理功能中补充。')
+        }
+      />
     </div>
-  ) : (
-    homeContent
   );
+
+  const mainContent =
+    activeSidebarPage === 'recentFiles' ? (
+      recentFilesContent
+    ) : isHomeBlankPageId(activeSidebarPage) ? (
+      <div className="home-content home-blank-content">
+        <HomeBlankPage page={activeSidebarPage} />
+      </div>
+    ) : (
+      homeContent
+    );
 
   return (
     <div className="home-dashboard-shell">
