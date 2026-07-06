@@ -2975,3 +2975,223 @@ select {
     display: none;
   }
 }
+
+.recent-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.recent-workspace-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.recent-workspace-heading span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.recent-workspace-count {
+  border: 1px solid #dbe4f0;
+  border-radius: 999px;
+  color: #475569;
+  font-size: 13px;
+  padding: 6px 12px;
+  white-space: nowrap;
+}
+
+.recent-workspace-toolbar {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(140px, 0.7fr)) auto auto;
+}
+
+.recent-workspace-toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.recent-workspace-toolbar label > span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recent-workspace-toolbar input,
+.recent-workspace-toolbar select {
+  background: #ffffff;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  color: #0f172a;
+  min-height: 38px;
+  padding: 0 12px;
+}
+
+.recent-workspace-search {
+  position: relative;
+}
+
+.recent-workspace-search svg {
+  bottom: 11px;
+  color: #64748b;
+  left: 12px;
+  position: absolute;
+}
+
+.recent-workspace-search input {
+  padding-left: 36px;
+}
+
+.recent-workspace-view-toggle {
+  border: 1px solid #dbe4f0;
+  border-radius: 10px;
+  display: inline-flex;
+  min-height: 38px;
+  overflow: hidden;
+}
+
+.icon-text-button {
+  align-items: center;
+  background: #ffffff;
+  border: 0;
+  color: #475569;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 6px;
+  padding: 0 12px;
+}
+
+.icon-text-button[aria-pressed='true'] {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.recent-workspace-list,
+.recent-workspace-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.recent-workspace-row,
+.recent-workspace-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.recent-workspace-row {
+  align-items: center;
+  grid-template-columns: minmax(240px, 1.8fr) minmax(160px, 0.8fr) minmax(150px, 0.8fr) auto;
+}
+
+.recent-workspace-grid {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
+.recent-workspace-card {
+  align-content: start;
+  min-height: 190px;
+}
+
+.recent-workspace-file-main {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.recent-workspace-file-main > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.recent-workspace-file-main strong,
+.recent-workspace-file-main span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-workspace-file-main span:last-child,
+.recent-workspace-meta {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.recent-workspace-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.recent-workspace-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.icon-button.active {
+  color: #f59e0b;
+}
+
+.recent-workspace-empty {
+  min-height: 220px;
+}
+
+.recent-workspace-menu-wrap {
+  position: relative;
+}
+
+.recent-workspace-menu-wrap .recent-file-menu {
+  right: 0;
+  top: calc(100% + 6px);
+}
+
+@media (max-width: 1180px) {
+  .recent-workspace-toolbar {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
+
+  .recent-workspace-view-toggle,
+  .recent-workspace-toolbar .text-link-button {
+    justify-self: start;
+  }
+
+  .recent-workspace-row {
+    grid-template-columns: minmax(220px, 1fr) minmax(160px, 0.6fr);
+  }
+
+  .recent-workspace-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 760px) {
+  .recent-workspace-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .recent-workspace-heading.horizontal {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .recent-workspace-row {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .recent-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}

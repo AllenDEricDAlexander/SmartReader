@@ -1,7 +1,6 @@
 import type { HomeSidebarPage } from './HomeSidebar';
 
 const blankPageLabels = {
-  recentFiles: '最近文件',
   favoriteFiles: '收藏文件',
   sessionRestore: '会话恢复',
   myDocuments: '我的文献',
