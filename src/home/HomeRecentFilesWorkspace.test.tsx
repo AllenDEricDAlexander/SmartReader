@@ -238,4 +238,19 @@ describe('HomeRecentFilesWorkspace', () => {
       false,
     );
   });
+
+  it('opens the row menu and wires locate and remove fallback actions', () => {
+    const props = renderWorkspace();
+
+    fireEvent.click(screen.getByRole('button', { name: '更多操作 Beta Research.pdf' }));
+
+    const menu = screen.getByRole('menu');
+    fireEvent.click(within(menu).getByRole('menuitem', { name: '定位文件' }));
+    expect(props.onLocateFile).toHaveBeenCalledWith(documents[0]);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '更多操作 Beta Research.pdf' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '从最近记录移除' }));
+    expect(props.onRemoveRecent).toHaveBeenCalledWith(documents[0]);
+  });
 });

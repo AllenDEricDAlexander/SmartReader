@@ -1,5 +1,5 @@
-import { FileText, Grid2X2, List, Search, Star } from 'lucide-react';
-import { useMemo, useState, type ChangeEvent } from 'react';
+import { FileText, Grid2X2, List, MoreVertical, Search, Star } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import type { PersistedDocument } from '../persistence/persistenceApi';
 import { formatDateTime, formatProgressPercent, getDirectoryPath } from './homeDisplayUtils';
 
@@ -83,14 +83,17 @@ export function HomeRecentFilesWorkspace({
   onOpenPdf,
   onReopenDocument,
   onToggleFavorite,
-  onLocateFile: _onLocateFile,
-  onRemoveRecent: _onRemoveRecent,
+  onLocateFile,
+  onRemoveRecent,
 }: HomeRecentFilesWorkspaceProps) {
   const [query, setQuery] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('recent');
   const [progressFilter, setProgressFilter] = useState<ProgressFilter>('all');
   const [favoriteFilter, setFavoriteFilter] = useState<FavoriteFilter>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
+  const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
+  const menuItemRefs = useRef(new Map<string, Array<HTMLButtonElement | null>>());
   const normalizedQuery = normalizeSearchValue(query);
   const filtering = normalizedQuery !== '' || progressFilter !== 'all' || favoriteFilter !== 'all';
 
@@ -131,9 +134,105 @@ export function HomeRecentFilesWorkspace({
     setQuery(event.target.value);
   };
 
+  useEffect(() => {
+    if (!openMenuKey) {
+      return;
+    }
+
+    menuItemRefs.current.get(openMenuKey)?.[0]?.focus();
+  }, [openMenuKey]);
+
+  const closeMenu = () => {
+    setOpenMenuKey(null);
+  };
+
+  const closeMenuAndFocusTrigger = (documentKey: string) => {
+    closeMenu();
+    triggerRefs.current.get(documentKey)?.focus();
+  };
+
+  const handleMenuAction = (action: () => void | Promise<void>) => {
+    closeMenu();
+    void action();
+  };
+
+  const setTriggerRef = (documentKey: string, element: HTMLButtonElement | null) => {
+    if (element) {
+      triggerRefs.current.set(documentKey, element);
+      return;
+    }
+
+    triggerRefs.current.delete(documentKey);
+  };
+
+  const setMenuItemRef = (
+    documentKey: string,
+    index: number,
+    element: HTMLButtonElement | null,
+  ) => {
+    const items = menuItemRefs.current.get(documentKey) ?? [];
+
+    if (element) {
+      items[index] = element;
+      menuItemRefs.current.set(documentKey, items);
+      return;
+    }
+
+    items[index] = null;
+    if (items.some(Boolean)) {
+      menuItemRefs.current.set(documentKey, items);
+      return;
+    }
+
+    menuItemRefs.current.delete(documentKey);
+  };
+
+  const handleMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>, documentKey: string) => {
+    const menuItems = menuItemRefs.current.get(documentKey)?.filter(Boolean) ?? [];
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeMenuAndFocusTrigger(documentKey);
+      return;
+    }
+
+    if (menuItems.length === 0) {
+      return;
+    }
+
+    const currentIndex = Math.max(
+      menuItems.findIndex((item) => item === document.activeElement),
+      0,
+    );
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      menuItems[(currentIndex + 1) % menuItems.length]?.focus();
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      menuItems[(currentIndex - 1 + menuItems.length) % menuItems.length]?.focus();
+      return;
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault();
+      menuItems[0]?.focus();
+      return;
+    }
+
+    if (event.key === 'End') {
+      event.preventDefault();
+      menuItems[menuItems.length - 1]?.focus();
+    }
+  };
+
   const renderDocument = (document: PersistedDocument) => {
     const favorite = favoriteDocumentKeys.has(document.documentKey);
     const progressPercent = formatProgressPercent(document.progress);
+    const menuOpen = openMenuKey === document.documentKey;
 
     return (
       <article
@@ -188,6 +287,61 @@ export function HomeRecentFilesWorkspace({
           >
             <Star size={16} fill={favorite ? 'currentColor' : 'none'} />
           </button>
+          <div className="recent-workspace-menu-wrap">
+            <button
+              type="button"
+              ref={(element) => setTriggerRef(document.documentKey, element)}
+              className="icon-button"
+              aria-label={`更多操作 ${document.displayName}`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setOpenMenuKey(menuOpen ? null : document.documentKey)}
+            >
+              <MoreVertical size={16} />
+            </button>
+            {menuOpen ? (
+              <div
+                className="recent-file-menu"
+                role="menu"
+                onKeyDown={(event) => handleMenuKeyDown(event, document.documentKey)}
+              >
+                <button
+                  type="button"
+                  ref={(element) => setMenuItemRef(document.documentKey, 0, element)}
+                  role="menuitem"
+                  onClick={() => handleMenuAction(() => onReopenDocument(document))}
+                >
+                  打开
+                </button>
+                <button
+                  type="button"
+                  ref={(element) => setMenuItemRef(document.documentKey, 1, element)}
+                  role="menuitem"
+                  onClick={() =>
+                    handleMenuAction(() => onToggleFavorite(document.documentKey, !favorite))
+                  }
+                >
+                  {favorite ? '取消收藏' : '收藏'}
+                </button>
+                <button
+                  type="button"
+                  ref={(element) => setMenuItemRef(document.documentKey, 2, element)}
+                  role="menuitem"
+                  onClick={() => handleMenuAction(() => onLocateFile(document))}
+                >
+                  定位文件
+                </button>
+                <button
+                  type="button"
+                  ref={(element) => setMenuItemRef(document.documentKey, 3, element)}
+                  role="menuitem"
+                  onClick={() => handleMenuAction(() => onRemoveRecent(document))}
+                >
+                  从最近记录移除
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </article>
     );
