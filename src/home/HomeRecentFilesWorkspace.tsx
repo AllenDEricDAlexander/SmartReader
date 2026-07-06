@@ -175,6 +175,7 @@ export function HomeRecentFilesWorkspace({
           <button
             type="button"
             className="secondary-button"
+            aria-label={`继续阅读 ${document.displayName}`}
             onClick={() => void onReopenDocument(document)}
           >
             继续阅读
@@ -283,7 +284,10 @@ export function HomeRecentFilesWorkspace({
           </div>
 
           {visibleDocuments.length > 0 ? (
-            <div className={viewMode === 'cards' ? 'recent-workspace-grid' : 'recent-workspace-list'}>
+            <div
+              className={viewMode === 'cards' ? 'recent-workspace-grid' : 'recent-workspace-list'}
+              data-testid="recent-workspace-results"
+            >
               {visibleDocuments.map(renderDocument)}
             </div>
           ) : (

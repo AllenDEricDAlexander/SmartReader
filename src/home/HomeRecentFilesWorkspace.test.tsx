@@ -132,4 +132,110 @@ describe('HomeRecentFilesWorkspace', () => {
 
     expect(props.onOpenPdf).toHaveBeenCalledTimes(1);
   });
+
+  it('filters by progress buckets', () => {
+    renderWorkspace();
+
+    fireEvent.change(screen.getByRole('combobox', { name: '阅读进度筛选' }), {
+      target: { value: 'notStarted' },
+    });
+    expect(listedNames()).toEqual(['Gamma Draft.pdf', 'Local Browser Upload.pdf']);
+
+    fireEvent.change(screen.getByRole('combobox', { name: '阅读进度筛选' }), {
+      target: { value: 'reading' },
+    });
+    expect(listedNames()).toEqual(['Beta Research.pdf']);
+
+    fireEvent.change(screen.getByRole('combobox', { name: '阅读进度筛选' }), {
+      target: { value: 'completed' },
+    });
+    expect(listedNames()).toEqual(['Alpha Notes.pdf']);
+  });
+
+  it('filters by favorite state', () => {
+    renderWorkspace();
+
+    fireEvent.change(screen.getByRole('combobox', { name: '收藏状态筛选' }), {
+      target: { value: 'favorite' },
+    });
+    expect(listedNames()).toEqual(['Alpha Notes.pdf']);
+
+    fireEvent.change(screen.getByRole('combobox', { name: '收藏状态筛选' }), {
+      target: { value: 'notFavorite' },
+    });
+    expect(listedNames()).toEqual([
+      'Beta Research.pdf',
+      'Gamma Draft.pdf',
+      'Local Browser Upload.pdf',
+    ]);
+  });
+
+  it('sorts by name and reading progress', () => {
+    renderWorkspace();
+
+    fireEvent.change(screen.getByRole('combobox', { name: '排序方式' }), {
+      target: { value: 'name' },
+    });
+    expect(listedNames()).toEqual([
+      'Alpha Notes.pdf',
+      'Beta Research.pdf',
+      'Gamma Draft.pdf',
+      'Local Browser Upload.pdf',
+    ]);
+
+    fireEvent.change(screen.getByRole('combobox', { name: '排序方式' }), {
+      target: { value: 'progressDesc' },
+    });
+    expect(listedNames()).toEqual([
+      'Alpha Notes.pdf',
+      'Beta Research.pdf',
+      'Gamma Draft.pdf',
+      'Local Browser Upload.pdf',
+    ]);
+
+    fireEvent.change(screen.getByRole('combobox', { name: '排序方式' }), {
+      target: { value: 'progressAsc' },
+    });
+    expect(listedNames()).toEqual([
+      'Gamma Draft.pdf',
+      'Local Browser Upload.pdf',
+      'Beta Research.pdf',
+      'Alpha Notes.pdf',
+    ]);
+  });
+
+  it('switches to card view while keeping visible documents', () => {
+    renderWorkspace();
+
+    fireEvent.click(screen.getByRole('button', { name: '卡片视图' }));
+
+    expect(screen.getByRole('button', { name: '列表视图' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: '卡片视图' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('recent-workspace-results')).toHaveClass('recent-workspace-grid');
+    expect(listedNames()).toEqual([
+      'Alpha Notes.pdf',
+      'Beta Research.pdf',
+      'Gamma Draft.pdf',
+      'Local Browser Upload.pdf',
+    ]);
+  });
+
+  it('wires continue reading and favorite toggles', () => {
+    const props = renderWorkspace();
+
+    fireEvent.click(screen.getByRole('button', { name: '继续阅读 Beta Research.pdf' }));
+    expect(props.onReopenDocument).toHaveBeenCalledWith(documents[0]);
+
+    fireEvent.click(screen.getByRole('button', { name: '收藏 Beta Research.pdf' }));
+    expect(props.onToggleFavorite).toHaveBeenCalledWith(
+      'desktop:/Users/mario/Papers/Beta Research.pdf',
+      true,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '取消收藏 Alpha Notes.pdf' }));
+    expect(props.onToggleFavorite).toHaveBeenCalledWith(
+      'desktop:/Users/mario/Archive/Alpha Notes.pdf',
+      false,
+    );
+  });
 });
