@@ -356,7 +356,7 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Close active tab' }));
 
-    fireEvent.click(screen.getByRole('button', { name: '最近文件 0' }));
+    fireEvent.click(screen.getByRole('button', { name: '最近文件 1' }));
 
     expect(await screen.findByRole('heading', { name: '最近文件' })).toBeInTheDocument();
     expect(screen.getByText('book.pdf')).toBeInTheDocument();
