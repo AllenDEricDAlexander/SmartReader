@@ -1,4 +1,5 @@
 import { act, createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   PersistedAnnotationRecord,
@@ -23,9 +24,11 @@ vi.mock('../platform/openWithEvents', () => ({
 }));
 
 const testViewerRenderer: PdfRenderer = ({ fileUrl, onPageChange }) => {
-  if (fileUrl === 'blob:progress-sync') {
-    onPageChange(4, 10);
-  }
+  useEffect(() => {
+    if (fileUrl === 'blob:progress-sync') {
+      onPageChange(4, 10);
+    }
+  }, [fileUrl, onPageChange]);
 
   return <div>PDF {fileUrl}</div>;
 };
@@ -361,6 +364,55 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: '最近文件' })).toBeInTheDocument();
     expect(screen.getByText('book.pdf')).toBeInTheDocument();
     expect(persistence.listRecentDocuments).toHaveBeenCalledTimes(1);
+  });
+
+  it('updates recent file progress from viewer page changes', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:progress-sync');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const persistence = createEmptyPersistence();
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/progress.pdf', name: 'progress.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-15T00:00:00Z',
+    });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'progress.pdf' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close active tab' }));
+    fireEvent.click(screen.getByRole('button', { name: '最近文件 1' }));
+
+    expect(await screen.findByText('progress.pdf')).toBeInTheDocument();
+    expect(screen.getByText('4 / 10 页')).toBeInTheDocument();
+    expect(screen.getByText('40%')).toBeInTheDocument();
+
+    vi.useFakeTimers();
+    await vi.runOnlyPendingTimersAsync();
+    vi.useRealTimers();
+
+    expect(persistence.saveDocument).toHaveBeenLastCalledWith({
+      documentKey: 'desktop:/tmp/progress.pdf',
+      path: '/tmp/progress.pdf',
+      displayName: 'progress.pdf',
+      fileSize: 5,
+      modifiedAt: '2026-06-15T00:00:00Z',
+      pageCount: 10,
+      lastPage: 4,
+      progress: 0.4,
+      missing: false,
+    });
   });
 
   it('mounts an opened PDF inside the sized viewer surface', async () => {
