@@ -3156,3 +3156,42 @@ select {
   right: 0;
   top: calc(100% + 6px);
 }
+
+@media (max-width: 1180px) {
+  .recent-workspace-toolbar {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
+
+  .recent-workspace-view-toggle,
+  .recent-workspace-toolbar .text-link-button {
+    justify-self: start;
+  }
+
+  .recent-workspace-row {
+    grid-template-columns: minmax(220px, 1fr) minmax(160px, 0.6fr);
+  }
+
+  .recent-workspace-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 760px) {
+  .recent-workspace-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .recent-workspace-heading.horizontal {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .recent-workspace-row {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .recent-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}
