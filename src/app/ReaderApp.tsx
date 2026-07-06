@@ -17,6 +17,7 @@ import type {
   PersistedDocument,
   PersistedSessionTab,
 } from '../persistence/persistenceApi';
+import { createDebouncedFlush } from '../persistence/debounce';
 import { defaultReaderPreferences, mergeReaderPreferences } from '../preferences/preferencesStore';
 import { SettingsWorkspace, type SettingsSection } from '../settings/SettingsWorkspace';
 import type { Tag } from '../tags/tagModels';
@@ -59,16 +60,22 @@ const appVersion = {
   build: null,
 };
 
-function mapSessionToPersistedDocument(session: DocumentSession): PersistedDocument {
+function mapSessionToPersistedDocument(
+  session: DocumentSession,
+  previousDocument?: PersistedDocument | null,
+): PersistedDocument {
   return {
     documentKey: session.documentKey,
     path: session.source.kind === 'desktop-path' ? session.source.path : null,
     displayName: session.title,
-    fileSize: session.source.kind === 'browser-file' ? session.source.file.size : null,
+    fileSize:
+      session.source.kind === 'browser-file'
+        ? session.source.file.size
+        : previousDocument?.fileSize ?? null,
     modifiedAt:
       session.source.kind === 'browser-file'
         ? new Date(session.source.file.lastModified).toISOString()
-        : null,
+        : previousDocument?.modifiedAt ?? null,
     pageCount: session.totalPages,
     lastPage: session.page,
     progress: session.progress,
@@ -169,6 +176,10 @@ export function ReaderApp({
   const globalSearchRefreshRequestRef = useRef(0);
   const blobUrlCache = useMemo(() => new BlobUrlCache(), []);
   const pdfByteCache = useMemo(() => new PdfByteCache(), []);
+  const documentPersistence = useMemo(
+    () => createDebouncedFlush(persistence.saveDocument, 250),
+    [persistence],
+  );
   const defaultViewerController = useMemo(() => new ViewerController(), []);
   const activeViewerController = viewerController ?? defaultViewerController;
   const bridgeViewerController =
@@ -313,10 +324,11 @@ export function ReaderApp({
     return () => {
       window.removeEventListener('beforeunload', flushBeforeUnload);
       sessionPersistence.cancel();
+      documentPersistence.cancel();
     };
-  }, [sessionPersistence]);
+  }, [documentPersistence, sessionPersistence]);
 
-  const syncRecentDocument = useCallback(
+  const syncRecentDocumentImmediately = useCallback(
     (document: PersistedDocument) => {
       setRecentDocuments((current) => upsertRecentDocument(current, document));
       void persistence.saveDocument(document);
@@ -324,11 +336,19 @@ export function ReaderApp({
     [persistence],
   );
 
+  const syncRecentDocumentProgress = useCallback(
+    (document: PersistedDocument) => {
+      setRecentDocuments((current) => upsertRecentDocument(current, document));
+      documentPersistence.schedule(document);
+    },
+    [documentPersistence],
+  );
+
   const handleDocumentOpened = useCallback(
     (document: PersistedDocument) => {
-      syncRecentDocument(document);
+      syncRecentDocumentImmediately(document);
     },
-    [syncRecentDocument],
+    [syncRecentDocumentImmediately],
   );
 
   const {
@@ -812,13 +832,27 @@ export function ReaderApp({
           })
         }
         onProgressChange={(progress) => {
-          setDocuments((current) =>
-            updateSessionProgress(current, progress.sessionId, {
+          setDocuments((current) => {
+            const next = updateSessionProgress(current, progress.sessionId, {
               page: progress.page,
               totalPages: progress.totalPages,
               zoom: progress.zoom,
-            }),
-          );
+            });
+            const updatedSession = next.sessions.find(
+              (session) => session.id === progress.sessionId,
+            );
+
+            if (updatedSession?.source.kind === 'desktop-path') {
+              const existingRecentDocument = recentDocuments.find(
+                (document) => document.documentKey === updatedSession.documentKey,
+              );
+              syncRecentDocumentProgress(
+                mapSessionToPersistedDocument(updatedSession, existingRecentDocument),
+              );
+            }
+
+            return next;
+          });
         }}
         onLoadError={(error) => {
           setDocuments((current) =>

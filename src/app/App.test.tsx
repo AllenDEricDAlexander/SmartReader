@@ -398,20 +398,18 @@ describe('App', () => {
     expect(screen.getByText('4 / 10 页')).toBeInTheDocument();
     expect(screen.getByText('40%')).toBeInTheDocument();
 
-    vi.useFakeTimers();
-    await vi.runOnlyPendingTimersAsync();
-    vi.useRealTimers();
-
-    expect(persistence.saveDocument).toHaveBeenLastCalledWith({
-      documentKey: 'desktop:/tmp/progress.pdf',
-      path: '/tmp/progress.pdf',
-      displayName: 'progress.pdf',
-      fileSize: 5,
-      modifiedAt: '2026-06-15T00:00:00Z',
-      pageCount: 10,
-      lastPage: 4,
-      progress: 0.4,
-      missing: false,
+    await waitFor(() => {
+      expect(persistence.saveDocument).toHaveBeenLastCalledWith({
+        documentKey: 'desktop:/tmp/progress.pdf',
+        path: '/tmp/progress.pdf',
+        displayName: 'progress.pdf',
+        fileSize: 5,
+        modifiedAt: '2026-06-15T00:00:00Z',
+        pageCount: 10,
+        lastPage: 4,
+        progress: 0.4,
+        missing: false,
+      });
     });
   });
 
