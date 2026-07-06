@@ -22,7 +22,13 @@ vi.mock('../platform/openWithEvents', () => ({
   }),
 }));
 
-const testViewerRenderer: PdfRenderer = ({ fileUrl }) => <div>PDF {fileUrl}</div>;
+const testViewerRenderer: PdfRenderer = ({ fileUrl, onPageChange }) => {
+  if (fileUrl === 'blob:progress-sync') {
+    onPageChange(4, 10);
+  }
+
+  return <div>PDF {fileUrl}</div>;
+};
 
 function createEmptyPersistence(): PersistenceApi {
   return {
@@ -321,6 +327,40 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
     });
+  });
+
+  it('adds a newly opened desktop PDF to recent files without reloading persistence', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:book');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const persistence = createEmptyPersistence();
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/book.pdf', name: 'book.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-15T00:00:00Z',
+    });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close active tab' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '最近文件 0' }));
+
+    expect(await screen.findByRole('heading', { name: '最近文件' })).toBeInTheDocument();
+    expect(screen.getByText('book.pdf')).toBeInTheDocument();
+    expect(persistence.listRecentDocuments).toHaveBeenCalledTimes(1);
   });
 
   it('mounts an opened PDF inside the sized viewer surface', async () => {
