@@ -9,7 +9,7 @@ import {
 } from '../../documents/documentSessionStore';
 import { fileToBrowserSource } from '../../platform/browserFilePicker';
 import { getPdfFilesFromDrop } from '../../platform/dropZone';
-import { getDocumentKey, type FileSource } from '../../platform/fileSource';
+import { getDocumentKey, getFileSourceName, type FileSource } from '../../platform/fileSource';
 import { listenForOpenWith } from '../../platform/openWithEvents';
 import type {
   PersistedDocument,
@@ -23,6 +23,7 @@ type UseDocumentOpeningInput = {
   bridge: TauriBridge;
   documents: DocumentState;
   loadDocumentDecorations(documentKey: string): Promise<void>;
+  onDocumentOpened(document: PersistedDocument): void;
   pdfByteCache: PdfByteCache;
   persistence: PersistenceApi;
   setDocuments: Dispatch<SetStateAction<DocumentState>>;
@@ -40,6 +41,7 @@ export function useDocumentOpening({
   bridge,
   documents,
   loadDocumentDecorations,
+  onDocumentOpened,
   pdfByteCache,
   persistence,
   setDocuments,
@@ -48,6 +50,20 @@ export function useDocumentOpening({
 }: UseDocumentOpeningInput) {
   const openBytes = useCallback(
     (source: FileSource, bytes: Uint8Array, metadata: OpenMetadata = {}) => {
+      if (source.kind === 'desktop-path') {
+        onDocumentOpened({
+          documentKey: getDocumentKey(source),
+          path: source.path,
+          displayName: getFileSourceName(source),
+          fileSize: metadata.fileSize ?? null,
+          modifiedAt: metadata.modifiedAt ?? null,
+          pageCount: null,
+          lastPage: 1,
+          progress: 0,
+          missing: false,
+        });
+      }
+
       setDocuments((current) => {
         const next = addDocumentSession(current, source);
         const documentKey = getDocumentKey(source);
@@ -58,20 +74,6 @@ export function useDocumentOpening({
           const url = blobUrlCache.createForSession(session.id, bytes);
           setViewerSource({ sessionId: session.id, url });
 
-          if (source.kind === 'desktop-path') {
-            void persistence.saveDocument({
-              documentKey,
-              path: source.path,
-              displayName: session.title,
-              fileSize: metadata.fileSize ?? null,
-              modifiedAt: metadata.modifiedAt ?? null,
-              pageCount: session.totalPages,
-              lastPage: session.page,
-              progress: session.progress,
-              missing: false,
-            });
-          }
-
           void loadDocumentDecorations(documentKey);
         }
 
@@ -81,8 +83,8 @@ export function useDocumentOpening({
     [
       blobUrlCache,
       loadDocumentDecorations,
+      onDocumentOpened,
       pdfByteCache,
-      persistence,
       setDocuments,
       setViewerSource,
     ],

@@ -76,6 +76,35 @@ function mapSessionToPersistedDocument(session: DocumentSession): PersistedDocum
   };
 }
 
+function upsertRecentDocument(
+  documents: PersistedDocument[],
+  document: PersistedDocument,
+): PersistedDocument[] {
+  const existingIndex = documents.findIndex(
+    (candidate) => candidate.documentKey === document.documentKey,
+  );
+
+  if (existingIndex === -1) {
+    return [document, ...documents];
+  }
+
+  return [
+    document,
+    ...documents.slice(0, existingIndex),
+    ...documents.slice(existingIndex + 1),
+  ];
+}
+
+function mergeRecentDocuments(
+  currentDocuments: PersistedDocument[],
+  restoredDocuments: PersistedDocument[],
+): PersistedDocument[] {
+  return restoredDocuments.reduce(
+    (documents, document) => upsertRecentDocument(documents, document),
+    currentDocuments,
+  );
+}
+
 function mapSessionsToPersistedTabs(sessions: DocumentSession[]): PersistedSessionTab[] {
   return sessions
     .filter((session) => session.source.kind === 'desktop-path')
@@ -172,7 +201,14 @@ export function ReaderApp({
     preferences: readerPreferences,
     preferencesLoaded,
     setDocuments,
-    setRecentDocuments,
+    setRecentDocuments: (update) => {
+      if (typeof update === 'function') {
+        setRecentDocuments(update);
+        return;
+      }
+
+      setRecentDocuments((current) => mergeRecentDocuments(current, update));
+    },
     setSidebarOpen,
     setViewerSource,
   });
@@ -280,6 +316,21 @@ export function ReaderApp({
     };
   }, [sessionPersistence]);
 
+  const syncRecentDocument = useCallback(
+    (document: PersistedDocument) => {
+      setRecentDocuments((current) => upsertRecentDocument(current, document));
+      void persistence.saveDocument(document);
+    },
+    [persistence],
+  );
+
+  const handleDocumentOpened = useCallback(
+    (document: PersistedDocument) => {
+      syncRecentDocument(document);
+    },
+    [syncRecentDocument],
+  );
+
   const {
     handleBrowserFileChange,
     handleDrop,
@@ -291,6 +342,7 @@ export function ReaderApp({
     bridge,
     documents,
     loadDocumentDecorations,
+    onDocumentOpened: handleDocumentOpened,
     pdfByteCache,
     persistence,
     setDocuments,
