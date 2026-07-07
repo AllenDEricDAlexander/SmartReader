@@ -3258,6 +3258,12 @@ select {
   display: grid;
   gap: 14px;
   padding: 14px;
+  position: relative;
+}
+
+.favorite-workspace-card[data-menu-open='true'],
+.favorite-workspace-row[data-menu-open='true'] {
+  z-index: 20;
 }
 
 .favorite-workspace-row {
