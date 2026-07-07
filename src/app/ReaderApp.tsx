@@ -37,12 +37,6 @@ import { useReaderDecorations } from '../reader/hooks/useReaderDecorations';
 import { useReaderNavigation } from '../reader/hooks/useReaderNavigation';
 import { useReaderPersistence } from '../reader/hooks/useReaderPersistence';
 import { useSessionRestore } from '../reader/hooks/useSessionRestore';
-import { ReaderLeftPanel } from '../reader/ReaderLeftPanel';
-import { ReaderRightPanel } from '../reader/ReaderRightPanel';
-import { ReaderStatusBar } from '../reader/ReaderStatusBar';
-import { ReaderTabs } from '../reader/ReaderTabs';
-import { ReaderToolbar } from '../reader/ReaderToolbar';
-import { ReaderWorkspace } from '../reader/ReaderWorkspace';
 import { GlobalSearchPanel } from '../search/GlobalSearchPanel';
 import type { GlobalSearchResult } from '../search/globalSearch';
 import { ViewerController } from '../viewer/viewerController';
@@ -53,6 +47,7 @@ import { CompareWorkspace } from '../workspaces/CompareWorkspace';
 import { ImportWorkspace } from '../workspaces/ImportWorkspace';
 import type { AppWorkspace, ReaderAppProps } from './appTypes';
 import { ReaderViewerContent } from './ReaderViewerContent';
+import { ReaderWorkspaceView } from './ReaderWorkspaceView';
 import {
   countRestorablePersistedTabs,
   mapSessionToPersistedDocument,
@@ -893,102 +888,45 @@ export function ReaderApp({
         />
       ) : null}
       {activeWorkspace === 'reader' && activeSession ? (
-        <ReaderWorkspace
+        <ReaderWorkspaceView
+          activeAnnotations={activeAnnotations}
+          activeBookmarks={activeBookmarks}
+          activeSession={activeSession}
+          activeSessionIsFavorite={activeSessionIsFavorite}
+          activeViewerController={activeViewerController}
+          availableTags={availableTags}
+          documents={documents}
+          lastSearchCommand={lastSearchCommand}
+          pageInput={pageInput}
+          recentDocuments={recentDocuments}
+          searchText={searchText}
+          selectedAnnotation={selectedAnnotation}
           sidebarOpen={sidebarOpen}
-          tabs={
-            <ReaderTabs
-              sessions={documents.sessions}
-              activeSessionId={documents.activeSessionId}
-              onSelectSession={selectReaderSession}
-            />
-          }
-          toolbar={
-            <ReaderToolbar
-              activeSession={activeSession}
-              searchText={searchText}
-              pageInput={pageInput}
-              onOpenPdf={openPdfAndIgnoreResult}
-              onBrowserFileChange={handleBrowserFileChange}
-              onSearchTextChange={setSearchText}
-              onPageInputChange={setPageInput}
-              onOpenSearch={() => activeViewerController.openSearch()}
-              onSearch={() => runSearch(searchText)}
-              onJumpToPage={() => jumpToPage(Number(pageInput))}
-              onFitWidth={() => activeViewerController.fitWidth()}
-              onFitPage={() => activeViewerController.fitPage()}
-              onZoomIn={() => activeViewerController.zoomIn()}
-              onZoomOut={() => activeViewerController.zoomOut()}
-              onToggleSidebar={() => setSidebarOpen((open) => !open)}
-              onCloseActiveTab={closeActiveTab}
-              onHistoryBack={stepHistoryBack}
-              onHistoryForward={stepHistoryForward}
-              onAddBookmark={addBookmarkForActivePage}
-              onAddNote={addPageNote}
-              isFavorite={activeSessionIsFavorite}
-              onToggleFavorite={handleToggleActiveFavorite}
-              onOpenPreferences={() => openSettingsWorkspace()}
-            />
-          }
-          leftPanel={
-            <ReaderLeftPanel
-              activeSession={activeSession}
-              recentDocuments={recentDocuments}
-              bookmarks={activeBookmarks}
-              annotations={activeAnnotations}
-              selectedAnnotationId={selectedAnnotation?.id ?? null}
-              searchText={searchText}
-              lastSearchCommand={lastSearchCommand}
-              onJumpToPage={jumpToActiveDocumentPage}
-              onReopenRecentDocument={(document) => void reopenRecentDocument(document)}
-              onAddBookmark={addBookmarkForActivePage}
-              onAddNote={addPageNote}
-              onSelectAnnotation={(annotation) => setSelectedAnnotationId(annotation.id)}
-              onDeleteAnnotation={(annotationId) =>
-                deleteAnnotationForDocument(activeSession.documentKey, annotationId)
-              }
-              onImportAnnotations={(json) =>
-                importAnnotationsForDocument(activeSession.documentKey, json)
-              }
-              onSearchTextChange={setSearchText}
-              onOpenSearch={() => activeViewerController.openSearch()}
-              onSearch={() => runSearch(searchText)}
-            />
-          }
-          viewer={
-            <section
-              className="viewer-surface"
-              aria-label="PDF viewer surface"
-              onWheel={handleViewerWheel}
-            >
-              {viewerContent}
-            </section>
-          }
-          rightPanel={
-            <ReaderRightPanel
-              activeSession={activeSession}
-              selectedAnnotation={selectedAnnotation}
-              tags={availableTags}
-              searchText={searchText}
-              lastSearchCommand={lastSearchCommand}
-              isFavorite={activeSessionIsFavorite}
-              onSearchTextChange={setSearchText}
-              onOpenSearch={() => activeViewerController.openSearch()}
-              onSearch={() => runSearch(searchText)}
-              onClearSearch={clearSearch}
-              onSearchNext={() => activeViewerController.searchNext()}
-              onSearchPrevious={() => activeViewerController.searchPrevious()}
-              onJumpToPage={jumpToActiveDocumentPage}
-              onFitWidth={() => activeViewerController.fitWidth()}
-              onFitPage={() => activeViewerController.fitPage()}
-              onToggleFavorite={handleToggleActiveFavorite}
-              onDeleteAnnotation={(annotationId) =>
-                deleteAnnotationForDocument(activeSession.documentKey, annotationId)
-              }
-              onSaveAnnotationNote={handleSaveAnnotationNote}
-              onToggleAnnotationTag={handleToggleAnnotationTag}
-            />
-          }
-          statusBar={<ReaderStatusBar activeSession={activeSession} />}
+          viewerContent={viewerContent}
+          addBookmarkForActivePage={addBookmarkForActivePage}
+          addPageNote={addPageNote}
+          clearSearch={clearSearch}
+          closeActiveTab={closeActiveTab}
+          deleteAnnotationForDocument={deleteAnnotationForDocument}
+          handleBrowserFileChange={handleBrowserFileChange}
+          handleSaveAnnotationNote={handleSaveAnnotationNote}
+          handleToggleActiveFavorite={handleToggleActiveFavorite}
+          handleToggleAnnotationTag={handleToggleAnnotationTag}
+          handleViewerWheel={handleViewerWheel}
+          importAnnotationsForDocument={importAnnotationsForDocument}
+          jumpToActiveDocumentPage={jumpToActiveDocumentPage}
+          jumpToPage={jumpToPage}
+          openPdfAndIgnoreResult={openPdfAndIgnoreResult}
+          openSettingsWorkspace={openSettingsWorkspace}
+          reopenRecentDocument={reopenRecentDocument}
+          runSearch={runSearch}
+          selectReaderSession={selectReaderSession}
+          setPageInput={setPageInput}
+          setSearchText={setSearchText}
+          setSelectedAnnotationId={setSelectedAnnotationId}
+          setSidebarOpen={setSidebarOpen}
+          stepHistoryBack={stepHistoryBack}
+          stepHistoryForward={stepHistoryForward}
         />
       ) : null}
       {activeWorkspace === 'home' ? (
