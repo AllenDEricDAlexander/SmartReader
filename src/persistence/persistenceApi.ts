@@ -1,7 +1,7 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { ReaderPreferences } from '../preferences/preferencesModels';
-import type { CreateTagInput, MergeTagsInput, Tag } from '../tags/tagModels';
+import type { CreateTagInput, MergeTagsInput, Tag, TagDashboard } from '../tags/tagModels';
 
 export type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -112,6 +112,7 @@ export type FavoritesTagsPersistenceApi = {
   deleteTag(id: number): Promise<void>;
   mergeTags(input: MergeTagsInput): Promise<Tag>;
   listTags(): Promise<Tag[]>;
+  loadTagDashboard(): Promise<TagDashboard>;
   attachDocumentTag(documentKey: string, tagId: number): Promise<void>;
   detachDocumentTag(documentKey: string, tagId: number): Promise<void>;
   attachAnnotationTag(annotationId: number, tagId: number): Promise<void>;
@@ -187,6 +188,9 @@ export function createPersistenceApi(invoke: Invoke = tauriInvoke): PersistenceA
     },
     listTags() {
       return invoke<Tag[]>('list_tags');
+    },
+    loadTagDashboard() {
+      return invoke<TagDashboard>('load_tag_dashboard');
     },
     attachDocumentTag(documentKey, tagId) {
       return invoke<void>('attach_document_tag', { documentKey, tagId });

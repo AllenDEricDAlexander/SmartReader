@@ -205,4 +205,18 @@ describe('persistenceApi', () => {
     expect(invoke).toHaveBeenCalledWith('attach_annotation_tag', { annotationId: 7, tagId: 2 });
     expect(invoke).toHaveBeenCalledWith('detach_annotation_tag', { annotationId: 7, tagId: 2 });
   });
+
+  it('loads the tag dashboard through Tauri invoke', async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      overview: { totalTags: 0, activeTags: 0, totalUsage: 0, orphanTags: 0 },
+      tags: [],
+      details: [],
+      recommendations: [],
+    });
+    const api = createPersistenceApi(invoke);
+
+    await api.loadTagDashboard();
+
+    expect(invoke).toHaveBeenCalledWith('load_tag_dashboard');
+  });
 });
