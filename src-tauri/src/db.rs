@@ -18,6 +18,10 @@ const MIGRATIONS: &[Migration] = &[
         version: "003_workbench_stabilization",
         sql: include_str!("migrations/003_workbench_stabilization.sql"),
     },
+    Migration {
+        version: "004_tag_activity_log",
+        sql: include_str!("migrations/004_tag_activity_log.sql"),
+    },
 ];
 const READER_PREFERENCES_KEY: &str = "reader_preferences";
 pub const DEFAULT_CACHE_TOTAL_BYTES: i64 = 5 * 1024 * 1024 * 1024;
@@ -1537,6 +1541,30 @@ mod tests {
             )
             .expect("column count");
         assert_eq!(favorite_column_count, 1);
+    }
+
+    #[test]
+    fn opens_tag_activity_log_schema() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        apply_migrations(&connection).expect("schema applies");
+
+        let table_count: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'tag_activity_log'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("table count");
+        let index_count: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name IN ('idx_tag_activity_log_tag_id', 'idx_tag_activity_log_created_at', 'idx_tag_activity_log_action')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("index count");
+
+        assert_eq!(table_count, 1);
+        assert_eq!(index_count, 3);
     }
 
     #[test]
