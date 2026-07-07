@@ -3497,3 +3497,241 @@ select {
   background: #ffffff;
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
 }
+
+.tag-dashboard-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 150px 150px auto auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.tag-dashboard-search,
+.tag-dashboard-toolbar select,
+.tag-dashboard-toolbar > button {
+  min-width: 0;
+  height: 40px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+}
+
+.tag-dashboard-search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.tag-dashboard-search svg {
+  color: #64748b;
+}
+
+.tag-dashboard-search input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #0f172a;
+}
+
+.tag-dashboard-toolbar select,
+.tag-dashboard-toolbar > button {
+  padding: 0 12px;
+}
+
+.tag-dashboard-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-color: #2563eb !important;
+  background: #2563eb !important;
+  color: #fff !important;
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.22);
+}
+
+.tag-dashboard-ghost {
+  background: #fff !important;
+  color: #64748b !important;
+}
+
+.tag-dashboard-top-grid {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 14px;
+}
+
+.tag-dashboard-card {
+  min-width: 0;
+  padding: 18px;
+}
+
+.tag-dashboard-card h2 {
+  margin: 0 0 16px;
+  color: #0f172a;
+  font-size: 16px;
+}
+
+.tag-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid #edf2f7;
+  border-radius: 10px;
+  background: #e2e8f0;
+}
+
+.tag-overview-grid div {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  background: #fff;
+}
+
+.tag-overview-grid span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.tag-overview-grid strong {
+  color: #0f172a;
+  font-size: 23px;
+  line-height: 1;
+}
+
+.tag-cloud-list {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.tag-cloud-list button {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid color-mix(in srgb, var(--tag-color) 45%, #fff);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--tag-color) 10%, #fff);
+  color: var(--tag-color);
+  font-weight: 700;
+}
+
+.tag-cloud-list button.active {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tag-color) 25%, transparent);
+}
+
+.tag-cloud-list span {
+  margin-left: 8px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.tag-table-card {
+  padding-bottom: 12px;
+}
+
+.tag-table {
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.tag-table-head,
+.tag-table-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.1fr) 100px 110px 150px minmax(180px, 1.4fr) 116px;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 14px;
+}
+
+.tag-table-head {
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tag-table-row {
+  border-top: 1px solid #e2e8f0;
+  color: #334155;
+  font-size: 13px;
+}
+
+.tag-table-row.active,
+.tag-table-row:hover {
+  background: #f8fbff;
+}
+
+.tag-table-name {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  color: #0f172a;
+  text-align: left;
+}
+
+.tag-table-name i {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+.tag-table-name strong,
+.tag-table-row > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-table-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-table-actions button,
+.tag-dashboard-pagination button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-height: 32px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #fff;
+  color: #64748b;
+}
+
+.tag-table-actions button:last-child {
+  color: #ef4444;
+}
+
+.tag-dashboard-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.tag-dashboard-empty {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 13px;
+}
