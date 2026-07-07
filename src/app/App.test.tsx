@@ -66,6 +66,12 @@ function createEmptyPersistence(): PersistenceApi {
     deleteTag: vi.fn(),
     mergeTags: vi.fn(),
     listTags: vi.fn().mockResolvedValue([]),
+    loadTagDashboard: vi.fn().mockResolvedValue({
+      overview: { totalTags: 0, activeTags: 0, totalUsage: 0, orphanTags: 0 },
+      tags: [],
+      details: [],
+      recommendations: [],
+    }),
     attachDocumentTag: vi.fn(),
     detachDocumentTag: vi.fn(),
     attachAnnotationTag: vi.fn(),
@@ -1870,8 +1876,10 @@ describe('App', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '标签管理' }));
-    fireEvent.change(screen.getByLabelText('标签名称'), { target: { value: '论文' } });
+    await screen.findByRole('button', { name: '创建标签' });
     fireEvent.click(screen.getByRole('button', { name: '创建标签' }));
+    fireEvent.change(screen.getByLabelText('标签名称'), { target: { value: '论文' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
 
     await waitFor(() => {
       expect(persistence.createTag).toHaveBeenCalledWith({ name: '论文', color: '#2563eb' });
@@ -1893,14 +1901,16 @@ describe('App', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '标签管理' }));
-    fireEvent.change(screen.getByLabelText('标签名称'), { target: { value: '论文' } });
+    await screen.findByRole('button', { name: '创建标签' });
     fireEvent.click(screen.getByRole('button', { name: '创建标签' }));
+    fireEvent.change(screen.getByLabelText('标签名称'), { target: { value: '论文' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
 
     await waitFor(() => {
       expect(persistence.createTag).toHaveBeenCalledWith({ name: '论文', color: '#2563eb' });
     });
     expect(screen.getByLabelText('标签名称')).toHaveValue('论文');
-    expect(screen.getByRole('status')).toHaveTextContent('标签创建失败');
+    expect(screen.getByRole('alert')).toHaveTextContent('create failed');
   });
 
   it('opens settings from the preferences shortcut', () => {
