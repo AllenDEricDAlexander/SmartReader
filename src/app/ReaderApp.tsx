@@ -842,6 +842,7 @@ export function ReaderApp({
         closeToolWorkspace={closeToolWorkspace}
         deleteAnnotationForDocument={deleteAnnotationForDocument}
         handleBrowserFileChange={handleBrowserFileChange}
+        handleImportBrowserFileChange={handleImportBrowserFileChange}
         handleDrop={handleDrop}
         handleSaveAnnotationNote={handleSaveAnnotationNote}
         handleSavePreferences={handleSavePreferences}

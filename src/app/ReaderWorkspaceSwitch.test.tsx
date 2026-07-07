@@ -48,6 +48,7 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     closeToolWorkspace: vi.fn(),
     deleteAnnotationForDocument: vi.fn(),
     handleBrowserFileChange: vi.fn(),
+    handleImportBrowserFileChange: vi.fn(),
     handleDrop: vi.fn(),
     handleSaveAnnotationNote: vi.fn(),
     handleSavePreferences: vi.fn(),

@@ -67,6 +67,7 @@ type ReaderWorkspaceSwitchProps = {
   closeToolWorkspace(): void;
   deleteAnnotationForDocument(documentKey: string, annotationId: number): void;
   handleBrowserFileChange(event: ChangeEvent<HTMLInputElement>): void;
+  handleImportBrowserFileChange(event: ChangeEvent<HTMLInputElement>): void;
   handleDrop(event: DragEvent<HTMLElement>): void | Promise<void>;
   handleSaveAnnotationNote(annotation: ReaderAnnotation, text: string): void | Promise<void>;
   handleSavePreferences(preferences: ReaderPreferences): Promise<void>;
@@ -144,6 +145,7 @@ export function ReaderWorkspaceSwitch({
   closeToolWorkspace,
   deleteAnnotationForDocument,
   handleBrowserFileChange,
+  handleImportBrowserFileChange,
   handleDrop,
   handleSaveAnnotationNote,
   handleSavePreferences,
@@ -193,7 +195,7 @@ export function ReaderWorkspaceSwitch({
       {activeWorkspace === 'import' ? (
         <ImportWorkspace
           onOpenPdf={openImportPdf}
-          onBrowserFileChange={handleBrowserFileChange}
+          onBrowserFileChange={handleImportBrowserFileChange}
           canOpenNativePdf={canOpenNativePdf}
           onClose={closeToolWorkspace}
         />
