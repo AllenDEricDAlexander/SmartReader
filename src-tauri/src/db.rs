@@ -194,6 +194,92 @@ pub struct PersistedTag {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct TagDashboard {
+    pub overview: TagDashboardOverview,
+    pub tags: Vec<TagDashboardTagRow>,
+    pub details: Vec<TagDashboardDetail>,
+    pub recommendations: Vec<TagDashboardRecommendation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TagDashboardOverview {
+    pub total_tags: i64,
+    pub active_tags: i64,
+    pub total_usage: i64,
+    pub orphan_tags: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TagDashboardTagRow {
+    pub id: i64,
+    pub name: String,
+    pub color: String,
+    pub usage_count: i64,
+    pub document_count: i64,
+    pub annotation_count: i64,
+    pub recent_used_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TagDashboardDetail {
+    pub tag: TagDashboardTagRow,
+    pub documents: Vec<TagDashboardDocument>,
+    pub folder_distribution: Vec<TagFolderDistribution>,
+    pub activities: Vec<TagActivityRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TagDashboardDocument {
+    pub document_key: String,
+    pub display_name: String,
+    pub path: Option<String>,
+    pub missing: bool,
+    pub page_count: Option<i64>,
+    pub last_opened_at: Option<String>,
+    pub relation_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TagFolderDistribution {
+    pub folder: String,
+    pub count: i64,
+    pub percent: i64,
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TagActivityRecord {
+    pub id: i64,
+    pub tag_id: Option<i64>,
+    pub tag_name: String,
+    pub action: String,
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+    pub target_label: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TagDashboardRecommendation {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub tag_ids: Vec<i64>,
+    pub severity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateTagInput {
     pub name: String,
     pub color: String,
@@ -521,6 +607,12 @@ pub fn merge_tags(
 pub fn list_tags(state: State<'_, DatabaseState>) -> Result<Vec<PersistedTag>, DbError> {
     let connection = state.connection.lock().expect("database mutex poisoned");
     list_tags_tx(&connection)
+}
+
+#[tauri::command]
+pub fn load_tag_dashboard(state: State<'_, DatabaseState>) -> Result<TagDashboard, DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    load_tag_dashboard_tx(&connection)
 }
 
 #[tauri::command]
@@ -1348,6 +1440,209 @@ pub fn list_tags_tx(connection: &Connection) -> Result<Vec<PersistedTag>, DbErro
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+pub fn load_tag_dashboard_tx(connection: &Connection) -> Result<TagDashboard, DbError> {
+    let tags = list_tag_dashboard_rows_tx(connection)?;
+    let overview = TagDashboardOverview {
+        total_tags: tags.len() as i64,
+        active_tags: tags.iter().filter(|tag| tag.usage_count > 0).count() as i64,
+        total_usage: tags.iter().map(|tag| tag.usage_count).sum(),
+        orphan_tags: tags.iter().filter(|tag| tag.usage_count == 0).count() as i64,
+    };
+    let details = tags
+        .iter()
+        .map(|tag| load_tag_dashboard_detail_tx(connection, tag.clone()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let recommendations = build_tag_recommendations(&tags);
+
+    Ok(TagDashboard {
+        overview,
+        tags,
+        details,
+        recommendations,
+    })
+}
+
+fn list_tag_dashboard_rows_tx(connection: &Connection) -> Result<Vec<TagDashboardTagRow>, DbError> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT t.id, t.name, t.color,
+               count(DISTINCT dt.document_key) AS document_count,
+               count(DISTINCT at.annotation_id) AS annotation_count,
+               max(COALESCE(tal.created_at, t.updated_at)) AS recent_used_at,
+               t.created_at, t.updated_at
+        FROM tags t
+        LEFT JOIN document_tags dt ON dt.tag_id = t.id
+        LEFT JOIN annotation_tags at ON at.tag_id = t.id
+        LEFT JOIN tag_activity_log tal ON tal.tag_id = t.id
+        GROUP BY t.id, t.name, t.color, t.created_at, t.updated_at
+        ORDER BY recent_used_at DESC, t.name COLLATE NOCASE ASC
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| {
+        let document_count: i64 = row.get(3)?;
+        let annotation_count: i64 = row.get(4)?;
+        let name: String = row.get(1)?;
+        Ok(TagDashboardTagRow {
+            id: row.get(0)?,
+            name: name.clone(),
+            color: row.get(2)?,
+            usage_count: document_count + annotation_count,
+            document_count,
+            annotation_count,
+            recent_used_at: row.get(5)?,
+            created_at: row.get(6)?,
+            updated_at: row.get(7)?,
+            description: format!("{} 相关文献与批注", name),
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+fn load_tag_dashboard_detail_tx(
+    connection: &Connection,
+    tag: TagDashboardTagRow,
+) -> Result<TagDashboardDetail, DbError> {
+    let documents = list_tag_documents_tx(connection, tag.id)?;
+    let folder_distribution = build_folder_distribution(&documents);
+    let activities = list_tag_activities_tx(connection, tag.id, &tag.name)?;
+
+    Ok(TagDashboardDetail {
+        tag,
+        documents,
+        folder_distribution,
+        activities,
+    })
+}
+
+fn list_tag_documents_tx(
+    connection: &Connection,
+    tag_id: i64,
+) -> Result<Vec<TagDashboardDocument>, DbError> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT d.document_key, d.display_name, d.path, d.missing, d.page_count,
+               d.last_opened_at, count(*) AS relation_count
+        FROM documents d
+        JOIN (
+            SELECT document_key FROM document_tags WHERE tag_id = ?1
+            UNION ALL
+            SELECT a.document_key FROM annotations a
+            JOIN annotation_tags at ON at.annotation_id = a.id
+            WHERE at.tag_id = ?1
+        ) r ON r.document_key = d.document_key
+        GROUP BY d.document_key, d.display_name, d.path, d.missing, d.page_count, d.last_opened_at
+        ORDER BY COALESCE(d.last_opened_at, '') DESC, relation_count DESC, d.display_name COLLATE NOCASE ASC
+        LIMIT 6
+        "#,
+    )?;
+    let rows = statement.query_map([tag_id], |row| {
+        Ok(TagDashboardDocument {
+            document_key: row.get(0)?,
+            display_name: row.get(1)?,
+            path: row.get(2)?,
+            missing: row.get::<_, i64>(3)? != 0,
+            page_count: row.get(4)?,
+            last_opened_at: row.get(5)?,
+            relation_count: row.get(6)?,
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+fn build_folder_distribution(documents: &[TagDashboardDocument]) -> Vec<TagFolderDistribution> {
+    let mut counts = std::collections::BTreeMap::<String, i64>::new();
+    for document in documents {
+        let folder = document
+            .path
+            .as_ref()
+            .and_then(|path| Path::new(path).parent())
+            .map(|path| path.to_string_lossy().to_string())
+            .filter(|folder| !folder.is_empty())
+            .unwrap_or_else(|| "未知位置".to_string());
+        *counts.entry(folder).or_insert(0) += 1;
+    }
+
+    let total: i64 = counts.values().sum();
+    let colors = ["#2563eb", "#06b6d4", "#f59e0b", "#ec4899", "#94a3b8"];
+    counts
+        .into_iter()
+        .enumerate()
+        .map(|(index, (folder, count))| TagFolderDistribution {
+            folder,
+            count,
+            percent: if total == 0 { 0 } else { (count * 100 / total).max(1) },
+            color: colors[index % colors.len()].to_string(),
+        })
+        .collect()
+}
+
+fn list_tag_activities_tx(
+    connection: &Connection,
+    tag_id: i64,
+    tag_name: &str,
+) -> Result<Vec<TagActivityRecord>, DbError> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT id, tag_id, tag_name, action, target_type, target_id, target_label, created_at
+        FROM tag_activity_log
+        WHERE tag_id = ?1 OR tag_name = ?2
+        ORDER BY created_at DESC, id DESC
+        LIMIT 8
+        "#,
+    )?;
+    let rows = statement.query_map(params![tag_id, tag_name], |row| {
+        Ok(TagActivityRecord {
+            id: row.get(0)?,
+            tag_id: row.get(1)?,
+            tag_name: row.get(2)?,
+            action: row.get(3)?,
+            target_type: row.get(4)?,
+            target_id: row.get(5)?,
+            target_label: row.get(6)?,
+            created_at: row.get(7)?,
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+fn build_tag_recommendations(tags: &[TagDashboardTagRow]) -> Vec<TagDashboardRecommendation> {
+    let mut recommendations = Vec::new();
+    let orphan_ids: Vec<i64> = tags
+        .iter()
+        .filter(|tag| tag.usage_count == 0)
+        .map(|tag| tag.id)
+        .collect();
+    if !orphan_ids.is_empty() {
+        recommendations.push(TagDashboardRecommendation {
+            id: "orphan-tags".to_string(),
+            title: format!("发现 {} 个孤立标签", orphan_ids.len()),
+            description: "这些标签尚未关联文档或批注，可考虑删除或合并。".to_string(),
+            tag_ids: orphan_ids,
+            severity: "warning".to_string(),
+        });
+    }
+
+    let low_usage_ids: Vec<i64> = tags
+        .iter()
+        .filter(|tag| tag.usage_count > 0 && tag.usage_count <= 2)
+        .map(|tag| tag.id)
+        .collect();
+    if !low_usage_ids.is_empty() {
+        recommendations.push(TagDashboardRecommendation {
+            id: "low-usage-tags".to_string(),
+            title: format!("发现 {} 个低频标签", low_usage_ids.len()),
+            description: "低频标签可能适合与相近主题合并。".to_string(),
+            tag_ids: low_usage_ids,
+            severity: "info".to_string(),
+        });
+    }
+
+    recommendations
+}
+
 pub fn attach_document_tag_tx(
     connection: &Connection,
     document_key: &str,
@@ -1752,6 +2047,49 @@ mod tests {
             .expect("collect actions");
 
         assert_eq!(actions, vec!["create", "rename", "delete"]);
+    }
+
+    #[test]
+    fn loads_tag_dashboard_from_real_relations() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        apply_migrations(&connection).expect("schema applies");
+        upsert_document(
+            &connection,
+            &PersistedDocument {
+                document_key: "desktop:/paper.pdf".to_string(),
+                path: Some("/Users/mario/Papers/paper.pdf".to_string()),
+                display_name: "Attention Is All You Need.pdf".to_string(),
+                file_size: None,
+                modified_at: None,
+                page_count: Some(15),
+                last_page: 1,
+                progress: 0.2,
+                missing: false,
+            },
+        )
+        .expect("save document");
+        let tag = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "Transformer".to_string(),
+                color: "#2563eb".to_string(),
+            },
+        )
+        .expect("create tag");
+        attach_document_tag_tx(&connection, "desktop:/paper.pdf", tag.id).expect("attach tag");
+
+        let dashboard = load_tag_dashboard_tx(&connection).expect("load dashboard");
+
+        assert_eq!(dashboard.overview.total_tags, 1);
+        assert_eq!(dashboard.overview.active_tags, 1);
+        assert_eq!(dashboard.overview.total_usage, 1);
+        assert_eq!(dashboard.tags[0].name, "Transformer");
+        assert_eq!(
+            dashboard.details[0].documents[0].display_name,
+            "Attention Is All You Need.pdf",
+        );
+        assert_eq!(dashboard.details[0].folder_distribution[0].count, 1);
+        assert!(!dashboard.details[0].activities.is_empty());
     }
 
     #[test]

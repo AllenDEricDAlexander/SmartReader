@@ -55,6 +55,7 @@ pub fn run() {
             db::delete_tag,
             db::merge_tags,
             db::list_tags,
+            db::load_tag_dashboard,
             db::attach_document_tag,
             db::detach_document_tag,
             db::attach_annotation_tag,
