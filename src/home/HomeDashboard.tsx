@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type ChangeEventHandler, type DragEventHandler } from 'react';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { PersistedDocument } from '../persistence/persistenceApi';
+import type { Tag } from '../tags/tagModels';
 import { HomeActionNotice } from './HomeActionNotice';
 import { HomeBlankPage, isHomeBlankPageId } from './HomeBlankPage';
 import { HomeAssistPanel } from './HomeAssistPanel';
@@ -28,6 +29,7 @@ type HomeNoticeState = {
 type HomeDashboardProps = {
   recentDocuments: PersistedDocument[];
   favoriteDocuments: FavoriteDocument[];
+  availableTags?: Tag[];
   activeSidebarPage?: HomeSidebarPage;
   counts?: HomeSidebarProps['counts'];
   cacheStats?: HomeSidebarProps['cacheStats'];
@@ -64,6 +66,7 @@ type HomeDashboardProps = {
 export function HomeDashboard({
   recentDocuments,
   favoriteDocuments,
+  availableTags = [],
   activeSidebarPage = 'home',
   counts = {
     recentFiles: recentDocuments.length,
@@ -264,7 +267,7 @@ export function HomeDashboard({
     <div className="home-content home-blank-content">
       <HomeFavoriteFilesWorkspace
         documents={favoriteDocuments}
-        tags={[]}
+        tags={availableTags}
         onOpenPdf={handleOpenPdf}
         onOpenDocument={handleOpenFavoriteDocument}
         onToggleFavorite={onToggleFavorite}

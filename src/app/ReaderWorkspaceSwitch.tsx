@@ -301,6 +301,7 @@ export function ReaderWorkspaceSwitch({
         <HomeDashboard
           recentDocuments={recentDocuments}
           favoriteDocuments={favoriteDocuments}
+          availableTags={availableTags}
           activeSidebarPage={activeSidebarPage}
           appVersion={appVersion}
           counts={{

@@ -93,4 +93,37 @@ describe('ReaderWorkspaceSwitch', () => {
     expect(screen.getByRole('button', { name: '打开文件' })).toBeInTheDocument();
     expect(screen.getByText('0 B / 5 GB')).toBeInTheDocument();
   });
+  it('passes available tags to the favorite files workspace', () => {
+    renderSwitch({
+      activeWorkspace: 'home',
+      activeSidebarPage: 'favoriteFiles',
+      favoriteDocuments: [
+        {
+          documentKey: 'desktop:/Users/mario/Papers/Favorite.pdf',
+          displayName: 'Favorite.pdf',
+          path: '/Users/mario/Papers/Favorite.pdf',
+          lastPage: 4,
+          progress: 0.4,
+          pageCount: 10,
+          missing: false,
+          lastOpenedAt: '2026-07-06T10:00:00+08:00',
+          tagIds: [1],
+        },
+      ],
+      availableTags: [
+        {
+          id: 1,
+          name: 'Transformer',
+          color: '#2563eb',
+          documentCount: 1,
+          annotationCount: 0,
+          createdAt: '2026-07-01T00:00:00+08:00',
+          updatedAt: '2026-07-01T00:00:00+08:00',
+        },
+      ],
+    });
+
+    expect(screen.getByRole('button', { name: '按标签筛选 Transformer' })).toBeInTheDocument();
+  });
+
 });
