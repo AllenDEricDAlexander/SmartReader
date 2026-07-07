@@ -206,6 +206,17 @@ pub struct MergeTagsInput {
     pub target_tag_id: i64,
 }
 
+#[derive(Debug, Clone)]
+struct TagActivityInput {
+    tag_id: Option<i64>,
+    tag_name: String,
+    action: &'static str,
+    target_type: Option<&'static str>,
+    target_id: Option<String>,
+    target_label: Option<String>,
+    metadata: serde_json::Value,
+}
+
 pub fn setup_database(app: &AppHandle) -> Result<DatabaseState, DbError> {
     let app_data_dir = app
         .path()
@@ -1177,7 +1188,17 @@ pub fn create_tag_tx(
         params![input.name, input.color, now, now],
     )?;
 
-    tag_by_id(connection, connection.last_insert_rowid())
+    let tag = tag_by_id(connection, connection.last_insert_rowid())?;
+    log_tag_activity_tx(
+        connection,
+        &tag,
+        "create",
+        Some("tag"),
+        Some(tag.id.to_string()),
+        Some(tag.name.clone()),
+        serde_json::json!({}),
+    )?;
+    Ok(tag)
 }
 
 pub fn rename_tag_tx(
@@ -1185,18 +1206,42 @@ pub fn rename_tag_tx(
     id: i64,
     name: &str,
 ) -> Result<PersistedTag, DbError> {
+    let old_tag = tag_by_id(connection, id)?;
     connection.execute(
         "UPDATE tags SET name = ?1, updated_at = ?2 WHERE id = ?3",
         params![name, now_rfc3339(), id],
     )?;
 
-    tag_by_id(connection, id)
+    let renamed_tag = tag_by_id(connection, id)?;
+    log_tag_activity_tx(
+        connection,
+        &renamed_tag,
+        "rename",
+        Some("tag"),
+        Some(id.to_string()),
+        Some(renamed_tag.name.clone()),
+        serde_json::json!({ "oldName": old_tag.name, "newName": renamed_tag.name }),
+    )?;
+    Ok(renamed_tag)
 }
 
 pub fn delete_tag_tx(connection: &Connection, id: i64) -> Result<(), DbError> {
+    let tag = tag_by_id(connection, id)?;
     connection.execute("DELETE FROM annotation_tags WHERE tag_id = ?1", [id])?;
     connection.execute("DELETE FROM document_tags WHERE tag_id = ?1", [id])?;
     connection.execute("DELETE FROM tags WHERE id = ?1", [id])?;
+    insert_tag_activity_tx(
+        connection,
+        TagActivityInput {
+            tag_id: None,
+            tag_name: tag.name,
+            action: "delete",
+            target_type: Some("tag"),
+            target_id: Some(id.to_string()),
+            target_label: None,
+            metadata: serde_json::json!({ "deletedTagId": id }),
+        },
+    )?;
     Ok(())
 }
 
@@ -1246,7 +1291,20 @@ pub fn merge_tags_tx(
             params![now, input.target_tag_id],
         )?;
 
-        tag_by_id(connection, input.target_tag_id)
+        let merged_tag = tag_by_id(connection, input.target_tag_id)?;
+        log_tag_activity_tx(
+            connection,
+            &merged_tag,
+            "merge",
+            Some("tag"),
+            Some(input.source_tag_id.to_string()),
+            None,
+            serde_json::json!({
+                "sourceTagId": input.source_tag_id,
+                "targetTagId": input.target_tag_id
+            }),
+        )?;
+        Ok(merged_tag)
     })();
 
     match result {
@@ -1295,7 +1353,7 @@ pub fn attach_document_tag_tx(
     document_key: &str,
     tag_id: i64,
 ) -> Result<(), DbError> {
-    tag_by_id(connection, tag_id)?;
+    let tag = tag_by_id(connection, tag_id)?;
     require_document_key(connection, document_key)?;
     connection.execute(
         r#"
@@ -1303,6 +1361,15 @@ pub fn attach_document_tag_tx(
         VALUES (?1, ?2, ?3)
         "#,
         params![document_key, tag_id, now_rfc3339()],
+    )?;
+    log_tag_activity_tx(
+        connection,
+        &tag,
+        "attach_document",
+        Some("document"),
+        Some(document_key.to_string()),
+        document_display_name_tx(connection, document_key)?,
+        serde_json::json!({}),
     )?;
     Ok(())
 }
@@ -1312,9 +1379,19 @@ pub fn detach_document_tag_tx(
     document_key: &str,
     tag_id: i64,
 ) -> Result<(), DbError> {
+    let tag = tag_by_id(connection, tag_id)?;
     connection.execute(
         "DELETE FROM document_tags WHERE document_key = ?1 AND tag_id = ?2",
         params![document_key, tag_id],
+    )?;
+    log_tag_activity_tx(
+        connection,
+        &tag,
+        "detach_document",
+        Some("document"),
+        Some(document_key.to_string()),
+        document_display_name_tx(connection, document_key)?,
+        serde_json::json!({}),
     )?;
     Ok(())
 }
@@ -1324,7 +1401,7 @@ pub fn attach_annotation_tag_tx(
     annotation_id: i64,
     tag_id: i64,
 ) -> Result<(), DbError> {
-    tag_by_id(connection, tag_id)?;
+    let tag = tag_by_id(connection, tag_id)?;
     require_annotation_id(connection, annotation_id)?;
     connection.execute(
         r#"
@@ -1332,6 +1409,15 @@ pub fn attach_annotation_tag_tx(
         VALUES (?1, ?2, ?3)
         "#,
         params![annotation_id, tag_id, now_rfc3339()],
+    )?;
+    log_tag_activity_tx(
+        connection,
+        &tag,
+        "attach_annotation",
+        Some("annotation"),
+        Some(annotation_id.to_string()),
+        None,
+        serde_json::json!({}),
     )?;
     Ok(())
 }
@@ -1381,11 +1467,85 @@ pub fn detach_annotation_tag_tx(
     annotation_id: i64,
     tag_id: i64,
 ) -> Result<(), DbError> {
+    let tag = tag_by_id(connection, tag_id)?;
     connection.execute(
         "DELETE FROM annotation_tags WHERE annotation_id = ?1 AND tag_id = ?2",
         params![annotation_id, tag_id],
     )?;
+    log_tag_activity_tx(
+        connection,
+        &tag,
+        "detach_annotation",
+        Some("annotation"),
+        Some(annotation_id.to_string()),
+        None,
+        serde_json::json!({}),
+    )?;
     Ok(())
+}
+
+fn insert_tag_activity_tx(
+    connection: &Connection,
+    input: TagActivityInput,
+) -> Result<(), DbError> {
+    connection.execute(
+        r#"
+        INSERT INTO tag_activity_log (
+            tag_id, tag_name, action, target_type, target_id,
+            target_label, metadata_json, created_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "#,
+        params![
+            input.tag_id,
+            input.tag_name,
+            input.action,
+            input.target_type,
+            input.target_id,
+            input.target_label,
+            input.metadata.to_string(),
+            now_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+fn log_tag_activity_tx(
+    connection: &Connection,
+    tag: &PersistedTag,
+    action: &'static str,
+    target_type: Option<&'static str>,
+    target_id: Option<String>,
+    target_label: Option<String>,
+    metadata: serde_json::Value,
+) -> Result<(), DbError> {
+    insert_tag_activity_tx(
+        connection,
+        TagActivityInput {
+            tag_id: Some(tag.id),
+            tag_name: tag.name.clone(),
+            action,
+            target_type,
+            target_id,
+            target_label,
+            metadata,
+        },
+    )
+}
+
+fn document_display_name_tx(
+    connection: &Connection,
+    document_key: &str,
+) -> Result<Option<String>, DbError> {
+    match connection.query_row(
+        "SELECT display_name FROM documents WHERE document_key = ?1",
+        [document_key],
+        |row| row.get(0),
+    ) {
+        Ok(display_name) => Ok(Some(display_name)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(error) => Err(DbError::from(error)),
+    }
 }
 
 fn tag_by_id(connection: &Connection, id: i64) -> Result<PersistedTag, DbError> {
@@ -1565,6 +1725,33 @@ mod tests {
 
         assert_eq!(table_count, 1);
         assert_eq!(index_count, 3);
+    }
+
+    #[test]
+    fn records_tag_activity_for_tag_mutations() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        apply_migrations(&connection).expect("schema applies");
+
+        let tag = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "深度学习".to_string(),
+                color: "#2563eb".to_string(),
+            },
+        )
+        .expect("create tag");
+        let renamed = rename_tag_tx(&connection, tag.id, "机器学习").expect("rename tag");
+        delete_tag_tx(&connection, renamed.id).expect("delete tag");
+
+        let actions: Vec<String> = connection
+            .prepare("SELECT action FROM tag_activity_log ORDER BY id ASC")
+            .expect("prepare actions")
+            .query_map([], |row| row.get(0))
+            .expect("query actions")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect actions");
+
+        assert_eq!(actions, vec!["create", "rename", "delete"]);
     }
 
     #[test]
