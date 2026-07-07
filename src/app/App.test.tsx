@@ -1950,9 +1950,11 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '返回首页' }));
     fireEvent.click(screen.getByRole('button', { name: '书签' }));
-    expect(screen.getByLabelText('书签管理工作区')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '书签管理' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('书签管理工作区')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '返回首页' }));
+    fireEvent.click(screen.getByRole('button', { name: '首页' }));
     fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
     expect(screen.getByLabelText('设置工作区')).toBeInTheDocument();
   });
@@ -2318,13 +2320,13 @@ describe('App', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '书签' }));
-    expect(await screen.findByLabelText('书签管理工作区')).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: '书签管理' })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: /失效书签/ }));
 
     await waitFor(() => {
       expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/missing-bookmark.pdf');
     });
-    expect(screen.getByLabelText('书签管理工作区')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '书签管理' })).toBeInTheDocument();
     expect(screen.queryByLabelText('阅读工作区')).not.toBeInTheDocument();
   });
 
@@ -2854,6 +2856,8 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '返回首页' }));
     fireEvent.click(screen.getByRole('button', { name: '书签' }));
-    expect(await screen.findByText('书签加载失败，请重试。')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText('书签加载失败，请重试。').length).toBeGreaterThan(0);
+    });
   });
 });

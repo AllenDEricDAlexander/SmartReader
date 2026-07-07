@@ -303,6 +303,8 @@ export function ReaderWorkspaceSwitch({
         <HomeDashboard
           recentDocuments={recentDocuments}
           favoriteDocuments={favoriteDocuments}
+          bookmarks={globalSearchBookmarks}
+          bookmarkError={globalSearchBookmarkError}
           availableTags={availableTags}
           activeSidebarPage={activeSidebarPage}
           appVersion={appVersion}
@@ -317,13 +319,27 @@ export function ReaderWorkspaceSwitch({
           onBrowserFileChange={handleBrowserFileChange}
           onReopenRecentDocument={(document) => void reopenRecentDocument(document)}
           onOpenFavoriteDocument={(document) => openFavoriteDocument(document)}
+          canOpenBookmark={(bookmark) =>
+            canOpenRecordPage(bookmark.documentKey, bookmark.documentPath, bookmark.documentMissing)
+          }
+          onOpenBookmark={(bookmark) =>
+            void openRecordPage(
+              bookmark.documentKey,
+              bookmark.documentPath,
+              bookmark.page,
+              bookmark.documentMissing,
+            )
+          }
           onToggleFavorite={handleToggleFavorite}
           canOpenNativePdf={canOpenNativePdf}
           onOpenGlobalSearch={openGlobalSearch}
           onOpenImport={() => openShortcutWorkspace('import')}
           onOpenCompare={() => openShortcutWorkspace('compare')}
           onOpenAnnotations={() => openShortcutWorkspace('annotations')}
-          onOpenBookmarks={() => openShortcutWorkspace('bookmarks')}
+          onOpenBookmarks={() => {
+            openHomeSidebarPage('bookmarks');
+            openGlobalSearch();
+          }}
           onOpenHome={() => openHomeSidebarPage('home')}
           onOpenRecentFiles={() => openHomeSidebarPage('recentFiles')}
           onOpenFavoriteFiles={() => openHomeSidebarPage('favoriteFiles')}

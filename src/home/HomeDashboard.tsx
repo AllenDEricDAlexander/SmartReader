@@ -1,10 +1,11 @@
 import { useCallback, useRef, useState, type ChangeEventHandler, type DragEventHandler } from 'react';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
-import type { PersistedDocument } from '../persistence/persistenceApi';
+import type { PersistedBookmarkRecord, PersistedDocument } from '../persistence/persistenceApi';
 import type { Tag } from '../tags/tagModels';
 import { HomeActionNotice } from './HomeActionNotice';
 import { HomeBlankPage, isHomeBlankPageId } from './HomeBlankPage';
 import { HomeAssistPanel } from './HomeAssistPanel';
+import { HomeBookmarksWorkspace } from './HomeBookmarksWorkspace';
 import { HomeFavoriteFilesWorkspace } from './HomeFavoriteFilesWorkspace';
 import { HomeFavorites } from './HomeFavorites';
 import { HomeQuickStart } from './HomeQuickStart';
@@ -29,6 +30,8 @@ type HomeNoticeState = {
 type HomeDashboardProps = {
   recentDocuments: PersistedDocument[];
   favoriteDocuments: FavoriteDocument[];
+  bookmarks?: PersistedBookmarkRecord[];
+  bookmarkError?: string | null;
   availableTags?: Tag[];
   activeSidebarPage?: HomeSidebarPage;
   counts?: HomeSidebarProps['counts'];
@@ -40,6 +43,8 @@ type HomeDashboardProps = {
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
   onReopenRecentDocument(document: PersistedDocument): void | Promise<void>;
   onOpenFavoriteDocument?(document: FavoriteDocument): boolean | void | Promise<boolean | void>;
+  canOpenBookmark?(bookmark: PersistedBookmarkRecord): boolean;
+  onOpenBookmark?(bookmark: PersistedBookmarkRecord): void | Promise<void>;
   onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
   canOpenNativePdf?(): boolean;
   onOpenGlobalSearch?(): void;
@@ -66,6 +71,8 @@ type HomeDashboardProps = {
 export function HomeDashboard({
   recentDocuments,
   favoriteDocuments,
+  bookmarks = [],
+  bookmarkError = null,
   availableTags = [],
   activeSidebarPage = 'home',
   counts = {
@@ -85,6 +92,8 @@ export function HomeDashboard({
   onBrowserFileChange,
   onReopenRecentDocument,
   onOpenFavoriteDocument,
+  canOpenBookmark = () => true,
+  onOpenBookmark = noop,
   onToggleFavorite,
   canOpenNativePdf = () => true,
   onOpenGlobalSearch = noop,
@@ -279,11 +288,24 @@ export function HomeDashboard({
     </div>
   );
 
+  const bookmarksContent = (
+    <div className="home-content home-blank-content">
+      <HomeBookmarksWorkspace
+        bookmarks={bookmarks}
+        error={bookmarkError}
+        canOpenBookmark={canOpenBookmark}
+        onOpenBookmark={onOpenBookmark}
+      />
+    </div>
+  );
+
   const mainContent =
     activeSidebarPage === 'recentFiles' ? (
       recentFilesContent
     ) : activeSidebarPage === 'favoriteFiles' ? (
       favoriteFilesContent
+    ) : activeSidebarPage === 'bookmarks' ? (
+      bookmarksContent
     ) : isHomeBlankPageId(activeSidebarPage) ? (
       <div className="home-content home-blank-content">
         <HomeBlankPage page={activeSidebarPage} />

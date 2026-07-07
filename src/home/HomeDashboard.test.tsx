@@ -403,6 +403,33 @@ describe('HomeDashboard', () => {
     expect(screen.getByTestId('favorite-workspace-document-name')).toHaveTextContent('Favorite.pdf');
   });
 
+  it('renders bookmarks inside the home dashboard frame', () => {
+    renderDashboard({
+      activeSidebarPage: 'bookmarks',
+      bookmarks: [
+        {
+          id: 7,
+          documentKey: 'desktop:/Users/mario/Papers/Book.pdf',
+          documentDisplayName: 'Book.pdf',
+          documentPath: '/Users/mario/Papers/Book.pdf',
+          documentMissing: false,
+          page: 12,
+          title: '关键段落',
+          createdAt: '2026-07-07T10:00:00+08:00',
+          updatedAt: '2026-07-07T10:00:00+08:00',
+        },
+      ],
+    });
+
+    expect(screen.getByRole('button', { name: '书签管理' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.getByRole('region', { name: '书签管理' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /关键段落/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText('书签管理工作区')).not.toBeInTheDocument();
+  });
+
   it('falls back to normal home content instead of a blank page for workspace-only sidebar pages', () => {
     renderDashboard({ activeSidebarPage: 'tags' });
 
