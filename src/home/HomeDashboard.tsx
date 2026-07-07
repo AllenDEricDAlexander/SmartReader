@@ -4,6 +4,7 @@ import type { PersistedDocument } from '../persistence/persistenceApi';
 import { HomeActionNotice } from './HomeActionNotice';
 import { HomeBlankPage, isHomeBlankPageId } from './HomeBlankPage';
 import { HomeAssistPanel } from './HomeAssistPanel';
+import { HomeFavoriteFilesWorkspace } from './HomeFavoriteFilesWorkspace';
 import { HomeFavorites } from './HomeFavorites';
 import { HomeQuickStart } from './HomeQuickStart';
 import { HomeRecentFiles } from './HomeRecentFiles';
@@ -259,9 +260,27 @@ export function HomeDashboard({
     </div>
   );
 
+  const favoriteFilesContent = (
+    <div className="home-content home-blank-content">
+      <HomeFavoriteFilesWorkspace
+        documents={favoriteDocuments}
+        tags={[]}
+        onOpenPdf={handleOpenPdf}
+        onOpenDocument={handleOpenFavoriteDocument}
+        onToggleFavorite={onToggleFavorite}
+        onLocateFile={() =>
+          showNotice('定位文件功能待补充', '定位文件将在最近文件管理功能中补充。')
+        }
+        onOpenTags={onOpenTags}
+      />
+    </div>
+  );
+
   const mainContent =
     activeSidebarPage === 'recentFiles' ? (
       recentFilesContent
+    ) : activeSidebarPage === 'favoriteFiles' ? (
+      favoriteFilesContent
     ) : isHomeBlankPageId(activeSidebarPage) ? (
       <div className="home-content home-blank-content">
         <HomeBlankPage page={activeSidebarPage} />

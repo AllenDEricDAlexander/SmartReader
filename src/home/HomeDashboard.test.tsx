@@ -373,6 +373,29 @@ describe('HomeDashboard', () => {
     );
   });
 
+  it('renders the favorite files workspace from the sidebar page', () => {
+    renderDashboard({
+      activeSidebarPage: 'favoriteFiles',
+      favoriteDocuments: [
+        {
+          documentKey: 'desktop:/Users/mario/Papers/Favorite.pdf',
+          displayName: 'Favorite.pdf',
+          path: '/Users/mario/Papers/Favorite.pdf',
+          lastPage: 4,
+          progress: 0.4,
+          pageCount: 10,
+          missing: false,
+          lastOpenedAt: '2026-07-06T10:00:00+08:00',
+          tagIds: [],
+        },
+      ],
+    });
+
+    expect(screen.getByRole('heading', { name: '收藏文件' })).toBeInTheDocument();
+    expect(screen.getByText('共 1 个收藏，当前显示 1 个')).toBeInTheDocument();
+    expect(screen.getByTestId('favorite-workspace-document-name')).toHaveTextContent('Favorite.pdf');
+  });
+
   it('falls back to normal home content instead of a blank page for workspace-only sidebar pages', () => {
     renderDashboard({ activeSidebarPage: 'tags' });
 
