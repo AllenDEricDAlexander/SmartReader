@@ -166,6 +166,9 @@ export function TagManager({ persistence, onTagsChange, onClose, onOpenDocument 
               onEdit={(tag) => openDialog('edit', tag)}
               onMerge={(tag) => openDialog('merge', tag)}
               onDelete={(tag) => void runMutation(async () => {
+                if (!window.confirm(`删除标签“${tag.name}”？`)) {
+                  return;
+                }
                 await persistence.deleteTag(tag.id);
                 onTagsChange((current) => current.filter((item) => item.id !== tag.id));
                 setSelectedTagId(null);

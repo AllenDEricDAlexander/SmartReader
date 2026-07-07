@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { TagManager } from './TagManager';
 import type { TagDashboard } from './tagModels';
@@ -44,7 +44,15 @@ const dashboard: TagDashboard = {
 function renderTagManager() {
   const persistence = {
     loadTagDashboard: vi.fn().mockResolvedValue(dashboard),
-    createTag: vi.fn(),
+    createTag: vi.fn().mockResolvedValue({
+      id: 2,
+      name: '计算机视觉',
+      color: '#2563eb',
+      documentCount: 0,
+      annotationCount: 0,
+      createdAt: '2026-07-07T10:00:00Z',
+      updatedAt: '2026-07-07T10:00:00Z',
+    }),
     renameTag: vi.fn(),
     deleteTag: vi.fn(),
     mergeTags: vi.fn(),
@@ -71,5 +79,32 @@ describe('TagManager', () => {
     expect(screen.getByText('标签云')).toBeInTheDocument();
     expect(screen.getByText('标签详情')).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText('深度学习').length).toBeGreaterThan(0));
+  });
+
+  it('filters tags from the toolbar', async () => {
+    renderTagManager();
+
+    await screen.findAllByText('深度学习');
+    fireEvent.change(screen.getByLabelText('搜索标签名称或描述'), {
+      target: { value: '不存在' },
+    });
+
+    const table = screen.getByRole('region', { name: '全部标签' });
+    expect(within(table).getByRole('heading', { name: '全部标签（0）' })).toBeInTheDocument();
+    expect(within(table).queryByRole('button', { name: /深度学习/ })).not.toBeInTheDocument();
+  });
+
+  it('creates a tag and refreshes the dashboard', async () => {
+    const persistence = renderTagManager();
+
+    await screen.findByRole('heading', { name: '标签管理' });
+    fireEvent.click(screen.getByRole('button', { name: '创建标签' }));
+    fireEvent.change(screen.getByLabelText('标签名称'), { target: { value: '计算机视觉' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    await waitFor(() =>
+      expect(persistence.createTag).toHaveBeenCalledWith({ name: '计算机视觉', color: '#2563eb' }),
+    );
+    await waitFor(() => expect(persistence.loadTagDashboard).toHaveBeenCalledTimes(2));
   });
 });
