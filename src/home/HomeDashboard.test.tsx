@@ -211,6 +211,13 @@ describe('HomeDashboard', () => {
     expect(styles).not.toMatch(/@media \(max-width: 1280px\)\s*{[^@]*\.home-content\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
   });
 
+  it('keeps workspace row menus floating instead of expanding cards or rows', () => {
+    const styles = readAppStyles();
+
+    expect(styles).toMatch(/\.recent-workspace-menu-wrap\s*{[^}]*position:\s*relative;/s);
+    expect(styles).toMatch(/\.recent-workspace-menu-wrap \.recent-file-menu\s*{[^}]*position:\s*absolute;[^}]*right:\s*0;[^}]*top:\s*calc\(100% \+ 6px\);[^}]*z-index:\s*30;/s);
+  });
+
   it('renders the prototype welcome banner at the top of the home content', () => {
     renderDashboard({ activeSidebarPage: 'home' });
 

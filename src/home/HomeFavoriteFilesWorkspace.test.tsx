@@ -178,22 +178,6 @@ describe('HomeFavoriteFilesWorkspace', () => {
     expect(props.onLocateFile).toHaveBeenCalledWith(documents[1]);
   });
 
-  it('marks the open menu document so the popover stays above neighboring cards', () => {
-    renderWorkspace();
-
-    const alphaCard = screen.getAllByTestId('favorite-workspace-document')[0];
-    const betaCard = screen.getAllByTestId('favorite-workspace-document')[1];
-
-    expect(alphaCard).not.toHaveAttribute('data-menu-open', 'true');
-    expect(betaCard).not.toHaveAttribute('data-menu-open', 'true');
-
-    fireEvent.click(within(alphaCard).getByRole('button', { name: '更多操作 Alpha Notes.pdf' }));
-
-    expect(alphaCard).toHaveAttribute('data-menu-open', 'true');
-    expect(betaCard).not.toHaveAttribute('data-menu-open', 'true');
-    expect(within(alphaCard).getByRole('menu')).toBeInTheDocument();
-  });
-
   it('shows empty, no-result, and recommendation empty states', () => {
     const props = renderWorkspace({ documents: [] });
 

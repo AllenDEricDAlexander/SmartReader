@@ -183,7 +183,6 @@ export function HomeFavoriteFilesWorkspace({
       <article
         key={document.documentKey}
         className={viewMode === 'cards' ? 'favorite-workspace-card' : 'favorite-workspace-row'}
-        data-menu-open={menuOpen ? 'true' : undefined}
         data-testid="favorite-workspace-document"
       >
         <div className="favorite-workspace-file-main">
