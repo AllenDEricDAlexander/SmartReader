@@ -16,7 +16,6 @@ import {
 } from '../documents/documentSessionStore';
 import type { DocumentSession } from '../documents/documentModels';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
-import { HomeDashboard } from '../home/HomeDashboard';
 import type { HomeSidebarPage } from '../home/HomeSidebar';
 import type {
   CacheStats,
@@ -27,9 +26,8 @@ import type {
 } from '../persistence/persistenceApi';
 import { createDebouncedFlush } from '../persistence/debounce';
 import { defaultReaderPreferences, mergeReaderPreferences } from '../preferences/preferencesStore';
-import { SettingsWorkspace, type SettingsSection } from '../settings/SettingsWorkspace';
+import type { SettingsSection } from '../settings/SettingsWorkspace';
 import type { Tag } from '../tags/tagModels';
-import { TagManager } from '../tags/TagManager';
 import type { ReaderAnnotation } from '../annotations/annotationModels';
 import { useDocumentOpening } from '../reader/hooks/useDocumentOpening';
 import { useReaderCommands } from '../reader/hooks/useReaderCommands';
@@ -41,13 +39,9 @@ import { GlobalSearchPanel } from '../search/GlobalSearchPanel';
 import type { GlobalSearchResult } from '../search/globalSearch';
 import { ViewerController } from '../viewer/viewerController';
 import type { ViewerSource } from '../viewer/viewerTypes';
-import { AnnotationManagerWorkspace } from '../workspaces/AnnotationManagerWorkspace';
-import { BookmarkManagerWorkspace } from '../workspaces/BookmarkManagerWorkspace';
-import { CompareWorkspace } from '../workspaces/CompareWorkspace';
-import { ImportWorkspace } from '../workspaces/ImportWorkspace';
 import type { AppWorkspace, ReaderAppProps } from './appTypes';
 import { ReaderViewerContent } from './ReaderViewerContent';
-import { ReaderWorkspaceView } from './ReaderWorkspaceView';
+import { ReaderWorkspaceSwitch } from './ReaderWorkspaceSwitch';
 import {
   countRestorablePersistedTabs,
   mapSessionToPersistedDocument,
@@ -809,164 +803,80 @@ export function ReaderApp({
       onDragOver={handleWorkbenchDragOver}
       onDrop={handleWorkbenchDrop}
     >
-      {activeWorkspace === 'settings' ? (
-        <SettingsWorkspace
-          commandRegistry={commandRegistry}
-          preferences={readerPreferences}
-          openSessionCount={documents.sessions.length}
-          recentDocumentCount={recentDocuments.length}
-          initialSection={settingsInitialSection}
-          saving={settingsSaving}
-          onClose={() => setWorkspaceOverride(null)}
-          onSave={handleSavePreferences}
-        />
-      ) : null}
-      {activeWorkspace === 'import' ? (
-        <ImportWorkspace
-          onOpenPdf={openImportPdf}
-          onBrowserFileChange={handleImportBrowserFileChange}
-          canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
-          onClose={closeToolWorkspace}
-        />
-      ) : null}
-      {activeWorkspace === 'compare' ? (
-        <CompareWorkspace
-          recentDocuments={recentDocuments}
-          onOpenDocument={openCompareDocument}
-          onClose={closeToolWorkspace}
-        />
-      ) : null}
-      {activeWorkspace === 'annotations' ? (
-        <AnnotationManagerWorkspace
-          annotations={globalSearchAnnotations}
-          error={globalSearchAnnotationError}
-          canOpenAnnotation={(annotation) =>
-            canOpenRecordPage(
-              annotation.documentKey,
-              annotation.documentPath,
-              annotation.documentMissing,
-            )
-          }
-          onClose={closeToolWorkspace}
-          onOpenAnnotation={(annotation) =>
-            void openRecordPage(
-              annotation.documentKey,
-              annotation.documentPath,
-              annotation.page,
-              annotation.documentMissing,
-            )
-          }
-        />
-      ) : null}
-      {activeWorkspace === 'bookmarks' ? (
-        <BookmarkManagerWorkspace
-          bookmarks={globalSearchBookmarks}
-          error={globalSearchBookmarkError}
-          canOpenBookmark={(bookmark) =>
-            canOpenRecordPage(bookmark.documentKey, bookmark.documentPath, bookmark.documentMissing)
-          }
-          onClose={closeToolWorkspace}
-          onOpenBookmark={(bookmark) =>
-            void openRecordPage(
-              bookmark.documentKey,
-              bookmark.documentPath,
-              bookmark.page,
-              bookmark.documentMissing,
-            )
-          }
-        />
-      ) : null}
-      {activeWorkspace === 'tags' ? (
-        <TagManager
-          tags={availableTags}
-          persistence={persistence}
-          onTagsChange={(update) => {
-            tagsMutatedRef.current = true;
-            setAvailableTags(update);
-          }}
-          onClose={() => setWorkspaceOverride(null)}
-        />
-      ) : null}
-      {activeWorkspace === 'reader' && activeSession ? (
-        <ReaderWorkspaceView
-          activeAnnotations={activeAnnotations}
-          activeBookmarks={activeBookmarks}
-          activeSession={activeSession}
-          activeSessionIsFavorite={activeSessionIsFavorite}
-          activeViewerController={activeViewerController}
-          availableTags={availableTags}
-          documents={documents}
-          lastSearchCommand={lastSearchCommand}
-          pageInput={pageInput}
-          recentDocuments={recentDocuments}
-          searchText={searchText}
-          selectedAnnotation={selectedAnnotation}
-          sidebarOpen={sidebarOpen}
-          viewerContent={viewerContent}
-          addBookmarkForActivePage={addBookmarkForActivePage}
-          addPageNote={addPageNote}
-          clearSearch={clearSearch}
-          closeActiveTab={closeActiveTab}
-          deleteAnnotationForDocument={deleteAnnotationForDocument}
-          handleBrowserFileChange={handleBrowserFileChange}
-          handleSaveAnnotationNote={handleSaveAnnotationNote}
-          handleToggleActiveFavorite={handleToggleActiveFavorite}
-          handleToggleAnnotationTag={handleToggleAnnotationTag}
-          handleViewerWheel={handleViewerWheel}
-          importAnnotationsForDocument={importAnnotationsForDocument}
-          jumpToActiveDocumentPage={jumpToActiveDocumentPage}
-          jumpToPage={jumpToPage}
-          openPdfAndIgnoreResult={openPdfAndIgnoreResult}
-          openSettingsWorkspace={openSettingsWorkspace}
-          reopenRecentDocument={reopenRecentDocument}
-          runSearch={runSearch}
-          selectReaderSession={selectReaderSession}
-          setPageInput={setPageInput}
-          setSearchText={setSearchText}
-          setSelectedAnnotationId={setSelectedAnnotationId}
-          setSidebarOpen={setSidebarOpen}
-          stepHistoryBack={stepHistoryBack}
-          stepHistoryForward={stepHistoryForward}
-        />
-      ) : null}
-      {activeWorkspace === 'home' ? (
-        <HomeDashboard
-          recentDocuments={recentDocuments}
-          favoriteDocuments={favoriteDocuments}
-          activeSidebarPage={homeSidebarPage}
-          appVersion={appVersion}
-          counts={{
-            recentFiles: recentDocuments.length,
-            favoriteFiles: favoriteDocuments.length,
-            restorableSessions: sessionRestoreCount,
-          }}
-          cacheStats={cacheStats}
-          onOpenPdf={openPdf}
-          onDropPdf={handleDrop}
-          onBrowserFileChange={handleBrowserFileChange}
-          onReopenRecentDocument={(document) => void reopenRecentDocument(document)}
-          onOpenFavoriteDocument={(document) => openFavoriteDocument(document)}
-          onToggleFavorite={handleToggleFavorite}
-          canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
-          onOpenGlobalSearch={openGlobalSearch}
-          onOpenImport={() => openShortcutWorkspace('import')}
-          onOpenCompare={() => openShortcutWorkspace('compare')}
-          onOpenAnnotations={() => openShortcutWorkspace('annotations')}
-          onOpenBookmarks={() => openShortcutWorkspace('bookmarks')}
-          onOpenHome={() => openHomeSidebarPage('home')}
-          onOpenRecentFiles={() => openHomeSidebarPage('recentFiles')}
-          onOpenFavoriteFiles={() => openHomeSidebarPage('favoriteFiles')}
-          onOpenSessionRestore={() => openHomeSidebarPage('sessionRestore')}
-          onOpenMyDocuments={() => openHomeSidebarPage('myDocuments')}
-          onOpenFolders={() => openHomeSidebarPage('folders')}
-          onOpenNotes={() => openHomeSidebarPage('notes')}
-          onOpenFullTextSearch={openGlobalSearch}
-          onOpenCacheManagement={() => openSettingsWorkspace('cache')}
-          onOpenShortcutSettings={() => openSettingsWorkspace('shortcuts')}
-          onOpenSettings={() => openSettingsWorkspace()}
-          onOpenTags={() => setWorkspaceOverride('tags')}
-        />
-      ) : null}
+      <ReaderWorkspaceSwitch
+        activeAnnotations={activeAnnotations}
+        activeBookmarks={activeBookmarks}
+        activeSession={activeSession}
+        activeSessionIsFavorite={activeSessionIsFavorite}
+        activeSidebarPage={homeSidebarPage}
+        activeViewerController={activeViewerController}
+        activeWorkspace={activeWorkspace}
+        appVersion={appVersion}
+        availableTags={availableTags}
+        cacheStats={cacheStats}
+        commandRegistry={commandRegistry}
+        documents={documents}
+        favoriteDocuments={favoriteDocuments}
+        globalSearchAnnotationError={globalSearchAnnotationError}
+        globalSearchAnnotations={globalSearchAnnotations}
+        globalSearchBookmarkError={globalSearchBookmarkError}
+        globalSearchBookmarks={globalSearchBookmarks}
+        lastSearchCommand={lastSearchCommand}
+        pageInput={pageInput}
+        persistence={persistence}
+        readerPreferences={readerPreferences}
+        recentDocuments={recentDocuments}
+        searchText={searchText}
+        selectedAnnotation={selectedAnnotation}
+        sessionRestoreCount={sessionRestoreCount}
+        settingsInitialSection={settingsInitialSection}
+        settingsSaving={settingsSaving}
+        sidebarOpen={sidebarOpen}
+        viewerContent={viewerContent}
+        addBookmarkForActivePage={addBookmarkForActivePage}
+        addPageNote={addPageNote}
+        canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
+        canOpenRecordPage={canOpenRecordPage}
+        clearSearch={clearSearch}
+        closeActiveTab={closeActiveTab}
+        closeToolWorkspace={closeToolWorkspace}
+        deleteAnnotationForDocument={deleteAnnotationForDocument}
+        handleBrowserFileChange={handleBrowserFileChange}
+        handleDrop={handleDrop}
+        handleSaveAnnotationNote={handleSaveAnnotationNote}
+        handleSavePreferences={handleSavePreferences}
+        handleToggleActiveFavorite={handleToggleActiveFavorite}
+        handleToggleAnnotationTag={handleToggleAnnotationTag}
+        handleToggleFavorite={handleToggleFavorite}
+        handleViewerWheel={handleViewerWheel}
+        importAnnotationsForDocument={importAnnotationsForDocument}
+        jumpToActiveDocumentPage={jumpToActiveDocumentPage}
+        jumpToPage={jumpToPage}
+        onTagsChange={(update) => {
+          tagsMutatedRef.current = true;
+          setAvailableTags(update);
+        }}
+        openCompareDocument={openCompareDocument}
+        openFavoriteDocument={openFavoriteDocument}
+        openGlobalSearch={openGlobalSearch}
+        openHomeSidebarPage={openHomeSidebarPage}
+        openImportPdf={openImportPdf}
+        openPdf={openPdf}
+        openPdfAndIgnoreResult={openPdfAndIgnoreResult}
+        openRecordPage={openRecordPage}
+        openSettingsWorkspace={openSettingsWorkspace}
+        openShortcutWorkspace={openShortcutWorkspace}
+        reopenRecentDocument={reopenRecentDocument}
+        runSearch={runSearch}
+        selectReaderSession={selectReaderSession}
+        setPageInput={setPageInput}
+        setSearchText={setSearchText}
+        setSelectedAnnotationId={setSelectedAnnotationId}
+        setSidebarOpen={setSidebarOpen}
+        setWorkspaceOverride={setWorkspaceOverride}
+        stepHistoryBack={stepHistoryBack}
+        stepHistoryForward={stepHistoryForward}
+      />
       <GlobalSearchPanel
         open={globalSearchOpen}
         query={globalSearchQuery}
