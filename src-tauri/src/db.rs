@@ -1739,6 +1739,18 @@ mod tests {
 
         upsert_document(&connection, &first_document).expect("first document");
         upsert_document(&connection, &second_document).expect("second document");
+        connection
+            .execute(
+                "UPDATE documents SET last_opened_at = ?1 WHERE document_key = ?2",
+                params!["2026-07-01T00:00:00Z", &first_document.document_key],
+            )
+            .expect("set first open time");
+        connection
+            .execute(
+                "UPDATE documents SET last_opened_at = ?1 WHERE document_key = ?2",
+                params!["2026-07-02T00:00:00Z", &second_document.document_key],
+            )
+            .expect("set second open time");
         set_document_favorite_tx(&connection, &first_document.document_key, true).expect("favorite first");
         set_document_favorite_tx(&connection, &second_document.document_key, true).expect("favorite second");
         let tag = create_tag_tx(
