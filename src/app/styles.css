@@ -3460,3 +3460,40 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
+.tag-dashboard-workspace {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  background: #f8fafc;
+  color: var(--sr-text);
+}
+
+.tag-dashboard-main {
+  min-width: 0;
+  min-height: 0;
+  padding: 28px;
+  overflow: auto;
+}
+
+.tag-dashboard-heading h1 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 26px;
+  line-height: 1.2;
+}
+
+.tag-dashboard-content {
+  display: grid;
+  gap: 18px;
+  margin-top: 24px;
+}
+
+.tag-dashboard-card,
+.tag-dashboard-detail-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+}

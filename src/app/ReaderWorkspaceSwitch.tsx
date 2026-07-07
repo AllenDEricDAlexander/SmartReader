@@ -249,10 +249,12 @@ export function ReaderWorkspaceSwitch({
       ) : null}
       {activeWorkspace === 'tags' ? (
         <TagManager
-          tags={availableTags}
           persistence={persistence}
           onTagsChange={onTagsChange}
           onClose={() => setWorkspaceOverride(null)}
+          onOpenDocument={(documentKey, documentPath, page, missing) =>
+            void openRecordPage(documentKey, documentPath, page, missing)
+          }
         />
       ) : null}
       {activeWorkspace === 'reader' && activeSession ? (
