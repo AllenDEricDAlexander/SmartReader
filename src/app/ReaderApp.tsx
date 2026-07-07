@@ -466,6 +466,10 @@ export function ReaderApp({
                 path: session.source.kind === 'desktop-path' ? session.source.path : null,
                 lastPage: session.page,
                 progress: session.progress,
+                pageCount: null,
+                missing: false,
+                lastOpenedAt: null,
+                tagIds: [],
               }
             : {
                 documentKey,
@@ -473,6 +477,10 @@ export function ReaderApp({
                 path: recent?.path ?? null,
                 lastPage: recent?.lastPage ?? 1,
                 progress: recent?.progress ?? 0,
+                pageCount: recent?.pageCount ?? null,
+                missing: recent?.missing ?? false,
+                lastOpenedAt: null,
+                tagIds: [],
               };
 
           return [

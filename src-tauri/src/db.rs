@@ -170,6 +170,10 @@ pub struct FavoriteDocument {
     pub path: Option<String>,
     pub last_page: i64,
     pub progress: f64,
+    pub page_count: Option<i64>,
+    pub missing: bool,
+    pub last_opened_at: Option<String>,
+    pub tag_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -633,19 +637,26 @@ pub fn list_favorite_documents_tx(
 ) -> Result<Vec<FavoriteDocument>, DbError> {
     let mut statement = connection.prepare(
         r#"
-        SELECT document_key, display_name, path, last_page, progress
+        SELECT document_key, display_name, path, last_page, progress,
+               page_count, missing, last_opened_at
         FROM documents
         WHERE favorite = 1
         ORDER BY last_opened_at DESC
         "#,
     )?;
     let rows = statement.query_map([], |row| {
+        let document_key: String = row.get(0)?;
+        let tag_ids = list_document_tag_ids_tx(connection, &document_key)?;
         Ok(FavoriteDocument {
-            document_key: row.get(0)?,
+            document_key,
             display_name: row.get(1)?,
             path: row.get(2)?,
             last_page: row.get(3)?,
             progress: row.get(4)?,
+            page_count: row.get(5)?,
+            missing: row.get::<_, i64>(6)? == 1,
+            last_opened_at: row.get(7)?,
+            tag_ids,
         })
     })?;
 
@@ -1321,6 +1332,18 @@ pub fn attach_annotation_tag_tx(
     Ok(())
 }
 
+fn list_document_tag_ids_tx(
+    connection: &Connection,
+    document_key: &str,
+) -> Result<Vec<i64>, rusqlite::Error> {
+    let mut statement = connection.prepare(
+        "SELECT tag_id FROM document_tags WHERE document_key = ?1 ORDER BY tag_id ASC",
+    )?;
+    let rows = statement.query_map([document_key], |row| row.get(0))?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+}
+
 fn replace_annotation_tag_ids_tx(
     connection: &Connection,
     annotation_id: i64,
@@ -1691,7 +1714,7 @@ mod tests {
         let connection = Connection::open_in_memory().expect("in-memory database");
         apply_migrations(&connection).expect("schema applies");
 
-        let document = PersistedDocument {
+        let first_document = PersistedDocument {
             document_key: "desktop:/tmp/book.pdf".to_string(),
             path: Some("/tmp/book.pdf".to_string()),
             display_name: "book.pdf".to_string(),
@@ -1702,21 +1725,46 @@ mod tests {
             progress: 0.35,
             missing: false,
         };
-        upsert_document(&connection, &document).expect("document");
+        let second_document = PersistedDocument {
+            document_key: "desktop:/tmp/newer.pdf".to_string(),
+            path: Some("/tmp/newer.pdf".to_string()),
+            display_name: "newer.pdf".to_string(),
+            file_size: Some(200),
+            modified_at: Some("2026-06-17T00:00:00Z".to_string()),
+            page_count: Some(50),
+            last_page: 50,
+            progress: 1.0,
+            missing: false,
+        };
 
-        set_document_favorite_tx(&connection, &document.document_key, true).expect("favorite");
+        upsert_document(&connection, &first_document).expect("first document");
+        upsert_document(&connection, &second_document).expect("second document");
+        set_document_favorite_tx(&connection, &first_document.document_key, true).expect("favorite first");
+        set_document_favorite_tx(&connection, &second_document.document_key, true).expect("favorite second");
+        let tag = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "机器学习".to_string(),
+                color: "#2563eb".to_string(),
+            },
+        )
+        .expect("create tag");
+        attach_document_tag_tx(&connection, &first_document.document_key, tag.id)
+            .expect("attach tag");
+
         let favorites = list_favorite_documents_tx(&connection).expect("favorites");
 
-        assert_eq!(
-            favorites,
-            vec![FavoriteDocument {
-                document_key: document.document_key,
-                display_name: document.display_name,
-                path: document.path,
-                last_page: document.last_page,
-                progress: document.progress,
-            }]
-        );
+        assert_eq!(favorites.len(), 2);
+        assert_eq!(favorites[0].document_key, second_document.document_key);
+        assert_eq!(favorites[0].tag_ids, Vec::<i64>::new());
+        assert_eq!(favorites[0].page_count, second_document.page_count);
+        assert!(!favorites[0].missing);
+        assert!(favorites[0].last_opened_at.is_some());
+        assert_eq!(favorites[1].document_key, first_document.document_key);
+        assert_eq!(favorites[1].tag_ids, vec![tag.id]);
+        assert_eq!(favorites[1].page_count, first_document.page_count);
+        assert_eq!(favorites[1].last_page, first_document.last_page);
+        assert_eq!(favorites[1].progress, first_document.progress);
     }
 
     #[test]
