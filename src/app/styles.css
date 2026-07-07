@@ -3735,3 +3735,206 @@ select {
   color: #94a3b8;
   font-size: 13px;
 }
+
+.tag-dashboard-detail-panel {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 20px 16px;
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+  overflow: auto;
+}
+
+.tag-dashboard-detail-panel > header,
+.tag-detail-card-heading,
+.tag-detail-summary > div:first-child,
+.tag-detail-summary dl div,
+.tag-folder-row,
+.tag-activity-row,
+.tag-recommendation-card > div:not(.tag-detail-card-heading) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tag-dashboard-detail-panel > header h2,
+.tag-detail-card h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.tag-dashboard-detail-panel > header button,
+.tag-detail-summary > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #fff;
+  color: #64748b;
+}
+
+.tag-detail-summary,
+.tag-detail-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.tag-detail-summary > div:first-child {
+  justify-content: flex-start;
+  color: #0f172a;
+  font-size: 16px;
+}
+
+.tag-detail-summary i,
+.tag-folder-row i {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+.tag-detail-summary dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.tag-detail-summary dt,
+.tag-detail-summary p,
+.tag-detail-card small,
+.tag-activity-row span {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.tag-detail-summary dd,
+.tag-folder-row strong,
+.tag-activity-row strong {
+  margin: 0;
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.tag-detail-card > button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: #fff;
+  color: #ef4444;
+  text-align: left;
+}
+
+.tag-detail-card > button:hover {
+  background: #f8fafc;
+}
+
+.tag-detail-card > button span,
+.tag-recommendation-card span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  color: #0f172a;
+}
+
+.tag-detail-card > button strong,
+.tag-recommendation-card strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-folder-row span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #334155;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-recommendation-card svg {
+  color: #f59e0b;
+}
+
+.tag-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.tag-dialog {
+  width: min(420px, calc(100vw - 32px));
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid #dbe3ef;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+}
+
+.tag-dialog header,
+.tag-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tag-dialog h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 18px;
+}
+
+.tag-dialog label {
+  display: grid;
+  gap: 8px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.tag-dialog input,
+.tag-dialog select {
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  color: #0f172a;
+}
+
+.tag-dialog-colors {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tag-dialog-colors button {
+  width: 28px;
+  min-height: 28px;
+  border-radius: 999px;
+}
+
+.tag-dialog-colors button[aria-pressed='true'] {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 2px;
+}

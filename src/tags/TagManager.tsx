@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
-import { AlertCircle, Loader2, RotateCcw, X } from 'lucide-react';
+import { AlertCircle, Loader2, RotateCcw } from 'lucide-react';
 import type { PersistenceApi } from '../persistence/persistenceApi';
-import type { Tag, TagDashboard } from './tagModels';
+import type { Tag, TagDashboard, TagDashboardTagRow } from './tagModels';
+import { TagCreateEditDialog } from './TagCreateEditDialog';
 import { TagCloudPanel } from './TagCloudPanel';
 import { TagDashboardToolbar } from './TagDashboardToolbar';
+import { TagDetailsPanel } from './TagDetailsPanel';
 import {
   filterTagRows,
   getDefaultTagId,
@@ -29,7 +31,7 @@ type TagManagerProps = {
   ): void;
 };
 
-export function TagManager({ persistence, onClose }: TagManagerProps) {
+export function TagManager({ persistence, onTagsChange, onClose, onOpenDocument }: TagManagerProps) {
   const [dashboard, setDashboard] = useState<TagDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +40,10 @@ export function TagManager({ persistence, onClose }: TagManagerProps) {
   const [color, setColor] = useState('all');
   const [sortKey, setSortKey] = useState<TagSortKey>('usage');
   const [page, setPage] = useState(1);
+  const [dialogMode, setDialogMode] = useState<'create' | 'edit' | 'merge' | null>(null);
+  const [dialogTag, setDialogTag] = useState<TagDashboardTagRow | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const pageSize = 10;
 
   const loadDashboard = useCallback(async () => {
@@ -72,6 +78,27 @@ export function TagManager({ persistence, onClose }: TagManagerProps) {
     dashboard?.details.find((detail) => detail.tag.id === selectedTagId) ??
     dashboard?.details[0] ??
     null;
+
+  async function runMutation(action: () => Promise<void>) {
+    setSaving(true);
+    setMutationError(null);
+    try {
+      await action();
+      setDialogMode(null);
+      setDialogTag(null);
+      await loadDashboard();
+    } catch (mutationError) {
+      setMutationError(mutationError instanceof Error ? mutationError.message : '标签操作失败');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function openDialog(mode: 'create' | 'edit' | 'merge', tag: TagDashboardTagRow | null = null) {
+    setDialogMode(mode);
+    setDialogTag(tag);
+    setMutationError(null);
+  }
 
   return (
     <section className="tag-dashboard-workspace" aria-label="标签管理工作区">
@@ -118,7 +145,7 @@ export function TagManager({ persistence, onClose }: TagManagerProps) {
                 setSortKey('usage');
                 setPage(1);
               }}
-              onCreate={() => undefined}
+              onCreate={() => openDialog('create')}
             />
             <div className="tag-dashboard-top-grid">
               <TagOverviewCards overview={dashboard.overview} />
@@ -136,22 +163,63 @@ export function TagManager({ persistence, onClose }: TagManagerProps) {
               selectedTagId={selectedTagId}
               onPageChange={setPage}
               onSelectTag={setSelectedTagId}
-              onEdit={() => undefined}
-              onMerge={() => undefined}
-              onDelete={() => undefined}
+              onEdit={(tag) => openDialog('edit', tag)}
+              onMerge={(tag) => openDialog('merge', tag)}
+              onDelete={(tag) => void runMutation(async () => {
+                await persistence.deleteTag(tag.id);
+                onTagsChange((current) => current.filter((item) => item.id !== tag.id));
+                setSelectedTagId(null);
+              })}
             />
           </div>
         ) : null}
       </main>
-      <aside className="tag-dashboard-detail-panel">
-        <header>
-          <h2>标签详情</h2>
-          <button type="button" aria-label="关闭标签详情" onClick={onClose}>
-            <X size={14} />
-          </button>
-        </header>
-        {selectedDetail ? <strong>{selectedDetail.tag.name}</strong> : <span>暂无标签</span>}
-      </aside>
+      <TagDetailsPanel
+        detail={selectedDetail}
+        recommendations={dashboard?.recommendations ?? []}
+        onClose={onClose}
+        onEdit={() => openDialog('edit', selectedDetail?.tag ?? null)}
+        onOpenDocument={(documentKey, path, missing) => onOpenDocument(documentKey, path, 1, missing)}
+      />
+      <TagCreateEditDialog
+        mode={dialogMode}
+        tag={dialogTag}
+        tags={dashboard?.tags ?? []}
+        saving={saving}
+        error={mutationError}
+        onClose={() => {
+          setDialogMode(null);
+          setDialogTag(null);
+          setMutationError(null);
+        }}
+        onCreate={(name, color) => void runMutation(async () => {
+          const createdTag = await persistence.createTag({ name, color });
+          onTagsChange((current) => [
+            ...current.filter((item) => item.id !== createdTag.id),
+            createdTag,
+          ]);
+          setSelectedTagId(createdTag.id);
+        })}
+        onRename={(tag, name) => void runMutation(async () => {
+          const renamedTag = await persistence.renameTag(tag.id, name);
+          onTagsChange((current) => [
+            ...current.filter((item) => item.id !== renamedTag.id),
+            renamedTag,
+          ]);
+          setSelectedTagId(renamedTag.id);
+        })}
+        onMerge={(source, targetId) => void runMutation(async () => {
+          const mergedTag = await persistence.mergeTags({
+            sourceTagId: source.id,
+            targetTagId: targetId,
+          });
+          onTagsChange((current) => [
+            ...current.filter((item) => item.id !== source.id && item.id !== mergedTag.id),
+            mergedTag,
+          ]);
+          setSelectedTagId(mergedTag.id);
+        })}
+      />
     </section>
   );
 }
