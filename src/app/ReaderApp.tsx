@@ -31,8 +31,6 @@ import { SettingsWorkspace, type SettingsSection } from '../settings/SettingsWor
 import type { Tag } from '../tags/tagModels';
 import { TagManager } from '../tags/TagManager';
 import type { ReaderAnnotation } from '../annotations/annotationModels';
-import { ReaderEmptyState } from '../reader/ReaderEmptyState';
-import { ReaderErrorState } from '../reader/ReaderErrorState';
 import { useDocumentOpening } from '../reader/hooks/useDocumentOpening';
 import { useReaderCommands } from '../reader/hooks/useReaderCommands';
 import { useReaderDecorations } from '../reader/hooks/useReaderDecorations';
@@ -47,7 +45,6 @@ import { ReaderToolbar } from '../reader/ReaderToolbar';
 import { ReaderWorkspace } from '../reader/ReaderWorkspace';
 import { GlobalSearchPanel } from '../search/GlobalSearchPanel';
 import type { GlobalSearchResult } from '../search/globalSearch';
-import { PdfViewerBridge } from '../viewer/PdfViewerBridge';
 import { ViewerController } from '../viewer/viewerController';
 import type { ViewerSource } from '../viewer/viewerTypes';
 import { AnnotationManagerWorkspace } from '../workspaces/AnnotationManagerWorkspace';
@@ -55,6 +52,7 @@ import { BookmarkManagerWorkspace } from '../workspaces/BookmarkManagerWorkspace
 import { CompareWorkspace } from '../workspaces/CompareWorkspace';
 import { ImportWorkspace } from '../workspaces/ImportWorkspace';
 import type { AppWorkspace, ReaderAppProps } from './appTypes';
+import { ReaderViewerContent } from './ReaderViewerContent';
 import {
   countRestorablePersistedTabs,
   mapSessionToPersistedDocument,
@@ -759,62 +757,54 @@ export function ReaderApp({
     [activeWorkspace, handleDrop],
   );
 
-  const viewerContent = activeSession ? (
-    activeSession.status === 'error' ? (
-      <ReaderErrorState
-        title={activeSession.title}
-        message={activeSession.errorMessage}
-        canRetry={activeSession.source.kind === 'desktop-path'}
-        onRetry={() => reopenDesktopSession(activeSession.id)}
-      />
-    ) : (
-      <PdfViewerBridge
-        source={viewerSource}
-        annotations={activeAnnotations}
-        controller={bridgeViewerController}
-        renderer={viewerRenderer}
-        onHighlightSelection={(selection) =>
-          void saveAnnotationForActiveDocument({
-            page: selection.page,
-            type: 'highlight',
-            color: '#facc15',
-            text: null,
-            quote: selection.selectedText,
-            areas: selection.areas,
-          })
-        }
-        onProgressChange={(progress) => {
-          setDocuments((current) => {
-            const next = updateSessionProgress(current, progress.sessionId, {
-              page: progress.page,
-              totalPages: progress.totalPages,
-              zoom: progress.zoom,
-            });
-            const updatedSession = next.sessions.find(
-              (session) => session.id === progress.sessionId,
-            );
-
-            if (updatedSession?.source.kind === 'desktop-path') {
-              const existingRecentDocument = recentDocuments.find(
-                (document) => document.documentKey === updatedSession.documentKey,
-              );
-              syncRecentDocumentProgress(
-                mapSessionToPersistedDocument(updatedSession, existingRecentDocument),
-              );
-            }
-
-            return next;
+  const viewerContent = (
+    <ReaderViewerContent
+      activeSession={activeSession}
+      viewerSource={viewerSource}
+      annotations={activeAnnotations}
+      controller={bridgeViewerController}
+      renderer={viewerRenderer}
+      onOpenPdf={openPdfAndIgnoreResult}
+      onRetry={reopenDesktopSession}
+      onHighlightSelection={(selection) =>
+        void saveAnnotationForActiveDocument({
+          page: selection.page,
+          type: 'highlight',
+          color: '#facc15',
+          text: null,
+          quote: selection.selectedText,
+          areas: selection.areas,
+        })
+      }
+      onProgressChange={(progress) => {
+        setDocuments((current) => {
+          const next = updateSessionProgress(current, progress.sessionId, {
+            page: progress.page,
+            totalPages: progress.totalPages,
+            zoom: progress.zoom,
           });
-        }}
-        onLoadError={(error) => {
-          setDocuments((current) =>
-            activeSession ? markSessionError(current, activeSession.id, error.message) : current,
+          const updatedSession = next.sessions.find(
+            (session) => session.id === progress.sessionId,
           );
-        }}
-      />
-    )
-  ) : (
-    <ReaderEmptyState onOpenPdf={openPdfAndIgnoreResult} />
+
+          if (updatedSession?.source.kind === 'desktop-path') {
+            const existingRecentDocument = recentDocuments.find(
+              (document) => document.documentKey === updatedSession.documentKey,
+            );
+            syncRecentDocumentProgress(
+              mapSessionToPersistedDocument(updatedSession, existingRecentDocument),
+            );
+          }
+
+          return next;
+        });
+      }}
+      onLoadError={(error) => {
+        setDocuments((current) =>
+          activeSession ? markSessionError(current, activeSession.id, error.message) : current,
+        );
+      }}
+    />
   );
 
   return (
