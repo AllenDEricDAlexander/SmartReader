@@ -3156,6 +3156,8 @@ select {
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
+  width: 150px;
+  max-width: none;
   z-index: 30;
 }
 

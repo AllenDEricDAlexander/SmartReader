@@ -215,7 +215,7 @@ describe('HomeDashboard', () => {
     const styles = readAppStyles();
 
     expect(styles).toMatch(/\.recent-workspace-menu-wrap\s*{[^}]*position:\s*relative;/s);
-    expect(styles).toMatch(/\.recent-workspace-menu-wrap \.recent-file-menu\s*{[^}]*position:\s*absolute;[^}]*right:\s*0;[^}]*top:\s*calc\(100% \+ 6px\);[^}]*z-index:\s*30;/s);
+    expect(styles).toMatch(/\.recent-workspace-menu-wrap \.recent-file-menu\s*{[^}]*position:\s*absolute;[^}]*right:\s*0;[^}]*top:\s*calc\(100% \+ 6px\);[^}]*width:\s*150px;[^}]*max-width:\s*none;[^}]*z-index:\s*30;/s);
   });
 
   it('renders the prototype welcome banner at the top of the home content', () => {
