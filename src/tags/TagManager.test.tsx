@@ -121,6 +121,20 @@ describe('TagManager', () => {
     expect(within(table).queryByRole('button', { name: /深度学习/ })).not.toBeInTheDocument();
   });
 
+  it('shows the current color filter with a visible swatch', async () => {
+    renderTagManager();
+
+    await screen.findByRole('heading', { name: '标签管理' });
+    const colorFilter = screen.getByLabelText('颜色筛选');
+
+    expect(colorFilter.closest('.tag-dashboard-select')).toBeInTheDocument();
+    expect(document.querySelector('.tag-color-filter-dot')).toBeInTheDocument();
+
+    fireEvent.change(colorFilter, { target: { value: '#2563eb' } });
+
+    expect(screen.getByRole('option', { name: '蓝色 #2563eb' })).toBeInTheDocument();
+  });
+
   it('creates a tag and refreshes the dashboard', async () => {
     const { persistence } = renderTagManager();
 

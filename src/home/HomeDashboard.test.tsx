@@ -277,6 +277,9 @@ describe('HomeDashboard', () => {
     expect(styles).toMatch(/\.home-content\.home-tags-content\s*{[^}]*padding:\s*0;/s);
     expect(styles).toMatch(/\.home-content\.home-tags-content\s*{[^}]*overflow:\s*hidden;/s);
     expect(styles).toMatch(/\.tag-dashboard-workspace\s*{[^}]*height:\s*100%;/s);
+    expect(styles).toMatch(/\.tag-dashboard-select\s*{[^}]*position:\s*relative;/s);
+    expect(styles).toMatch(/\.tag-color-filter-dot\s*{[^}]*border-radius:\s*999px;/s);
+    expect(styles).toMatch(/@media \(max-width: 1180px\)\s*{[^@]*\.tag-dashboard-workspace\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
   });
 
   it('renders the prototype welcome banner at the top of the home content', () => {
