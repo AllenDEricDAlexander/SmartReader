@@ -46,6 +46,8 @@ describe('buildGlobalSearchResults', () => {
           lastPage: 2,
           progress: 0.1,
           missing: false,
+          lastOpenedAt: null,
+          tagIds: [],
         },
         {
           documentKey: 'desktop:/tmp/stats.pdf',
@@ -57,6 +59,8 @@ describe('buildGlobalSearchResults', () => {
           lastPage: 3,
           progress: 0.15,
           missing: false,
+          lastOpenedAt: null,
+          tagIds: [],
         },
       ],
       favoriteDocuments: [],
@@ -159,6 +163,8 @@ describe('buildGlobalSearchResults', () => {
           lastPage: 1,
           progress: 0,
           missing: false,
+          lastOpenedAt: null,
+          tagIds: [],
         },
       ],
       favoriteDocuments: [

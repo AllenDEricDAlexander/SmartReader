@@ -20,6 +20,8 @@ const recentSessionDocuments: PersistedDocument[] = [
     lastPage: 12,
     progress: 0.14,
     missing: false,
+    lastOpenedAt: null,
+    tagIds: [],
   },
   {
     documentKey: 'desktop:/Users/mario/Research/Reader Spec.pdf',
@@ -31,6 +33,8 @@ const recentSessionDocuments: PersistedDocument[] = [
     lastPage: 8,
     progress: 0.19,
     missing: false,
+    lastOpenedAt: null,
+    tagIds: [],
   },
   {
     documentKey: 'desktop:/Users/mario/Archive/UX Review.pdf',
@@ -42,6 +46,8 @@ const recentSessionDocuments: PersistedDocument[] = [
     lastPage: 64,
     progress: 0.5,
     missing: false,
+    lastOpenedAt: null,
+    tagIds: [],
   },
   {
     documentKey: 'desktop:/Users/mario/Archive/Hidden Fourth.pdf',
@@ -53,6 +59,8 @@ const recentSessionDocuments: PersistedDocument[] = [
     lastPage: 100,
     progress: 0.5,
     missing: false,
+    lastOpenedAt: null,
+    tagIds: [],
   },
 ];
 
@@ -68,6 +76,8 @@ const recentTableDocuments: PersistedDocument[] = [
     lastPage: 32,
     progress: 0.5,
     missing: false,
+    lastOpenedAt: null,
+    tagIds: [],
   },
   {
     documentKey: 'desktop:/Users/mario/Reports/Sixth Hidden.pdf',
@@ -79,6 +89,8 @@ const recentTableDocuments: PersistedDocument[] = [
     lastPage: 8,
     progress: 0.125,
     missing: false,
+    lastOpenedAt: null,
+    tagIds: [],
   },
 ];
 

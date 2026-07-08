@@ -21,6 +21,8 @@ export function mapSessionToPersistedDocument(
     lastPage: session.page,
     progress: session.progress,
     missing: false,
+    lastOpenedAt: previousDocument?.lastOpenedAt ?? null,
+    tagIds: previousDocument?.tagIds ?? [],
   };
 }
 

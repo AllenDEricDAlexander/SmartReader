@@ -15,6 +15,8 @@ export type PersistedDocument = {
   lastPage: number;
   progress: number;
   missing: boolean;
+  lastOpenedAt: string | null;
+  tagIds: number[];
 };
 
 export type PersistedHistory = {
@@ -89,6 +91,8 @@ export type CacheStats = {
 export type CorePersistenceApi = {
   saveDocument(document: PersistedDocument): Promise<void>;
   listRecentDocuments(): Promise<PersistedDocument[]>;
+  removeRecentDocument(documentKey: string): Promise<void>;
+  clearRecentDocuments(): Promise<void>;
   saveReaderSession(session: PersistedReaderSession): Promise<void>;
   loadReaderSession(): Promise<PersistedReaderSession | null>;
   saveBookmark(bookmark: PersistedBookmark): Promise<PersistedBookmark>;
@@ -128,6 +132,12 @@ export function createPersistenceApi(invoke: Invoke = tauriInvoke): PersistenceA
     },
     listRecentDocuments() {
       return invoke<PersistedDocument[]>('list_recent_documents');
+    },
+    removeRecentDocument(documentKey) {
+      return invoke<void>('remove_recent_document', { documentKey });
+    },
+    clearRecentDocuments() {
+      return invoke<void>('clear_recent_documents');
     },
     saveReaderSession(session) {
       return invoke<void>('save_reader_session', { session });

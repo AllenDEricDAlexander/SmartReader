@@ -48,6 +48,8 @@ describe('reader app mappers', () => {
       lastPage: 1,
       progress: 12,
       missing: true,
+      lastOpenedAt: '2026-07-08T08:00:00.000Z',
+      tagIds: [1, 2],
     };
 
     expect(mapSessionToPersistedDocument(createDesktopSession(), previous)).toEqual({
@@ -60,6 +62,8 @@ describe('reader app mappers', () => {
       lastPage: 3,
       progress: 30,
       missing: false,
+      lastOpenedAt: '2026-07-08T08:00:00.000Z',
+      tagIds: [1, 2],
     });
   });
 
@@ -74,6 +78,8 @@ describe('reader app mappers', () => {
       lastPage: 1,
       progress: 0,
       missing: false,
+      lastOpenedAt: '2026-07-08T08:00:00.000Z',
+      tagIds: [],
     };
     const second = { ...first, documentKey: 'b', path: '/b.pdf', displayName: 'B' };
     const updatedFirst = { ...first, displayName: 'A updated', progress: 50 };

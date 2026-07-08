@@ -117,6 +117,8 @@ describe('restoreDocumentSessions', () => {
           lastPage: 6,
           progress: 0.3,
           missing: false,
+          lastOpenedAt: null,
+          tagIds: [],
         },
       ],
       {
@@ -159,6 +161,8 @@ describe('restoreDocumentSessions', () => {
             lastPage: 2,
             progress: 0.2,
             missing: false,
+            lastOpenedAt: null,
+            tagIds: [],
           },
         ],
         {

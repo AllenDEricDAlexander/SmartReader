@@ -16,6 +16,8 @@ const documents: PersistedDocument[] = [
     lastPage: 15,
     progress: 0.15,
     missing: false,
+    lastOpenedAt: null,
+    tagIds: [],
   },
   {
     documentKey: 'desktop:/Users/mario/Archive/Alpha Notes.pdf',
@@ -27,6 +29,8 @@ const documents: PersistedDocument[] = [
     lastPage: 20,
     progress: 1,
     missing: false,
+    lastOpenedAt: null,
+    tagIds: [],
   },
   {
     documentKey: 'desktop:/Users/mario/Drafts/Gamma Draft.pdf',
@@ -38,6 +42,8 @@ const documents: PersistedDocument[] = [
     lastPage: 0,
     progress: 0,
     missing: false,
+    lastOpenedAt: null,
+    tagIds: [],
   },
   {
     documentKey: 'browser:untitled-local',
@@ -49,6 +55,8 @@ const documents: PersistedDocument[] = [
     lastPage: 0,
     progress: 0,
     missing: false,
+    lastOpenedAt: null,
+    tagIds: [],
   },
 ];
 

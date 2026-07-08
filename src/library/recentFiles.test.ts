@@ -14,6 +14,8 @@ describe('recentFiles', () => {
         lastPage: 5,
         progress: 0.5,
         missing: false,
+        lastOpenedAt: null,
+        tagIds: [],
       },
     ]);
 
@@ -27,6 +29,8 @@ describe('recentFiles', () => {
         fileSizeLabel: '100 KB',
         modifiedAtLabel: '2026-06-15T00:00:00Z',
         missing: false,
+        lastOpenedAt: null,
+        tagIds: [],
       },
     ]);
   });
@@ -44,6 +48,8 @@ describe('recentFiles', () => {
           lastPage: 5,
           progress: 0.25,
           missing: false,
+          lastOpenedAt: null,
+          tagIds: [],
         },
       ]),
     ).toEqual([
@@ -56,6 +62,8 @@ describe('recentFiles', () => {
         fileSizeLabel: '2 KB',
         modifiedAtLabel: '2026-06-16T00:00:00Z',
         missing: false,
+        lastOpenedAt: null,
+        tagIds: [],
       },
     ]);
   });

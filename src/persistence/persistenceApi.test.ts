@@ -15,6 +15,8 @@ describe('persistenceApi', () => {
       lastPage: 3,
       progress: 0.15,
       missing: false,
+      lastOpenedAt: '2026-07-08T09:00:00Z',
+      tagIds: [2],
     };
 
     await api.saveDocument(document);
@@ -175,6 +177,8 @@ describe('persistenceApi', () => {
     await api.deleteTag(1);
     await api.mergeTags({ sourceTagId: 1, targetTagId: 2 });
     await api.listTags();
+    await api.removeRecentDocument('desktop:/tmp/book.pdf');
+    await api.clearRecentDocuments();
     await api.attachDocumentTag('desktop:/tmp/book.pdf', 2);
     await api.detachDocumentTag('desktop:/tmp/book.pdf', 2);
     await api.attachAnnotationTag(7, 2);
@@ -194,6 +198,10 @@ describe('persistenceApi', () => {
       input: { sourceTagId: 1, targetTagId: 2 },
     });
     expect(invoke).toHaveBeenCalledWith('list_tags');
+    expect(invoke).toHaveBeenCalledWith('remove_recent_document', {
+      documentKey: 'desktop:/tmp/book.pdf',
+    });
+    expect(invoke).toHaveBeenCalledWith('clear_recent_documents');
     expect(invoke).toHaveBeenCalledWith('attach_document_tag', {
       documentKey: 'desktop:/tmp/book.pdf',
       tagId: 2,

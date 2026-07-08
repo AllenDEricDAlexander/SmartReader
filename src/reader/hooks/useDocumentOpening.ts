@@ -61,6 +61,8 @@ export function useDocumentOpening({
           lastPage: 1,
           progress: 0,
           missing: false,
+          lastOpenedAt: null,
+          tagIds: [],
         });
       }
 
