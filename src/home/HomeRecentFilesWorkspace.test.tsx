@@ -2,6 +2,7 @@ import { fireEvent, screen, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { PersistedDocument } from '../persistence/persistenceApi';
+import type { Tag } from '../tags/tagModels';
 import { renderApp } from '../test/renderApp';
 import { HomeRecentFilesWorkspace } from './HomeRecentFilesWorkspace';
 
@@ -16,8 +17,8 @@ const documents: PersistedDocument[] = [
     lastPage: 15,
     progress: 0.15,
     missing: false,
-    lastOpenedAt: null,
-    tagIds: [],
+    lastOpenedAt: '2026-07-03T09:30:00+08:00',
+    tagIds: [1],
   },
   {
     documentKey: 'desktop:/Users/mario/Archive/Alpha Notes.pdf',
@@ -29,8 +30,8 @@ const documents: PersistedDocument[] = [
     lastPage: 20,
     progress: 1,
     missing: false,
-    lastOpenedAt: null,
-    tagIds: [],
+    lastOpenedAt: '2026-07-05T11:00:00+08:00',
+    tagIds: [1, 2],
   },
   {
     documentKey: 'desktop:/Users/mario/Drafts/Gamma Draft.pdf',
@@ -42,7 +43,7 @@ const documents: PersistedDocument[] = [
     lastPage: 0,
     progress: 0,
     missing: false,
-    lastOpenedAt: null,
+    lastOpenedAt: '2026-07-01T08:00:00+08:00',
     tagIds: [],
   },
   {
@@ -60,15 +61,40 @@ const documents: PersistedDocument[] = [
   },
 ];
 
+const tags: Tag[] = [
+  {
+    id: 1,
+    name: 'AI',
+    color: '#8b5cf6',
+    documentCount: 1,
+    annotationCount: 0,
+    createdAt: '2026-07-01T00:00:00Z',
+    updatedAt: '2026-07-01T00:00:00Z',
+  },
+  {
+    id: 2,
+    name: '医学',
+    color: '#10b981',
+    documentCount: 1,
+    annotationCount: 0,
+    createdAt: '2026-07-01T00:00:00Z',
+    updatedAt: '2026-07-01T00:00:00Z',
+  },
+];
+
 function renderWorkspace(overrides: Partial<ComponentProps<typeof HomeRecentFilesWorkspace>> = {}) {
   const props: ComponentProps<typeof HomeRecentFilesWorkspace> = {
     documents,
     favoriteDocumentKeys: new Set(['desktop:/Users/mario/Archive/Alpha Notes.pdf']),
+    tags,
     onOpenPdf: vi.fn(),
     onReopenDocument: vi.fn(),
     onToggleFavorite: vi.fn(),
+    onToggleDocumentTag: vi.fn(),
     onLocateFile: vi.fn(),
-    onRemoveRecent: vi.fn(),
+    onRemoveRecentDocuments: vi.fn(),
+    onClearRecentDocuments: vi.fn(),
+    onOpenTags: vi.fn(),
     ...overrides,
   };
 
@@ -92,6 +118,7 @@ describe('HomeRecentFilesWorkspace', () => {
     expect(screen.getByRole('searchbox', { name: '搜索最近文件' })).toHaveValue('');
     expect(screen.getByRole('combobox', { name: '排序方式' })).toHaveValue('recent');
     expect(screen.getByRole('combobox', { name: '阅读进度筛选' })).toHaveValue('all');
+    expect(screen.getByRole('combobox', { name: '标签筛选' })).toHaveValue('all');
     expect(screen.getByRole('combobox', { name: '收藏状态筛选' })).toHaveValue('all');
     expect(screen.getByRole('button', { name: '列表视图' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '卡片视图' })).toHaveAttribute('aria-pressed', 'false');
@@ -259,6 +286,72 @@ describe('HomeRecentFilesWorkspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '更多操作 Beta Research.pdf' }));
     fireEvent.click(screen.getByRole('menuitem', { name: '从最近记录移除' }));
-    expect(props.onRemoveRecent).toHaveBeenCalledWith(documents[0]);
+    expect(props.onRemoveRecentDocuments).toHaveBeenCalledWith([documents[0]]);
+  });
+
+  it('renders table headers, tag chips, and the derived right rail', () => {
+    renderWorkspace();
+
+    expect(screen.getByRole('columnheader', { name: '文件名' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '本地路径' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '最近打开' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '标签' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'AI' })[0]).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: '最近文件辅助信息' })).toBeInTheDocument();
+    expect(screen.getByText('本地统计')).toBeInTheDocument();
+  });
+
+  it('filters by tag and untagged state', () => {
+    renderWorkspace();
+
+    fireEvent.change(screen.getByRole('combobox', { name: '标签筛选' }), {
+      target: { value: '2' },
+    });
+    expect(listedNames()).toEqual(['Alpha Notes.pdf']);
+
+    fireEvent.change(screen.getByRole('combobox', { name: '标签筛选' }), {
+      target: { value: 'untagged' },
+    });
+    expect(listedNames()).toEqual(['Gamma Draft.pdf', 'Local Browser Upload.pdf']);
+  });
+
+  it('toggles a document tag from the inline tag picker', () => {
+    const props = renderWorkspace();
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑标签 Beta Research.pdf' }));
+    fireEvent.click(screen.getByRole('button', { name: '切换标签 医学' }));
+
+    expect(props.onToggleDocumentTag).toHaveBeenCalledWith(documents[0], tags[1], true);
+  });
+
+  it('supports batch tag binding, batch tag removal, and batch remove recent', () => {
+    const props = renderWorkspace();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 Beta Research.pdf' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 Gamma Draft.pdf' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '批量选择标签' }), {
+      target: { value: '2' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '批量绑定标签' }));
+    expect(props.onToggleDocumentTag).toHaveBeenCalledWith(documents[0], tags[1], true);
+    expect(props.onToggleDocumentTag).toHaveBeenCalledWith(documents[2], tags[1], true);
+
+    fireEvent.click(screen.getByRole('button', { name: '批量移除标签' }));
+    expect(props.onToggleDocumentTag).toHaveBeenCalledWith(documents[0], tags[1], false);
+    expect(props.onToggleDocumentTag).toHaveBeenCalledWith(documents[2], tags[1], false);
+
+    fireEvent.click(screen.getByRole('button', { name: '批量移出最近' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认移出' }));
+    expect(props.onRemoveRecentDocuments).toHaveBeenCalledWith([documents[0], documents[2]]);
+  });
+
+  it('clears recent history after confirmation', () => {
+    const props = renderWorkspace();
+
+    fireEvent.click(screen.getByRole('button', { name: '清空历史记录' }));
+    expect(screen.getByRole('dialog', { name: '清空历史记录' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '确认清空' }));
+
+    expect(props.onClearRecentDocuments).toHaveBeenCalledTimes(1);
   });
 });
