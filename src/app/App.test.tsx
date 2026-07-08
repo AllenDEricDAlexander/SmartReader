@@ -1876,6 +1876,13 @@ describe('App', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '标签管理' }));
+    expect(screen.getByLabelText('SmartReader 顶部栏')).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
+    expect(screen.getByRole('contentinfo', { name: '首页状态栏' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '标签管理' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
     await screen.findByRole('button', { name: '创建标签' });
     fireEvent.click(screen.getByRole('button', { name: '创建标签' }));
     fireEvent.change(screen.getByLabelText('标签名称'), { target: { value: '论文' } });

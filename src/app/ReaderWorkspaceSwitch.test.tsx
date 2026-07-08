@@ -7,6 +7,23 @@ import { CommandRegistry } from '../commands/commandRegistry';
 import { ViewerController } from '../viewer/viewerController';
 import { ReaderWorkspaceSwitch } from './ReaderWorkspaceSwitch';
 
+const emptyTagDashboard = {
+  overview: { totalTags: 0, activeTags: 0, totalUsage: 0, orphanTags: 0 },
+  tags: [],
+  details: [],
+  recommendations: [],
+};
+
+function createTagPersistence() {
+  return {
+    loadTagDashboard: vi.fn().mockResolvedValue(emptyTagDashboard),
+    createTag: vi.fn(),
+    renameTag: vi.fn(),
+    deleteTag: vi.fn(),
+    mergeTags: vi.fn(),
+  } as unknown as Parameters<typeof ReaderWorkspaceSwitch>[0]['persistence'];
+}
+
 function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch>[0]> = {}) {
   const preferences: ReaderPreferences = defaultReaderPreferences;
   const props: Parameters<typeof ReaderWorkspaceSwitch>[0] = {
@@ -29,7 +46,7 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     globalSearchBookmarks: [],
     lastSearchCommand: '',
     pageInput: '',
-    persistence: {} as Parameters<typeof ReaderWorkspaceSwitch>[0]['persistence'],
+    persistence: createTagPersistence(),
     readerPreferences: preferences,
     recentDocuments: [],
     searchText: '',
@@ -93,6 +110,24 @@ describe('ReaderWorkspaceSwitch', () => {
     expect(screen.getByRole('button', { name: '打开文件' })).toBeInTheDocument();
     expect(screen.getByText('0 B / 5 GB')).toBeInTheDocument();
   });
+
+  it('renders tag management as a home sidebar page', async () => {
+    renderSwitch({
+      activeWorkspace: 'home',
+      activeSidebarPage: 'tags',
+      persistence: createTagPersistence(),
+    });
+
+    expect(screen.getByLabelText('SmartReader 顶部栏')).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
+    expect(screen.getByRole('contentinfo', { name: '首页状态栏' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '标签管理' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(await screen.findByLabelText('标签管理工作区')).toBeInTheDocument();
+  });
+
   it('passes available tags to the favorite files workspace', () => {
     renderSwitch({
       activeWorkspace: 'home',

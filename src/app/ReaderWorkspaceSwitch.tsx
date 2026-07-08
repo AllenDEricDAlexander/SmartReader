@@ -314,6 +314,11 @@ export function ReaderWorkspaceSwitch({
             restorableSessions: sessionRestoreCount,
           }}
           cacheStats={cacheStats}
+          tagPersistence={persistence}
+          onTagsChange={onTagsChange}
+          onOpenTagDocument={(documentKey, documentPath, page, documentMissing) =>
+            void openRecordPage(documentKey, documentPath, page, documentMissing)
+          }
           onOpenPdf={openPdf}
           onDropPdf={handleDrop}
           onBrowserFileChange={handleBrowserFileChange}
@@ -351,7 +356,7 @@ export function ReaderWorkspaceSwitch({
           onOpenCacheManagement={() => openSettingsWorkspace('cache')}
           onOpenShortcutSettings={() => openSettingsWorkspace('shortcuts')}
           onOpenSettings={() => openSettingsWorkspace()}
-          onOpenTags={() => setWorkspaceOverride('tags')}
+          onOpenTags={() => openHomeSidebarPage('tags')}
         />
       ) : null}
     </>
