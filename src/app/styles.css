@@ -771,6 +771,13 @@ button:disabled,
   grid-template-columns: minmax(0, 1fr);
 }
 
+.home-content.home-tags-content {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 .home-primary,
 .home-status,
 .home-assist {
@@ -3462,10 +3469,12 @@ select {
 }
 
 .tag-dashboard-workspace {
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
   background: #f8fafc;
   color: var(--sr-text);
 }

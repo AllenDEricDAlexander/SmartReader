@@ -1,7 +1,15 @@
-import { useCallback, useRef, useState, type ChangeEventHandler, type DragEventHandler } from 'react';
+import {
+  useCallback,
+  useRef,
+  useState,
+  type ChangeEventHandler,
+  type DragEventHandler,
+  type SetStateAction,
+} from 'react';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { PersistedBookmarkRecord, PersistedDocument } from '../persistence/persistenceApi';
 import type { Tag } from '../tags/tagModels';
+import { TagManager } from '../tags/TagManager';
 import { HomeActionNotice } from './HomeActionNotice';
 import { HomeBlankPage, isHomeBlankPageId } from './HomeBlankPage';
 import { HomeAssistPanel } from './HomeAssistPanel';
@@ -38,6 +46,14 @@ type HomeDashboardProps = {
   cacheStats?: HomeSidebarProps['cacheStats'];
   appVersion?: HomeAppVersion;
   taskStatus?: HomeTaskStatus;
+  tagPersistence: Parameters<typeof TagManager>[0]['persistence'];
+  onTagsChange(update: SetStateAction<Tag[]>): void;
+  onOpenTagDocument(
+    documentKey: string,
+    documentPath: string | null,
+    page: number,
+    documentMissing: boolean,
+  ): void | Promise<void>;
   onOpenPdf(): void | Promise<unknown>;
   onDropPdf: DragEventHandler<HTMLElement>;
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
@@ -87,6 +103,9 @@ export function HomeDashboard({
   },
   appVersion = { version: '0.1.0', build: null },
   taskStatus = 'idle',
+  tagPersistence,
+  onTagsChange,
+  onOpenTagDocument,
   onOpenPdf,
   onDropPdf,
   onBrowserFileChange,
@@ -299,6 +318,16 @@ export function HomeDashboard({
     </div>
   );
 
+  const tagsContent = (
+    <div className="home-content home-tags-content">
+      <TagManager
+        persistence={tagPersistence}
+        onTagsChange={onTagsChange}
+        onOpenDocument={onOpenTagDocument}
+      />
+    </div>
+  );
+
   const mainContent =
     activeSidebarPage === 'recentFiles' ? (
       recentFilesContent
@@ -306,6 +335,8 @@ export function HomeDashboard({
       favoriteFilesContent
     ) : activeSidebarPage === 'bookmarks' ? (
       bookmarksContent
+    ) : activeSidebarPage === 'tags' ? (
+      tagsContent
     ) : isHomeBlankPageId(activeSidebarPage) ? (
       <div className="home-content home-blank-content">
         <HomeBlankPage page={activeSidebarPage} />

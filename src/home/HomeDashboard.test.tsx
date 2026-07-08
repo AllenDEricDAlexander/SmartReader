@@ -5,6 +5,7 @@ import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { PersistedDocument } from '../persistence/persistenceApi';
+import type { TagDashboard } from '../tags/tagModels';
 import { renderApp } from '../test/renderApp';
 import { HomeDashboard } from './HomeDashboard';
 
@@ -128,6 +129,54 @@ const favoriteCardDocuments: FavoriteDocument[] = [
   },
 ];
 
+const tagDashboard: TagDashboard = {
+  overview: { totalTags: 1, activeTags: 1, totalUsage: 4, orphanTags: 0 },
+  tags: [
+    {
+      id: 1,
+      name: '深度学习',
+      color: '#2563eb',
+      usageCount: 4,
+      documentCount: 2,
+      annotationCount: 2,
+      recentUsedAt: '2026-07-07T09:42:00Z',
+      createdAt: '2026-07-01T08:00:00Z',
+      updatedAt: '2026-07-07T09:42:00Z',
+      description: '深度学习 相关文献与批注',
+    },
+  ],
+  details: [
+    {
+      tag: {
+        id: 1,
+        name: '深度学习',
+        color: '#2563eb',
+        usageCount: 4,
+        documentCount: 2,
+        annotationCount: 2,
+        recentUsedAt: '2026-07-07T09:42:00Z',
+        createdAt: '2026-07-01T08:00:00Z',
+        updatedAt: '2026-07-07T09:42:00Z',
+        description: '深度学习 相关文献与批注',
+      },
+      documents: [],
+      folderDistribution: [],
+      activities: [],
+    },
+  ],
+  recommendations: [],
+};
+
+function createTagPersistence() {
+  return {
+    loadTagDashboard: vi.fn().mockResolvedValue(tagDashboard),
+    createTag: vi.fn(),
+    renameTag: vi.fn(),
+    deleteTag: vi.fn(),
+    mergeTags: vi.fn(),
+  };
+}
+
 function expectedLocalDateTime(value: string | null) {
   if (!value) {
     return '时间未知';
@@ -178,6 +227,9 @@ function createDashboardProps(
     onOpenNotes: vi.fn(),
     onOpenFullTextSearch: vi.fn(),
     onOpenCacheManagement: vi.fn(),
+    tagPersistence: createTagPersistence(),
+    onTagsChange: vi.fn(),
+    onOpenTagDocument: vi.fn(),
     ...overrides,
   };
 }
@@ -216,6 +268,15 @@ describe('HomeDashboard', () => {
 
     expect(styles).toMatch(/\.recent-workspace-menu-wrap\s*{[^}]*position:\s*relative;/s);
     expect(styles).toMatch(/\.recent-workspace-menu-wrap \.recent-file-menu\s*{[^}]*position:\s*absolute;[^}]*right:\s*0;[^}]*top:\s*calc\(100% \+ 6px\);[^}]*width:\s*150px;[^}]*max-width:\s*none;[^}]*z-index:\s*30;/s);
+  });
+
+  it('keeps tag management as a single framed home content page', () => {
+    const styles = readAppStyles();
+
+    expect(styles).toMatch(/\.home-content\.home-tags-content\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
+    expect(styles).toMatch(/\.home-content\.home-tags-content\s*{[^}]*padding:\s*0;/s);
+    expect(styles).toMatch(/\.home-content\.home-tags-content\s*{[^}]*overflow:\s*hidden;/s);
+    expect(styles).toMatch(/\.tag-dashboard-workspace\s*{[^}]*height:\s*100%;/s);
   });
 
   it('renders the prototype welcome banner at the top of the home content', () => {
@@ -430,15 +491,20 @@ describe('HomeDashboard', () => {
     expect(screen.queryByLabelText('书签管理工作区')).not.toBeInTheDocument();
   });
 
-  it('falls back to normal home content instead of a blank page for workspace-only sidebar pages', () => {
+  it('renders tag management inside the home dashboard frame', async () => {
     renderDashboard({ activeSidebarPage: 'tags' });
 
-    expect(screen.getByText('快速开始')).toBeInTheDocument();
+    expect(screen.queryByText('快速开始')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('SmartReader 顶部栏')).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
+    expect(screen.getByRole('contentinfo', { name: '首页状态栏' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '标签管理' })).toHaveAttribute(
       'aria-current',
       'page',
     );
-    expect(screen.queryByRole('region', { name: '标签管理' })).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('标签管理工作区')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '标签管理' })).toBeInTheDocument();
+    expect(screen.getByText('标签概览')).toBeInTheDocument();
   });
 
   it('does not render full-text search as a home blank page', () => {
