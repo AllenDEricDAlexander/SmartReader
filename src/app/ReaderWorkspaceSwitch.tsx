@@ -73,7 +73,10 @@ type ReaderWorkspaceSwitchProps = {
   handleSavePreferences(preferences: ReaderPreferences): Promise<void>;
   handleToggleActiveFavorite(): void;
   handleToggleAnnotationTag(annotation: ReaderAnnotation, tag: Tag, selected: boolean): void | Promise<void>;
+  handleToggleDocumentTag(document: PersistedDocument, tag: Tag, selected: boolean): void | Promise<void>;
   handleToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
+  handleRemoveRecentDocuments(documents: PersistedDocument[]): void | Promise<void>;
+  handleClearRecentDocuments(): void | Promise<void>;
   handleViewerWheel(event: WheelEvent<HTMLElement>): void;
   importAnnotationsForDocument(documentKey: string, json: string): Promise<void>;
   jumpToActiveDocumentPage(page: number): void;
@@ -151,7 +154,10 @@ export function ReaderWorkspaceSwitch({
   handleSavePreferences,
   handleToggleActiveFavorite,
   handleToggleAnnotationTag,
+  handleToggleDocumentTag,
   handleToggleFavorite,
+  handleRemoveRecentDocuments,
+  handleClearRecentDocuments,
   handleViewerWheel,
   importAnnotationsForDocument,
   jumpToActiveDocumentPage,
@@ -336,6 +342,9 @@ export function ReaderWorkspaceSwitch({
             )
           }
           onToggleFavorite={handleToggleFavorite}
+          onToggleDocumentTag={handleToggleDocumentTag}
+          onRemoveRecentDocuments={handleRemoveRecentDocuments}
+          onClearRecentDocuments={handleClearRecentDocuments}
           canOpenNativePdf={canOpenNativePdf}
           onOpenGlobalSearch={openGlobalSearch}
           onOpenImport={() => openShortcutWorkspace('import')}

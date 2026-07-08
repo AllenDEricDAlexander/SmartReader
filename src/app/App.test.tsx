@@ -247,6 +247,58 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: /打开本地 PDF/ })).toBeInTheDocument();
   });
 
+  it('binds an existing tag from the recent files workspace', async () => {
+    const persistence = {
+      ...createEmptyPersistence(),
+      listRecentDocuments: vi.fn().mockResolvedValue([
+        {
+          documentKey: 'desktop:/Users/mario/Papers/Recent.pdf',
+          path: '/Users/mario/Papers/Recent.pdf',
+          displayName: 'Recent.pdf',
+          fileSize: 1024,
+          modifiedAt: '2026-07-08T09:00:00+08:00',
+          pageCount: 12,
+          lastPage: 3,
+          progress: 0.25,
+          missing: false,
+          lastOpenedAt: '2026-07-08T09:00:00+08:00',
+          tagIds: [],
+        },
+      ]),
+      listTags: vi.fn().mockResolvedValue([
+        {
+          id: 1,
+          name: 'AI',
+          color: '#8b5cf6',
+          documentCount: 0,
+          annotationCount: 0,
+          createdAt: '2026-07-01T00:00:00Z',
+          updatedAt: '2026-07-01T00:00:00Z',
+        },
+      ]),
+      attachDocumentTag: vi.fn().mockResolvedValue(undefined),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '最近文件 1' }));
+    fireEvent.click(await screen.findByRole('button', { name: '编辑标签 Recent.pdf' }));
+    fireEvent.click(await screen.findByRole('button', { name: '切换标签 AI' }));
+
+    await waitFor(() => {
+      expect(persistence.attachDocumentTag).toHaveBeenCalledWith(
+        'desktop:/Users/mario/Papers/Recent.pdf',
+        1,
+      );
+    });
+  });
+
   it('opens cache settings from the sidebar cache management entry', async () => {
     renderApp(
       <App

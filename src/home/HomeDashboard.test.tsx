@@ -5,7 +5,7 @@ import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { PersistedDocument } from '../persistence/persistenceApi';
-import type { TagDashboard } from '../tags/tagModels';
+import type { Tag, TagDashboard } from '../tags/tagModels';
 import { renderApp } from '../test/renderApp';
 import { HomeDashboard } from './HomeDashboard';
 
@@ -141,6 +141,18 @@ const favoriteCardDocuments: FavoriteDocument[] = [
   },
 ];
 
+const availableTags: Tag[] = [
+  {
+    id: 1,
+    name: 'AI',
+    color: '#8b5cf6',
+    documentCount: 1,
+    annotationCount: 0,
+    createdAt: '2026-07-01T00:00:00Z',
+    updatedAt: '2026-07-01T00:00:00Z',
+  },
+];
+
 const tagDashboard: TagDashboard = {
   overview: { totalTags: 1, activeTags: 1, totalUsage: 4, orphanTags: 0 },
   tags: [
@@ -211,11 +223,15 @@ function createDashboardProps(
   return {
     recentDocuments: [],
     favoriteDocuments: [],
+    availableTags,
     onOpenPdf: vi.fn(),
     onDropPdf: vi.fn(),
     onBrowserFileChange: vi.fn(),
     onReopenRecentDocument: vi.fn(),
     onToggleFavorite: vi.fn(),
+    onToggleDocumentTag: vi.fn(),
+    onRemoveRecentDocuments: vi.fn(),
+    onClearRecentDocuments: vi.fn(),
     canOpenNativePdf: () => true,
     activeSidebarPage: 'home',
     counts: {
@@ -446,6 +462,33 @@ describe('HomeDashboard', () => {
     expect(screen.getByRole('heading', { name: '最近文件' })).toBeInTheDocument();
     expect(screen.getByText('共 6 个最近文件，当前显示 6 个')).toBeInTheDocument();
     expect(screen.getByRole('searchbox', { name: '搜索最近文件' })).toBeInTheDocument();
+  });
+
+  it('passes tags and recent management actions into the recent files workspace', () => {
+    const onToggleDocumentTag = vi.fn();
+    const onRemoveRecentDocuments = vi.fn();
+    const onClearRecentDocuments = vi.fn();
+    renderDashboard({
+      activeSidebarPage: 'recentFiles',
+      recentDocuments: [
+        {
+          ...recentTableDocuments[0],
+          lastOpenedAt: '2026-07-08T10:00:00+08:00',
+          tagIds: [1],
+        },
+      ],
+      onToggleDocumentTag,
+      onRemoveRecentDocuments,
+      onClearRecentDocuments,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑标签 Design Notes.pdf' }));
+    fireEvent.click(screen.getByRole('button', { name: '切换标签 AI' }));
+    expect(onToggleDocumentTag).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '清空历史记录' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认清空' }));
+    expect(onClearRecentDocuments).toHaveBeenCalledTimes(1);
   });
 
   it('marks recent files workspace content for single-column layout', () => {

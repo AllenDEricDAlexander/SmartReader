@@ -71,7 +71,10 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     handleSavePreferences: vi.fn(),
     handleToggleActiveFavorite: vi.fn(),
     handleToggleAnnotationTag: vi.fn(),
+    handleToggleDocumentTag: vi.fn(),
     handleToggleFavorite: vi.fn(),
+    handleRemoveRecentDocuments: vi.fn(),
+    handleClearRecentDocuments: vi.fn(),
     handleViewerWheel: vi.fn(),
     importAnnotationsForDocument: vi.fn(),
     jumpToActiveDocumentPage: vi.fn(),
@@ -159,6 +162,41 @@ describe('ReaderWorkspaceSwitch', () => {
     });
 
     expect(screen.getByRole('button', { name: '按标签筛选 Transformer' })).toBeInTheDocument();
+  });
+
+  it('passes available tags to the recent files workspace', () => {
+    renderSwitch({
+      activeWorkspace: 'home',
+      activeSidebarPage: 'recentFiles',
+      recentDocuments: [
+        {
+          documentKey: 'desktop:/Users/mario/Papers/Recent.pdf',
+          displayName: 'Recent.pdf',
+          path: '/Users/mario/Papers/Recent.pdf',
+          fileSize: 100,
+          modifiedAt: '2026-07-06T10:00:00+08:00',
+          pageCount: 10,
+          lastPage: 4,
+          progress: 0.4,
+          missing: false,
+          lastOpenedAt: '2026-07-06T10:00:00+08:00',
+          tagIds: [1],
+        },
+      ],
+      availableTags: [
+        {
+          id: 1,
+          name: 'Transformer',
+          color: '#2563eb',
+          documentCount: 1,
+          annotationCount: 0,
+          createdAt: '2026-07-01T00:00:00+08:00',
+          updatedAt: '2026-07-01T00:00:00+08:00',
+        },
+      ],
+    });
+
+    expect(screen.getByRole('button', { name: 'Transformer' })).toBeInTheDocument();
   });
 
 });

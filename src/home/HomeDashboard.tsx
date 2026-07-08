@@ -62,6 +62,9 @@ type HomeDashboardProps = {
   canOpenBookmark?(bookmark: PersistedBookmarkRecord): boolean;
   onOpenBookmark?(bookmark: PersistedBookmarkRecord): void | Promise<void>;
   onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
+  onToggleDocumentTag(document: PersistedDocument, tag: Tag, selected: boolean): void | Promise<void>;
+  onRemoveRecentDocuments(documents: PersistedDocument[]): void | Promise<void>;
+  onClearRecentDocuments(): void | Promise<void>;
   canOpenNativePdf?(): boolean;
   onOpenGlobalSearch?(): void;
   onOpenImport?(): void;
@@ -114,6 +117,9 @@ export function HomeDashboard({
   canOpenBookmark = () => true,
   onOpenBookmark = noop,
   onToggleFavorite,
+  onToggleDocumentTag,
+  onRemoveRecentDocuments,
+  onClearRecentDocuments,
   canOpenNativePdf = () => true,
   onOpenGlobalSearch = noop,
   onOpenImport = noop,
@@ -278,15 +284,17 @@ export function HomeDashboard({
       <HomeRecentFilesWorkspace
         documents={recentDocuments}
         favoriteDocumentKeys={favoriteDocumentKeys}
+        tags={availableTags}
         onOpenPdf={handleOpenPdf}
         onReopenDocument={onReopenRecentDocument}
         onToggleFavorite={onToggleFavorite}
+        onToggleDocumentTag={onToggleDocumentTag}
         onLocateFile={() =>
           showNotice('定位文件功能待补充', '定位文件将在最近文件管理功能中补充。')
         }
-        onRemoveRecent={() =>
-          showNotice('移除最近记录功能待补充', '从最近记录移除将在最近文件管理功能中补充。')
-        }
+        onRemoveRecentDocuments={onRemoveRecentDocuments}
+        onClearRecentDocuments={onClearRecentDocuments}
+        onOpenTags={onOpenTags}
       />
     </div>
   );

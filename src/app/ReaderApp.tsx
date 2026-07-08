@@ -364,6 +364,13 @@ export function ReaderApp({
       });
   }, [persistence]);
 
+  const refreshRecentDocuments = useCallback(() => {
+    void persistence
+      .listRecentDocuments()
+      .then(setRecentDocuments)
+      .catch(() => undefined);
+  }, [persistence]);
+
   const openGlobalSearch = useCallback(() => {
     setGlobalSearchOpen(true);
     refreshGlobalSearchCollections();
@@ -494,6 +501,56 @@ export function ReaderApp({
     },
     [documents.sessions, persistence, recentDocuments],
   );
+
+  const handleToggleDocumentTag = useCallback(
+    async (document: PersistedDocument, tag: Tag, selected: boolean) => {
+      try {
+        if (selected) {
+          await persistence.attachDocumentTag(document.documentKey, tag.id);
+        } else {
+          await persistence.detachDocumentTag(document.documentKey, tag.id);
+        }
+
+        refreshRecentDocuments();
+        void persistence.listTags().then((tags) => {
+          tagsMutatedRef.current = true;
+          setAvailableTags(tags);
+        });
+      } catch {
+        return;
+      }
+    },
+    [persistence, refreshRecentDocuments],
+  );
+
+  const handleRemoveRecentDocuments = useCallback(
+    async (documentsToRemove: PersistedDocument[]) => {
+      try {
+        await Promise.all(
+          documentsToRemove.map((document) =>
+            persistence.removeRecentDocument(document.documentKey),
+          ),
+        );
+        const removedKeys = new Set(documentsToRemove.map((document) => document.documentKey));
+
+        setRecentDocuments((current) =>
+          current.filter((document) => !removedKeys.has(document.documentKey)),
+        );
+      } catch {
+        return;
+      }
+    },
+    [persistence],
+  );
+
+  const handleClearRecentDocuments = useCallback(async () => {
+    try {
+      await persistence.clearRecentDocuments();
+      setRecentDocuments([]);
+    } catch {
+      return;
+    }
+  }, [persistence]);
 
   const handleToggleActiveFavorite = useCallback(() => {
     if (!activeSession) {
@@ -856,7 +913,10 @@ export function ReaderApp({
         handleSavePreferences={handleSavePreferences}
         handleToggleActiveFavorite={handleToggleActiveFavorite}
         handleToggleAnnotationTag={handleToggleAnnotationTag}
+        handleToggleDocumentTag={handleToggleDocumentTag}
         handleToggleFavorite={handleToggleFavorite}
+        handleRemoveRecentDocuments={handleRemoveRecentDocuments}
+        handleClearRecentDocuments={handleClearRecentDocuments}
         handleViewerWheel={handleViewerWheel}
         importAnnotationsForDocument={importAnnotationsForDocument}
         jumpToActiveDocumentPage={jumpToActiveDocumentPage}
