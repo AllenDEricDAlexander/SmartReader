@@ -22,6 +22,10 @@ const MIGRATIONS: &[Migration] = &[
         version: "004_tag_activity_log",
         sql: include_str!("migrations/004_tag_activity_log.sql"),
     },
+    Migration {
+        version: "005_recent_file_management",
+        sql: include_str!("migrations/005_recent_file_management.sql"),
+    },
 ];
 const READER_PREFERENCES_KEY: &str = "reader_preferences";
 pub const DEFAULT_CACHE_TOTAL_BYTES: i64 = 5 * 1024 * 1024 * 1024;
@@ -68,6 +72,9 @@ pub struct PersistedDocument {
     pub last_page: i64,
     pub progress: f64,
     pub missing: bool,
+    pub last_opened_at: Option<String>,
+    #[serde(default)]
+    pub tag_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -446,6 +453,21 @@ pub fn list_recent_documents(
 }
 
 #[tauri::command]
+pub fn remove_recent_document(
+    state: State<'_, DatabaseState>,
+    document_key: String,
+) -> Result<(), DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    remove_recent_document_tx(&connection, &document_key)
+}
+
+#[tauri::command]
+pub fn clear_recent_documents(state: State<'_, DatabaseState>) -> Result<(), DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    clear_recent_documents_tx(&connection)
+}
+
+#[tauri::command]
 pub fn save_reader_session(
     state: State<'_, DatabaseState>,
     session: PersistedReaderSession,
@@ -677,7 +699,8 @@ pub fn upsert_document(
             last_opened_at = excluded.last_opened_at,
             last_page = excluded.last_page,
             progress = excluded.progress,
-            missing = excluded.missing
+            missing = excluded.missing,
+            recent_hidden_at = NULL
         "#,
         params![
             document.document_key,
@@ -700,15 +723,19 @@ pub fn list_documents(connection: &Connection) -> Result<Vec<PersistedDocument>,
     let mut statement = connection.prepare(
         r#"
         SELECT document_key, path, display_name, file_size, modified_at, page_count,
-               last_page, progress, missing
+               last_page, progress, missing, last_opened_at
         FROM documents
+        WHERE recent_hidden_at IS NULL
         ORDER BY last_opened_at DESC
         "#,
     )?;
 
     let rows = statement.query_map([], |row| {
+        let document_key: String = row.get(0)?;
+        let tag_ids = list_document_tag_ids_tx(connection, &document_key)?;
+
         Ok(PersistedDocument {
-            document_key: row.get(0)?,
+            document_key,
             path: row.get(1)?,
             display_name: row.get(2)?,
             file_size: row.get(3)?,
@@ -717,10 +744,33 @@ pub fn list_documents(connection: &Connection) -> Result<Vec<PersistedDocument>,
             last_page: row.get(6)?,
             progress: row.get(7)?,
             missing: row.get::<_, i64>(8)? == 1,
+            last_opened_at: row.get(9)?,
+            tag_ids,
         })
     })?;
 
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+pub fn remove_recent_document_tx(
+    connection: &Connection,
+    document_key: &str,
+) -> Result<(), DbError> {
+    connection.execute(
+        "UPDATE documents SET recent_hidden_at = ?1 WHERE document_key = ?2",
+        params![now_rfc3339(), document_key],
+    )?;
+
+    Ok(())
+}
+
+pub fn clear_recent_documents_tx(connection: &Connection) -> Result<(), DbError> {
+    connection.execute(
+        "UPDATE documents SET recent_hidden_at = ?1 WHERE recent_hidden_at IS NULL",
+        [now_rfc3339()],
+    )?;
+
+    Ok(())
 }
 
 pub fn set_document_favorite_tx(
@@ -1572,7 +1622,11 @@ fn build_folder_distribution(documents: &[TagDashboardDocument]) -> Vec<TagFolde
         .map(|(index, (folder, count))| TagFolderDistribution {
             folder,
             count,
-            percent: if total == 0 { 0 } else { (count * 100 / total).max(1) },
+            percent: if total == 0 {
+                0
+            } else {
+                (count * 100 / total).max(1)
+            },
             color: colors[index % colors.len()].to_string(),
         })
         .collect()
@@ -1721,9 +1775,8 @@ fn list_document_tag_ids_tx(
     connection: &Connection,
     document_key: &str,
 ) -> Result<Vec<i64>, rusqlite::Error> {
-    let mut statement = connection.prepare(
-        "SELECT tag_id FROM document_tags WHERE document_key = ?1 ORDER BY tag_id ASC",
-    )?;
+    let mut statement = connection
+        .prepare("SELECT tag_id FROM document_tags WHERE document_key = ?1 ORDER BY tag_id ASC")?;
     let rows = statement.query_map([document_key], |row| row.get(0))?;
 
     rows.collect::<Result<Vec<_>, _>>()
@@ -1779,10 +1832,7 @@ pub fn detach_annotation_tag_tx(
     Ok(())
 }
 
-fn insert_tag_activity_tx(
-    connection: &Connection,
-    input: TagActivityInput,
-) -> Result<(), DbError> {
+fn insert_tag_activity_tx(connection: &Connection, input: TagActivityInput) -> Result<(), DbError> {
     connection.execute(
         r#"
         INSERT INTO tag_activity_log (
@@ -2065,6 +2115,8 @@ mod tests {
                 last_page: 1,
                 progress: 0.2,
                 missing: false,
+                last_opened_at: None,
+                tag_ids: Vec::new(),
             },
         )
         .expect("save document");
@@ -2165,12 +2217,112 @@ mod tests {
             last_page: 4,
             progress: 0.2,
             missing: false,
+            last_opened_at: None,
+            tag_ids: Vec::new(),
         };
 
         upsert_document(&connection, &document).expect("upsert");
         let documents = list_documents(&connection).expect("list");
 
-        assert_eq!(documents, vec![document]);
+        assert_eq!(documents.len(), 1);
+        assert_eq!(documents[0].document_key, document.document_key);
+        assert_eq!(documents[0].display_name, document.display_name);
+        assert!(documents[0].last_opened_at.is_some());
+        assert!(documents[0].tag_ids.is_empty());
+    }
+
+    fn test_document(key: &str, name: &str) -> PersistedDocument {
+        PersistedDocument {
+            document_key: key.to_string(),
+            path: Some(format!("/tmp/{name}")),
+            display_name: name.to_string(),
+            file_size: Some(100),
+            modified_at: Some("2026-07-08T00:00:00Z".to_string()),
+            page_count: Some(20),
+            last_page: 4,
+            progress: 0.2,
+            missing: false,
+            last_opened_at: None,
+            tag_ids: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn lists_recent_documents_with_last_opened_at_and_tag_ids() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        apply_migrations(&connection).expect("schema applies");
+
+        let document = test_document("desktop:/tmp/tagged.pdf", "tagged.pdf");
+        upsert_document(&connection, &document).expect("upsert document");
+        let tag = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "AI".to_string(),
+                color: "#2563eb".to_string(),
+            },
+        )
+        .expect("create tag");
+        attach_document_tag_tx(&connection, "desktop:/tmp/tagged.pdf", tag.id)
+            .expect("attach document tag");
+
+        let documents = list_documents(&connection).expect("list documents");
+
+        assert_eq!(documents.len(), 1);
+        assert_eq!(documents[0].document_key, "desktop:/tmp/tagged.pdf");
+        assert!(documents[0].last_opened_at.is_some());
+        assert_eq!(documents[0].tag_ids, vec![tag.id]);
+    }
+
+    #[test]
+    fn hides_single_recent_document_without_deleting_related_data() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        apply_migrations(&connection).expect("schema applies");
+
+        upsert_document(
+            &connection,
+            &test_document("desktop:/tmp/hidden.pdf", "hidden.pdf"),
+        )
+        .expect("upsert document");
+        let tag = create_tag_tx(
+            &connection,
+            CreateTagInput {
+                name: "Research".to_string(),
+                color: "#10b981".to_string(),
+            },
+        )
+        .expect("create tag");
+        attach_document_tag_tx(&connection, "desktop:/tmp/hidden.pdf", tag.id)
+            .expect("attach document tag");
+
+        remove_recent_document_tx(&connection, "desktop:/tmp/hidden.pdf")
+            .expect("hide recent document");
+
+        assert!(list_documents(&connection).expect("list").is_empty());
+        assert_eq!(
+            list_document_tag_ids_tx(&connection, "desktop:/tmp/hidden.pdf").expect("tag ids"),
+            vec![tag.id],
+        );
+    }
+
+    #[test]
+    fn clear_recent_documents_hides_all_visible_recents_and_reopen_restores_one() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        apply_migrations(&connection).expect("schema applies");
+
+        let first = test_document("desktop:/tmp/first.pdf", "first.pdf");
+        let second = test_document("desktop:/tmp/second.pdf", "second.pdf");
+        upsert_document(&connection, &first).expect("upsert first");
+        upsert_document(&connection, &second).expect("upsert second");
+
+        clear_recent_documents_tx(&connection).expect("clear recents");
+
+        assert!(list_documents(&connection).expect("list hidden").is_empty());
+
+        upsert_document(&connection, &first).expect("reopen first");
+        let documents = list_documents(&connection).expect("list restored");
+
+        assert_eq!(documents.len(), 1);
+        assert_eq!(documents[0].document_key, "desktop:/tmp/first.pdf");
     }
 
     #[test]
@@ -2188,6 +2340,8 @@ mod tests {
             last_page: 4,
             progress: 0.2,
             missing: false,
+            last_opened_at: None,
+            tag_ids: Vec::new(),
         };
         upsert_document(&connection, &document).expect("document");
 
@@ -2229,6 +2383,8 @@ mod tests {
             last_page: 4,
             progress: 0.2,
             missing: false,
+            last_opened_at: None,
+            tag_ids: Vec::new(),
         };
         upsert_document(&connection, &document).expect("document");
 
@@ -2277,6 +2433,8 @@ mod tests {
             last_page: 7,
             progress: 0.35,
             missing: false,
+            last_opened_at: None,
+            tag_ids: Vec::new(),
         };
         let second_document = PersistedDocument {
             document_key: "desktop:/tmp/newer.pdf".to_string(),
@@ -2288,6 +2446,8 @@ mod tests {
             last_page: 50,
             progress: 1.0,
             missing: false,
+            last_opened_at: None,
+            tag_ids: Vec::new(),
         };
 
         upsert_document(&connection, &first_document).expect("first document");
@@ -2304,8 +2464,10 @@ mod tests {
                 params!["2026-07-02T00:00:00Z", &second_document.document_key],
             )
             .expect("set second open time");
-        set_document_favorite_tx(&connection, &first_document.document_key, true).expect("favorite first");
-        set_document_favorite_tx(&connection, &second_document.document_key, true).expect("favorite second");
+        set_document_favorite_tx(&connection, &first_document.document_key, true)
+            .expect("favorite first");
+        set_document_favorite_tx(&connection, &second_document.document_key, true)
+            .expect("favorite second");
         let tag = create_tag_tx(
             &connection,
             CreateTagInput {
@@ -2357,6 +2519,8 @@ mod tests {
             last_page: 1,
             progress: 0.0,
             missing: false,
+            last_opened_at: None,
+            tag_ids: Vec::new(),
         };
         upsert_document(&connection, &document).expect("document");
         upsert_bookmark(
@@ -2398,6 +2562,8 @@ mod tests {
             last_page: 1,
             progress: 0.0,
             missing: false,
+            last_opened_at: None,
+            tag_ids: Vec::new(),
         };
         upsert_document(&connection, &document).expect("document");
         let tag = create_tag_tx(
@@ -2459,6 +2625,8 @@ mod tests {
             last_page: 4,
             progress: 0.2,
             missing: false,
+            last_opened_at: None,
+            tag_ids: Vec::new(),
         };
         upsert_document(&connection, &document).expect("document");
         let annotation = upsert_annotation(
@@ -2533,6 +2701,8 @@ mod tests {
             last_page: 4,
             progress: 0.2,
             missing: false,
+            last_opened_at: None,
+            tag_ids: Vec::new(),
         };
         upsert_document(&connection, &document).expect("document");
         let annotation = upsert_annotation(
@@ -2583,6 +2753,8 @@ mod tests {
             last_page: 4,
             progress: 0.2,
             missing: false,
+            last_opened_at: None,
+            tag_ids: Vec::new(),
         };
         upsert_document(&connection, &document).expect("document");
         let first = create_tag_tx(
@@ -2661,6 +2833,8 @@ mod tests {
             last_page: 4,
             progress: 0.2,
             missing: false,
+            last_opened_at: None,
+            tag_ids: Vec::new(),
         };
         upsert_document(&connection, &document).expect("document");
         let tag = create_tag_tx(
@@ -2773,6 +2947,8 @@ mod tests {
             last_page: 4,
             progress: 0.2,
             missing: false,
+            last_opened_at: None,
+            tag_ids: Vec::new(),
         };
         upsert_document(&connection, &document).expect("document");
         let annotation = upsert_annotation(

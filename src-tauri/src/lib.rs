@@ -35,6 +35,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             db::save_document,
             db::list_recent_documents,
+            db::remove_recent_document,
+            db::clear_recent_documents,
             db::save_reader_session,
             db::load_reader_session,
             db::save_preferences,
