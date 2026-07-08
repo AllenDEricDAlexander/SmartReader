@@ -41,7 +41,7 @@ const dashboard: TagDashboard = {
   recommendations: [],
 };
 
-function renderTagManager() {
+function renderTagManager({ onCloseDetail = vi.fn() } = {}) {
   const persistence = {
     loadTagDashboard: vi.fn().mockResolvedValue(dashboard),
     createTag: vi.fn().mockResolvedValue({
@@ -62,12 +62,12 @@ function renderTagManager() {
     <TagManager
       persistence={persistence}
       onTagsChange={vi.fn()}
-      onClose={vi.fn()}
+      onCloseDetail={onCloseDetail}
       onOpenDocument={vi.fn()}
     />,
   );
 
-  return persistence;
+  return { persistence, onCloseDetail };
 }
 
 describe('TagManager', () => {
@@ -79,6 +79,33 @@ describe('TagManager', () => {
     expect(screen.getByText('标签云')).toBeInTheDocument();
     expect(screen.getByText('标签详情')).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText('深度学习').length).toBeGreaterThan(0));
+  });
+
+  it('closes only the selected detail panel content', async () => {
+    const { onCloseDetail } = renderTagManager();
+
+    await screen.findByRole('heading', { name: '标签管理' });
+    expect(
+      within(screen.getByRole('complementary', { name: '标签详情' })).getByText(
+        '深度学习 相关文献与批注',
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭标签详情' }));
+
+    expect(onCloseDetail).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('heading', { name: '标签管理' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '创建标签' })).toBeInTheDocument();
+    expect(screen.getByText('暂无标签详情')).toBeInTheDocument();
+
+    const table = screen.getByRole('region', { name: '全部标签' });
+    fireEvent.click(within(table).getByRole('button', { name: '深度学习' }));
+
+    expect(
+      within(screen.getByRole('complementary', { name: '标签详情' })).getByText(
+        '深度学习 相关文献与批注',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('filters tags from the toolbar', async () => {
@@ -95,7 +122,7 @@ describe('TagManager', () => {
   });
 
   it('creates a tag and refreshes the dashboard', async () => {
-    const persistence = renderTagManager();
+    const { persistence } = renderTagManager();
 
     await screen.findByRole('heading', { name: '标签管理' });
     fireEvent.click(screen.getByRole('button', { name: '创建标签' }));

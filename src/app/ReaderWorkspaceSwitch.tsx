@@ -251,7 +251,7 @@ export function ReaderWorkspaceSwitch({
         <TagManager
           persistence={persistence}
           onTagsChange={onTagsChange}
-          onClose={() => setWorkspaceOverride(null)}
+          onCloseDetail={() => undefined}
           onOpenDocument={(documentKey, documentPath, page, missing) =>
             void openRecordPage(documentKey, documentPath, page, missing)
           }

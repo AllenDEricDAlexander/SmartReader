@@ -22,7 +22,7 @@ type TagManagerProps = {
     'loadTagDashboard' | 'createTag' | 'renameTag' | 'deleteTag' | 'mergeTags'
   >;
   onTagsChange: Dispatch<SetStateAction<Tag[]>>;
-  onClose(): void;
+  onCloseDetail?(): void;
   onOpenDocument(
     documentKey: string,
     documentPath: string | null,
@@ -31,7 +31,12 @@ type TagManagerProps = {
   ): void;
 };
 
-export function TagManager({ persistence, onTagsChange, onClose, onOpenDocument }: TagManagerProps) {
+export function TagManager({
+  persistence,
+  onTagsChange,
+  onCloseDetail,
+  onOpenDocument,
+}: TagManagerProps) {
   const [dashboard, setDashboard] = useState<TagDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,9 +80,9 @@ export function TagManager({ persistence, onTagsChange, onClose, onOpenDocument 
 
   const pageRows = paginateTagRows(visibleRows, page, pageSize);
   const selectedDetail =
-    dashboard?.details.find((detail) => detail.tag.id === selectedTagId) ??
-    dashboard?.details[0] ??
-    null;
+    selectedTagId === null
+      ? null
+      : dashboard?.details.find((detail) => detail.tag.id === selectedTagId) ?? null;
 
   async function runMutation(action: () => Promise<void>) {
     setSaving(true);
@@ -99,6 +104,11 @@ export function TagManager({ persistence, onTagsChange, onClose, onOpenDocument 
     setDialogTag(tag);
     setMutationError(null);
   }
+
+  const closeDetail = useCallback(() => {
+    setSelectedTagId(null);
+    onCloseDetail?.();
+  }, [onCloseDetail]);
 
   return (
     <section className="tag-dashboard-workspace" aria-label="标签管理工作区">
@@ -180,7 +190,7 @@ export function TagManager({ persistence, onTagsChange, onClose, onOpenDocument 
       <TagDetailsPanel
         detail={selectedDetail}
         recommendations={dashboard?.recommendations ?? []}
-        onClose={onClose}
+        onClose={closeDetail}
         onEdit={() => openDialog('edit', selectedDetail?.tag ?? null)}
         onOpenDocument={(documentKey, path, missing) => onOpenDocument(documentKey, path, 1, missing)}
       />
