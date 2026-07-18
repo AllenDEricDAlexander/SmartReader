@@ -17,6 +17,8 @@ type ReaderLeftPanelProps = {
   onJumpToPage(page: number): void;
   onReopenRecentDocument(document: PersistedDocument): void | Promise<void>;
   onAddBookmark(): void | Promise<void>;
+  onDeleteBookmark(bookmark: Bookmark): void | Promise<void>;
+  onRenameBookmark(bookmark: Bookmark, title: string): void | Promise<void>;
   onAddNote(): void | Promise<void>;
   onSelectAnnotation(annotation: ReaderAnnotation): void;
   onDeleteAnnotation(annotationId: number): void;
@@ -37,6 +39,8 @@ export function ReaderLeftPanel({
   onJumpToPage,
   onReopenRecentDocument,
   onAddBookmark,
+  onDeleteBookmark,
+  onRenameBookmark,
   onAddNote,
   onSelectAnnotation,
   onDeleteAnnotation,
@@ -114,6 +118,8 @@ export function ReaderLeftPanel({
         onSelectAnnotation={onSelectAnnotation}
         onJumpToPage={onJumpToPage}
         onAddBookmark={onAddBookmark}
+        onDeleteBookmark={onDeleteBookmark}
+        onRenameBookmark={onRenameBookmark}
         onAddNote={onAddNote}
         onDeleteAnnotation={onDeleteAnnotation}
         onImportAnnotations={onImportAnnotations}

@@ -1,5 +1,5 @@
 import type { Dispatch, ReactNode, SetStateAction, WheelEvent } from 'react';
-import type { ReaderAnnotation } from '../annotations/annotationModels';
+import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
 import type { DocumentSession, DocumentState } from '../documents/documentModels';
 import type { PersistedBookmark, PersistedDocument } from '../persistence/persistenceApi';
 import type { Tag } from '../tags/tagModels';
@@ -31,6 +31,7 @@ type ReaderWorkspaceViewProps = {
   addPageNote(): void;
   clearSearch(): void;
   closeActiveTab(): void;
+  deleteBookmark(bookmark: Bookmark): void | Promise<void>;
   deleteAnnotationForDocument(documentKey: string, annotationId: number): void;
   handleBrowserFileChange(event: React.ChangeEvent<HTMLInputElement>): void;
   handleSaveAnnotationNote(annotation: ReaderAnnotation, text: string): void | Promise<void>;
@@ -42,6 +43,7 @@ type ReaderWorkspaceViewProps = {
   jumpToPage(page: number): void;
   openPdfAndIgnoreResult(): void;
   openSettingsWorkspace(initialSection?: SettingsSection): void;
+  renameBookmark(bookmark: Bookmark, title: string): void | Promise<void>;
   reopenRecentDocument(document: PersistedDocument): Promise<boolean>;
   runSearch(keyword: string): void;
   selectReaderSession(sessionId: string): void;
@@ -72,6 +74,7 @@ export function ReaderWorkspaceView({
   addPageNote,
   clearSearch,
   closeActiveTab,
+  deleteBookmark,
   deleteAnnotationForDocument,
   handleBrowserFileChange,
   handleSaveAnnotationNote,
@@ -83,6 +86,7 @@ export function ReaderWorkspaceView({
   jumpToPage,
   openPdfAndIgnoreResult,
   openSettingsWorkspace,
+  renameBookmark,
   reopenRecentDocument,
   runSearch,
   selectReaderSession,
@@ -142,6 +146,8 @@ export function ReaderWorkspaceView({
           onJumpToPage={jumpToActiveDocumentPage}
           onReopenRecentDocument={(document) => void reopenRecentDocument(document)}
           onAddBookmark={addBookmarkForActivePage}
+          onDeleteBookmark={deleteBookmark}
+          onRenameBookmark={renameBookmark}
           onAddNote={addPageNote}
           onSelectAnnotation={(annotation) => setSelectedAnnotationId(annotation.id)}
           onDeleteAnnotation={(annotationId) =>

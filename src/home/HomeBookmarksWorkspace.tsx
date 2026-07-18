@@ -1,18 +1,23 @@
 import { BookMarked } from 'lucide-react';
 import type { PersistedBookmarkRecord } from '../persistence/persistenceApi';
+import { BookmarkActions } from '../reader/annotations/BookmarkActions';
 
 type HomeBookmarksWorkspaceProps = {
   bookmarks: PersistedBookmarkRecord[];
   error: string | null;
   canOpenBookmark(bookmark: PersistedBookmarkRecord): boolean;
+  onDeleteBookmark(bookmark: PersistedBookmarkRecord): void | Promise<void>;
   onOpenBookmark(bookmark: PersistedBookmarkRecord): void;
+  onRenameBookmark(bookmark: PersistedBookmarkRecord, title: string): void | Promise<void>;
 };
 
 export function HomeBookmarksWorkspace({
   bookmarks,
   error,
   canOpenBookmark,
+  onDeleteBookmark,
   onOpenBookmark,
+  onRenameBookmark,
 }: HomeBookmarksWorkspaceProps) {
   return (
     <section className="home-panel home-bookmarks-workspace" aria-label="书签管理">
@@ -38,18 +43,27 @@ export function HomeBookmarksWorkspace({
               const canOpen = canOpenBookmark(bookmark);
 
               return (
-                <button
+                <article
                   key={bookmark.id ?? `${bookmark.documentKey}:${bookmark.page}:${bookmark.title}`}
-                  type="button"
-                  className="workspace-list-row"
-                  disabled={!canOpen}
-                  onClick={() => onOpenBookmark(bookmark)}
+                  className="workspace-list-item"
                 >
-                  <strong>{bookmark.title}</strong>
-                  <span>
-                    {bookmark.documentDisplayName ?? bookmark.documentKey} · 第 {bookmark.page} 页
-                  </span>
-                </button>
+                  <button
+                    type="button"
+                    className="workspace-list-row"
+                    disabled={!canOpen}
+                    onClick={() => onOpenBookmark(bookmark)}
+                  >
+                    <strong>{bookmark.title}</strong>
+                    <span>
+                      {bookmark.documentDisplayName ?? bookmark.documentKey} · 第 {bookmark.page} 页
+                    </span>
+                  </button>
+                  <BookmarkActions
+                    bookmark={bookmark}
+                    onDelete={onDeleteBookmark}
+                    onRename={onRenameBookmark}
+                  />
+                </article>
               );
             })}
           </div>

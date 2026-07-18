@@ -60,7 +60,9 @@ type HomeDashboardProps = {
   onReopenRecentDocument(document: PersistedDocument): void | Promise<void>;
   onOpenFavoriteDocument?(document: FavoriteDocument): boolean | void | Promise<boolean | void>;
   canOpenBookmark?(bookmark: PersistedBookmarkRecord): boolean;
+  onDeleteBookmark?(bookmark: PersistedBookmarkRecord): void | Promise<void>;
   onOpenBookmark?(bookmark: PersistedBookmarkRecord): void | Promise<void>;
+  onRenameBookmark?(bookmark: PersistedBookmarkRecord, title: string): void | Promise<void>;
   onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
   onToggleDocumentTag(document: PersistedDocument, tag: Tag, selected: boolean): void | Promise<void>;
   onRemoveRecentDocuments(documents: PersistedDocument[]): void | Promise<void>;
@@ -115,7 +117,9 @@ export function HomeDashboard({
   onReopenRecentDocument,
   onOpenFavoriteDocument,
   canOpenBookmark = () => true,
+  onDeleteBookmark = noop,
   onOpenBookmark = noop,
+  onRenameBookmark = noop,
   onToggleFavorite,
   onToggleDocumentTag,
   onRemoveRecentDocuments,
@@ -321,7 +325,9 @@ export function HomeDashboard({
         bookmarks={bookmarks}
         error={bookmarkError}
         canOpenBookmark={canOpenBookmark}
+        onDeleteBookmark={onDeleteBookmark}
         onOpenBookmark={onOpenBookmark}
+        onRenameBookmark={onRenameBookmark}
       />
     </div>
   );

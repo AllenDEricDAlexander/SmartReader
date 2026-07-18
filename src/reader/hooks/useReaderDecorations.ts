@@ -5,6 +5,7 @@ import {
   addOrReplaceBookmark,
   importAnnotations,
   removeAnnotation,
+  removeBookmark,
   setAnnotationTag,
 } from '../../annotations/annotationStore';
 import type { DocumentSession } from '../../documents/documentModels';
@@ -77,6 +78,61 @@ export function useReaderDecorations({
       ),
     }));
   }, [activeSession, persistence]);
+
+  const renameBookmarkForDocument = useCallback(
+    async (documentKey: string, bookmark: Bookmark, title: string) => {
+      if (bookmark.id === null) {
+        return undefined;
+      }
+
+      const normalizedTitle = title.trim();
+
+      if (!normalizedTitle || normalizedTitle === bookmark.title) {
+        return bookmark;
+      }
+
+      const saved = await persistence.saveBookmark({
+        ...bookmark,
+        title: normalizedTitle,
+        updatedAt: new Date().toISOString(),
+      });
+
+      setBookmarksByDocument((current) => {
+        const bookmarks = current[documentKey];
+
+        if (!bookmarks) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [documentKey]: addOrReplaceBookmark(bookmarks, saved),
+        };
+      });
+
+      return saved;
+    },
+    [persistence],
+  );
+
+  const deleteBookmarkForDocument = useCallback(
+    async (documentKey: string, bookmarkId: number) => {
+      await persistence.deleteBookmark(bookmarkId);
+      setBookmarksByDocument((current) => {
+        const bookmarks = current[documentKey];
+
+        if (!bookmarks) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [documentKey]: removeBookmark(bookmarks, bookmarkId),
+        };
+      });
+    },
+    [persistence],
+  );
 
   const saveAnnotationForActiveDocument = useCallback(
     async (input: AnnotationInput) => {
@@ -218,9 +274,11 @@ export function useReaderDecorations({
     bookmarksByDocument,
     addBookmarkForActivePage,
     addPageNote,
+    deleteBookmarkForDocument,
     deleteAnnotationForDocument,
     importAnnotationsForDocument,
     loadDocumentDecorations,
+    renameBookmarkForDocument,
     saveAnnotationForActiveDocument,
     toggleAnnotationTagForDocument,
     updateAnnotationForDocument,

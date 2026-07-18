@@ -2352,7 +2352,9 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '书签' }));
     expect(await screen.findByText('关键书签')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /关键书签/ }));
+    fireEvent.click(
+      screen.getByRole('button', { name: /关键书签.*records\.pdf.*第 6 页/ }),
+    );
 
     expect(await screen.findByRole('tab', { name: 'records.pdf' })).toBeInTheDocument();
     await waitFor(() => {
@@ -2408,7 +2410,11 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '书签' }));
     expect(await screen.findByRole('region', { name: '书签管理' })).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: /失效书签/ }));
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /失效书签.*missing-bookmark\.pdf.*第 6 页/,
+      }),
+    );
 
     await waitFor(() => {
       expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/missing-bookmark.pdf');

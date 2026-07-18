@@ -1893,6 +1893,84 @@ select {
   gap: 8px;
 }
 
+.bookmark-card,
+.workspace-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.bookmark-card {
+  padding: 6px;
+  border: 1px solid var(--sr-border);
+  border-radius: var(--sr-radius);
+  background: var(--sr-surface-muted);
+}
+
+.bookmark-card .bookmark-row {
+  min-width: 0;
+  padding: 6px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.bookmark-row-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.bookmark-row-copy strong,
+.bookmark-row-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark-row-copy span {
+  color: var(--sr-text-muted);
+  font-size: 12px;
+}
+
+.bookmark-actions {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.bookmark-actions > button {
+  min-width: 30px;
+  min-height: 28px;
+  padding: 4px 7px;
+}
+
+.bookmark-rename {
+  min-width: 0;
+  flex: 1 1 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+}
+
+.bookmark-rename input {
+  min-width: 0;
+  height: 30px;
+  padding: 5px 8px;
+  border: 1px solid var(--sr-border-strong);
+  border-radius: 6px;
+  background: var(--sr-surface);
+  color: var(--sr-text);
+}
+
+.bookmark-action-error {
+  flex: 1 1 100%;
+  color: var(--sr-danger);
+  font-size: 12px;
+  text-align: right;
+}
+
 .search-result-card {
   width: 100%;
   display: grid;

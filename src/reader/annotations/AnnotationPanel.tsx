@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import type { Bookmark, ReaderAnnotation } from '../../annotations/annotationModels';
 import { AnnotationList } from './AnnotationList';
 import { AnnotationToolbar } from './AnnotationToolbar';
+import { BookmarkActions } from './BookmarkActions';
 
 type AnnotationPanelProps = {
   bookmarks: Bookmark[];
@@ -11,6 +12,8 @@ type AnnotationPanelProps = {
   onSelectAnnotation(annotation: ReaderAnnotation): void;
   onJumpToPage(page: number): void;
   onAddBookmark(): void | Promise<void>;
+  onDeleteBookmark(bookmark: Bookmark): void | Promise<void>;
+  onRenameBookmark(bookmark: Bookmark, title: string): void | Promise<void>;
   onAddNote(): void | Promise<void>;
   onDeleteAnnotation(annotationId: number): void;
   onImportAnnotations(json: string): void;
@@ -23,6 +26,8 @@ export function AnnotationPanel({
   onSelectAnnotation,
   onJumpToPage,
   onAddBookmark,
+  onDeleteBookmark,
+  onRenameBookmark,
   onAddNote,
   onDeleteAnnotation,
   onImportAnnotations,
@@ -75,16 +80,25 @@ export function AnnotationPanel({
         <div className="bookmark-list" role="list">
           {bookmarks.length > 0 ? (
             bookmarks.map((bookmark) => (
-              <button
+              <article
                 key={bookmark.id ?? `${bookmark.page}-${bookmark.title}`}
-                type="button"
-                className="side-list-item"
-                onClick={() => onJumpToPage(bookmark.page)}
+                className="bookmark-card"
                 role="listitem"
               >
-                <BookMarked size={14} />
-                {bookmark.title}
-              </button>
+                <button
+                  type="button"
+                  className="side-list-item bookmark-row"
+                  onClick={() => onJumpToPage(bookmark.page)}
+                >
+                  <BookMarked size={14} />
+                  {bookmark.title}
+                </button>
+                <BookmarkActions
+                  bookmark={bookmark}
+                  onDelete={onDeleteBookmark}
+                  onRename={onRenameBookmark}
+                />
+              </article>
             ))
           ) : (
             <p className="muted-copy">No bookmarks yet</p>

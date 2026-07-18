@@ -522,22 +522,26 @@ describe('HomeDashboard', () => {
     expect(screen.getByTestId('favorite-workspace-document-name')).toHaveTextContent('Favorite.pdf');
   });
 
-  it('renders bookmarks inside the home dashboard frame', () => {
+  it('renders bookmark actions inside the home dashboard frame', async () => {
+    const onDeleteBookmark = vi.fn().mockResolvedValue(undefined);
+    const onRenameBookmark = vi.fn().mockResolvedValue(undefined);
+    const bookmark = {
+      id: 7,
+      documentKey: 'desktop:/Users/mario/Papers/Book.pdf',
+      documentDisplayName: 'Book.pdf',
+      documentPath: '/Users/mario/Papers/Book.pdf',
+      documentMissing: false,
+      page: 12,
+      title: '关键段落',
+      createdAt: '2026-07-07T10:00:00+08:00',
+      updatedAt: '2026-07-07T10:00:00+08:00',
+    };
+
     renderDashboard({
       activeSidebarPage: 'bookmarks',
-      bookmarks: [
-        {
-          id: 7,
-          documentKey: 'desktop:/Users/mario/Papers/Book.pdf',
-          documentDisplayName: 'Book.pdf',
-          documentPath: '/Users/mario/Papers/Book.pdf',
-          documentMissing: false,
-          page: 12,
-          title: '关键段落',
-          createdAt: '2026-07-07T10:00:00+08:00',
-          updatedAt: '2026-07-07T10:00:00+08:00',
-        },
-      ],
+      bookmarks: [bookmark],
+      onDeleteBookmark,
+      onRenameBookmark,
     });
 
     expect(screen.getByRole('button', { name: '书签管理' })).toHaveAttribute(
@@ -545,8 +549,25 @@ describe('HomeDashboard', () => {
       'page',
     );
     expect(screen.getByRole('region', { name: '书签管理' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /关键段落/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /关键段落.*Book\.pdf.*第 12 页/ }),
+    ).toBeInTheDocument();
     expect(screen.queryByLabelText('书签管理工作区')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '重命名书签 关键段落' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '重命名书签 关键段落' }), {
+      target: { value: '核心结论' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存书签名称 关键段落' }));
+
+    await waitFor(() => {
+      expect(onRenameBookmark).toHaveBeenCalledWith(bookmark, '核心结论');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '删除书签 关键段落' }));
+    await waitFor(() => {
+      expect(onDeleteBookmark).toHaveBeenCalledWith(bookmark);
+    });
   });
 
   it('renders tag management inside the home dashboard frame', async () => {

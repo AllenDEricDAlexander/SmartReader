@@ -1,5 +1,5 @@
 import type { ChangeEvent, Dispatch, DragEvent, ReactNode, SetStateAction, WheelEvent } from 'react';
-import type { ReaderAnnotation } from '../annotations/annotationModels';
+import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
 import type { DocumentSession, DocumentState } from '../documents/documentModels';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import { HomeDashboard } from '../home/HomeDashboard';
@@ -65,6 +65,7 @@ type ReaderWorkspaceSwitchProps = {
   clearSearch(): void;
   closeActiveTab(): void;
   closeToolWorkspace(): void;
+  deleteBookmark(bookmark: Bookmark): void | Promise<void>;
   deleteAnnotationForDocument(documentKey: string, annotationId: number): void;
   handleBrowserFileChange(event: ChangeEvent<HTMLInputElement>): void;
   handleImportBrowserFileChange(event: ChangeEvent<HTMLInputElement>): void;
@@ -97,6 +98,7 @@ type ReaderWorkspaceSwitchProps = {
   ): Promise<void>;
   openSettingsWorkspace(initialSection?: SettingsSection): void;
   openShortcutWorkspace(workspace: AppWorkspace): void;
+  renameBookmark(bookmark: Bookmark, title: string): void | Promise<void>;
   reopenRecentDocument(document: PersistedDocument): Promise<boolean>;
   runSearch(keyword: string): void;
   selectReaderSession(sessionId: string): void;
@@ -146,6 +148,7 @@ export function ReaderWorkspaceSwitch({
   clearSearch,
   closeActiveTab,
   closeToolWorkspace,
+  deleteBookmark,
   deleteAnnotationForDocument,
   handleBrowserFileChange,
   handleImportBrowserFileChange,
@@ -173,6 +176,7 @@ export function ReaderWorkspaceSwitch({
   openRecordPage,
   openSettingsWorkspace,
   openShortcutWorkspace,
+  renameBookmark,
   reopenRecentDocument,
   runSearch,
   selectReaderSession,
@@ -243,6 +247,7 @@ export function ReaderWorkspaceSwitch({
             canOpenRecordPage(bookmark.documentKey, bookmark.documentPath, bookmark.documentMissing)
           }
           onClose={closeToolWorkspace}
+          onDeleteBookmark={deleteBookmark}
           onOpenBookmark={(bookmark) =>
             void openRecordPage(
               bookmark.documentKey,
@@ -251,6 +256,7 @@ export function ReaderWorkspaceSwitch({
               bookmark.documentMissing,
             )
           }
+          onRenameBookmark={renameBookmark}
         />
       ) : null}
       {activeWorkspace === 'tags' ? (
@@ -283,6 +289,7 @@ export function ReaderWorkspaceSwitch({
           addPageNote={addPageNote}
           clearSearch={clearSearch}
           closeActiveTab={closeActiveTab}
+          deleteBookmark={deleteBookmark}
           deleteAnnotationForDocument={deleteAnnotationForDocument}
           handleBrowserFileChange={handleBrowserFileChange}
           handleSaveAnnotationNote={handleSaveAnnotationNote}
@@ -294,6 +301,7 @@ export function ReaderWorkspaceSwitch({
           jumpToPage={jumpToPage}
           openPdfAndIgnoreResult={openPdfAndIgnoreResult}
           openSettingsWorkspace={openSettingsWorkspace}
+          renameBookmark={renameBookmark}
           reopenRecentDocument={reopenRecentDocument}
           runSearch={runSearch}
           selectReaderSession={selectReaderSession}
@@ -333,6 +341,7 @@ export function ReaderWorkspaceSwitch({
           canOpenBookmark={(bookmark) =>
             canOpenRecordPage(bookmark.documentKey, bookmark.documentPath, bookmark.documentMissing)
           }
+          onDeleteBookmark={deleteBookmark}
           onOpenBookmark={(bookmark) =>
             void openRecordPage(
               bookmark.documentKey,
@@ -341,6 +350,7 @@ export function ReaderWorkspaceSwitch({
               bookmark.documentMissing,
             )
           }
+          onRenameBookmark={renameBookmark}
           onToggleFavorite={handleToggleFavorite}
           onToggleDocumentTag={handleToggleDocumentTag}
           onRemoveRecentDocuments={handleRemoveRecentDocuments}

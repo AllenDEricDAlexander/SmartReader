@@ -28,7 +28,7 @@ import { createDebouncedFlush } from '../persistence/debounce';
 import { defaultReaderPreferences, mergeReaderPreferences } from '../preferences/preferencesStore';
 import type { SettingsSection } from '../settings/SettingsWorkspace';
 import type { Tag } from '../tags/tagModels';
-import type { ReaderAnnotation } from '../annotations/annotationModels';
+import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
 import { useDocumentOpening } from '../reader/hooks/useDocumentOpening';
 import { useReaderCommands } from '../reader/hooks/useReaderCommands';
 import { useReaderDecorations } from '../reader/hooks/useReaderDecorations';
@@ -129,13 +129,44 @@ export function ReaderApp({
     bookmarksByDocument,
     addBookmarkForActivePage,
     addPageNote,
+    deleteBookmarkForDocument,
     deleteAnnotationForDocument,
     importAnnotationsForDocument,
     loadDocumentDecorations,
+    renameBookmarkForDocument,
     saveAnnotationForActiveDocument,
     toggleAnnotationTagForDocument,
     updateAnnotationForDocument,
   } = useReaderDecorations({ activeSession, persistence });
+
+  const handleRenameBookmark = useCallback(
+    async (bookmark: Bookmark, title: string) => {
+      const saved = await renameBookmarkForDocument(bookmark.documentKey, bookmark, title);
+
+      if (!saved || saved.id === null) {
+        return;
+      }
+
+      setGlobalSearchBookmarks((current) =>
+        current.map((record) => (record.id === saved.id ? { ...record, ...saved } : record)),
+      );
+    },
+    [renameBookmarkForDocument],
+  );
+
+  const handleDeleteBookmark = useCallback(
+    async (bookmark: Bookmark) => {
+      if (bookmark.id === null) {
+        return;
+      }
+
+      await deleteBookmarkForDocument(bookmark.documentKey, bookmark.id);
+      setGlobalSearchBookmarks((current) =>
+        current.filter((record) => record.id !== bookmark.id),
+      );
+    },
+    [deleteBookmarkForDocument],
+  );
 
   const mergeRestoredRecentDocuments = useCallback(
     (update: SetStateAction<PersistedDocument[]>) => {
@@ -905,6 +936,7 @@ export function ReaderApp({
         clearSearch={clearSearch}
         closeActiveTab={closeActiveTab}
         closeToolWorkspace={closeToolWorkspace}
+        deleteBookmark={handleDeleteBookmark}
         deleteAnnotationForDocument={deleteAnnotationForDocument}
         handleBrowserFileChange={handleBrowserFileChange}
         handleImportBrowserFileChange={handleImportBrowserFileChange}
@@ -935,6 +967,7 @@ export function ReaderApp({
         openRecordPage={openRecordPage}
         openSettingsWorkspace={openSettingsWorkspace}
         openShortcutWorkspace={openShortcutWorkspace}
+        renameBookmark={handleRenameBookmark}
         reopenRecentDocument={reopenRecentDocument}
         runSearch={runSearch}
         selectReaderSession={selectReaderSession}
