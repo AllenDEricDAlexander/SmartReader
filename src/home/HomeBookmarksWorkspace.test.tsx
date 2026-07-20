@@ -695,6 +695,9 @@ describe('HomeBookmarksWorkspace', () => {
       /\.home-content\.bookmark-management-home-content\s*{[^}]*padding:\s*0;[^}]*overflow:\s*hidden;/s,
     );
     expect(styles).toMatch(
+      /\.home-content\.bookmark-management-home-content\s*{[^}]*height:\s*100%;[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);[^}]*align-content:\s*stretch;/s,
+    );
+    expect(styles).toMatch(
       /@media \(max-width:\s*1180px\)\s*{[^@]*\.bookmark-management-layout\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s,
     );
     expect(styles).toMatch(

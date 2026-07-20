@@ -4394,7 +4394,10 @@ select {
 }
 
 .home-content.bookmark-management-home-content {
+  height: 100%;
+  grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr);
+  align-content: stretch;
   gap: 0;
   padding: 0;
   overflow: hidden;
