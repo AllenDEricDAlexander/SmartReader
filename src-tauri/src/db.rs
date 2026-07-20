@@ -26,6 +26,10 @@ const MIGRATIONS: &[Migration] = &[
         version: "005_recent_file_management",
         sql: include_str!("migrations/005_recent_file_management.sql"),
     },
+    Migration {
+        version: "006_bookmark_management",
+        sql: include_str!("migrations/006_bookmark_management.sql"),
+    },
 ];
 const READER_PREFERENCES_KEY: &str = "reader_preferences";
 pub const DEFAULT_CACHE_TOTAL_BYTES: i64 = 5 * 1024 * 1024 * 1024;
@@ -110,6 +114,8 @@ pub struct PersistedBookmark {
     pub document_key: String,
     pub page: i64,
     pub title: String,
+    #[serde(default)]
+    pub note: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -124,6 +130,8 @@ pub struct PersistedBookmarkRecord {
     pub document_missing: bool,
     pub page: i64,
     pub title: String,
+    #[serde(default)]
+    pub note: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -1021,21 +1029,30 @@ fn require_annotation_id(connection: &Connection, annotation_id: i64) -> Result<
     Ok(())
 }
 
+fn normalize_bookmark_note(note: Option<String>) -> Option<String> {
+    note.map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 pub fn upsert_bookmark(
     connection: &Connection,
-    bookmark: PersistedBookmark,
+    mut bookmark: PersistedBookmark,
 ) -> Result<PersistedBookmark, DbError> {
+    bookmark.note = normalize_bookmark_note(bookmark.note.take());
+
     if let Some(id) = bookmark.id {
         connection.execute(
             r#"
             UPDATE bookmarks
-            SET document_key = ?1, page = ?2, title = ?3, created_at = ?4, updated_at = ?5
-            WHERE id = ?6
+            SET document_key = ?1, page = ?2, title = ?3, note = ?4,
+                created_at = ?5, updated_at = ?6
+            WHERE id = ?7
             "#,
             params![
                 bookmark.document_key,
                 bookmark.page,
                 bookmark.title,
+                bookmark.note,
                 bookmark.created_at,
                 bookmark.updated_at,
                 id,
@@ -1046,13 +1063,14 @@ pub fn upsert_bookmark(
 
     connection.execute(
         r#"
-        INSERT INTO bookmarks (document_key, page, title, created_at, updated_at)
-        VALUES (?1, ?2, ?3, ?4, ?5)
+        INSERT INTO bookmarks (document_key, page, title, note, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
         "#,
         params![
             bookmark.document_key,
             bookmark.page,
             bookmark.title,
+            bookmark.note,
             bookmark.created_at,
             bookmark.updated_at,
         ],
@@ -1070,7 +1088,7 @@ pub fn list_bookmarks_for_document(
 ) -> Result<Vec<PersistedBookmark>, DbError> {
     let mut statement = connection.prepare(
         r#"
-        SELECT id, document_key, page, title, created_at, updated_at
+        SELECT id, document_key, page, title, note, created_at, updated_at
         FROM bookmarks
         WHERE document_key = ?1
         ORDER BY page ASC, title ASC
@@ -1082,8 +1100,9 @@ pub fn list_bookmarks_for_document(
             document_key: row.get(1)?,
             page: row.get(2)?,
             title: row.get(3)?,
-            created_at: row.get(4)?,
-            updated_at: row.get(5)?,
+            note: row.get(4)?,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
         })
     })?;
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
@@ -1095,7 +1114,7 @@ pub fn list_all_bookmark_records_tx(
     let mut statement = connection.prepare(
         r#"
         SELECT b.id, b.document_key, d.display_name, d.path, COALESCE(d.missing, 1),
-               b.page, b.title, b.created_at, b.updated_at
+               b.page, b.title, b.note, b.created_at, b.updated_at
         FROM bookmarks b
         LEFT JOIN documents d ON d.document_key = b.document_key
         ORDER BY COALESCE(d.display_name, b.document_key) COLLATE NOCASE ASC,
@@ -1108,11 +1127,12 @@ pub fn list_all_bookmark_records_tx(
             document_key: row.get(1)?,
             document_display_name: row.get(2)?,
             document_path: row.get(3)?,
-            document_missing: row.get::<_, i64>(4)? == 1,
+            document_missing: row.get::<_, i64>(4)? != 0,
             page: row.get(5)?,
             title: row.get(6)?,
-            created_at: row.get(7)?,
-            updated_at: row.get(8)?,
+            note: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
         })
     })?;
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
@@ -2507,6 +2527,99 @@ mod tests {
     }
 
     #[test]
+    fn migrates_bookmark_note_and_accepts_legacy_payloads() {
+        let connection = migrated_test_connection();
+
+        let note_column_count: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('bookmarks') WHERE name = 'note'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("bookmark note column");
+        let legacy: PersistedBookmark = serde_json::from_value(serde_json::json!({
+            "id": null,
+            "documentKey": "desktop:/tmp/legacy.pdf",
+            "page": 2,
+            "title": "Legacy bookmark",
+            "createdAt": "2026-07-20T00:00:00Z",
+            "updatedAt": "2026-07-20T00:00:00Z"
+        }))
+        .expect("legacy payload without note");
+        let saved_legacy =
+            upsert_bookmark(&connection, legacy).expect("save legacy payload without note");
+        connection
+            .execute(
+                r#"
+                INSERT INTO bookmarks (document_key, page, title, created_at, updated_at)
+                VALUES (?1, ?2, ?3, ?4, ?5)
+                "#,
+                rusqlite::params![
+                    "desktop:/tmp/historical.pdf",
+                    4,
+                    "Historical bookmark",
+                    "2026-07-19T00:00:00Z",
+                    "2026-07-19T00:00:00Z",
+                ],
+            )
+            .expect("historical row without note");
+        let historical_note: Option<String> = connection
+            .query_row(
+                "SELECT note FROM bookmarks WHERE document_key = ?1",
+                ["desktop:/tmp/historical.pdf"],
+                |row| row.get(0),
+            )
+            .expect("historical note");
+
+        assert_eq!(note_column_count, 1);
+        assert_eq!(saved_legacy.note, None);
+        assert_eq!(historical_note, None);
+    }
+
+    #[test]
+    fn saves_loads_and_clears_bookmark_note() {
+        let connection = migrated_test_connection();
+        let saved = upsert_bookmark(
+            &connection,
+            PersistedBookmark {
+                id: None,
+                document_key: "desktop:/tmp/noted.pdf".to_string(),
+                page: 8,
+                title: "Core result".to_string(),
+                note: Some("  Compare with section 3  ".to_string()),
+                created_at: "2026-07-20T00:00:00Z".to_string(),
+                updated_at: "2026-07-20T00:00:00Z".to_string(),
+            },
+        )
+        .expect("save noted bookmark");
+
+        assert_eq!(saved.note.as_deref(), Some("Compare with section 3"));
+        let loaded = list_bookmarks_for_document(&connection, "desktop:/tmp/noted.pdf")
+            .expect("load noted bookmark");
+        assert_eq!(loaded[0].note.as_deref(), Some("Compare with section 3"));
+
+        let cleared = upsert_bookmark(
+            &connection,
+            PersistedBookmark {
+                note: Some("   ".to_string()),
+                updated_at: "2026-07-20T01:00:00Z".to_string(),
+                ..saved
+            },
+        )
+        .expect("clear bookmark note");
+        let stored_note: Option<String> = connection
+            .query_row(
+                "SELECT note FROM bookmarks WHERE id = ?1",
+                [cleared.id.expect("persisted id")],
+                |row| row.get(0),
+            )
+            .expect("stored note");
+
+        assert_eq!(cleared.note, None);
+        assert_eq!(stored_note, None);
+    }
+
+    #[test]
     fn lists_all_bookmarks_with_document_metadata() {
         let connection = migrated_test_connection();
         let document = PersistedDocument {
@@ -2530,6 +2643,7 @@ mod tests {
                 document_key: document.document_key.clone(),
                 page: 12,
                 title: "Important section".to_string(),
+                note: Some("Read again".to_string()),
                 created_at: "2026-07-01T00:00:00Z".to_string(),
                 updated_at: "2026-07-01T00:00:00Z".to_string(),
             },
@@ -2547,6 +2661,7 @@ mod tests {
         assert_eq!(records[0].document_path.as_deref(), Some("/tmp/book.pdf"));
         assert!(!records[0].document_missing);
         assert_eq!(records[0].title, "Important section");
+        assert_eq!(records[0].note.as_deref(), Some("Read again"));
     }
 
     #[test]
