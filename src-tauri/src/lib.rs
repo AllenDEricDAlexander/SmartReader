@@ -45,6 +45,7 @@ pub fn run() {
             db::save_bookmark,
             db::list_bookmarks,
             db::list_all_bookmarks,
+            db::load_bookmark_dashboard,
             db::delete_bookmark,
             db::save_annotation,
             db::list_annotations,

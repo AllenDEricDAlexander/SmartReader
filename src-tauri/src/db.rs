@@ -138,6 +138,32 @@ pub struct PersistedBookmarkRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct BookmarkDashboard {
+    pub total_bookmarks: i64,
+    pub groups: Vec<BookmarkDashboardGroup>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BookmarkDashboardGroup {
+    pub document: BookmarkDashboardDocument,
+    pub bookmark_count: i64,
+    pub bookmarks: Vec<PersistedBookmark>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BookmarkDashboardDocument {
+    pub document_key: String,
+    pub display_name: String,
+    pub path: Option<String>,
+    pub missing: bool,
+    pub file_size: Option<i64>,
+    pub page_count: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct PersistedAnnotation {
     pub id: Option<i64>,
     pub document_key: String,
@@ -539,6 +565,14 @@ pub fn list_all_bookmarks(
 ) -> Result<Vec<PersistedBookmarkRecord>, DbError> {
     let connection = state.connection.lock().expect("database mutex poisoned");
     list_all_bookmark_records_tx(&connection)
+}
+
+#[tauri::command]
+pub fn load_bookmark_dashboard(
+    state: State<'_, DatabaseState>,
+) -> Result<BookmarkDashboard, DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    load_bookmark_dashboard_tx(&connection)
 }
 
 #[tauri::command]
@@ -1136,6 +1170,71 @@ pub fn list_all_bookmark_records_tx(
         })
     })?;
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+pub fn load_bookmark_dashboard_tx(connection: &Connection) -> Result<BookmarkDashboard, DbError> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT b.id, b.document_key, b.page, b.title, b.note, b.created_at, b.updated_at,
+               COALESCE(d.display_name, b.document_key),
+               d.path,
+               CASE WHEN d.document_key IS NULL OR d.missing != 0 THEN 1 ELSE 0 END,
+               d.file_size,
+               d.page_count
+        FROM bookmarks b
+        LEFT JOIN documents d ON d.document_key = b.document_key
+        ORDER BY COALESCE(d.display_name, b.document_key) COLLATE NOCASE ASC,
+                 b.document_key ASC,
+                 b.page ASC,
+                 b.title COLLATE NOCASE ASC,
+                 b.id ASC
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| {
+        let document_key: String = row.get(1)?;
+        Ok((
+            BookmarkDashboardDocument {
+                document_key: document_key.clone(),
+                display_name: row.get(7)?,
+                path: row.get(8)?,
+                missing: row.get::<_, i64>(9)? != 0,
+                file_size: row.get(10)?,
+                page_count: row.get(11)?,
+            },
+            PersistedBookmark {
+                id: Some(row.get(0)?),
+                document_key,
+                page: row.get(2)?,
+                title: row.get(3)?,
+                note: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            },
+        ))
+    })?;
+
+    let mut groups: Vec<BookmarkDashboardGroup> = Vec::new();
+    for row in rows {
+        let (document, bookmark) = row?;
+        if let Some(group) = groups
+            .last_mut()
+            .filter(|group| group.document.document_key == document.document_key)
+        {
+            group.bookmarks.push(bookmark);
+            group.bookmark_count += 1;
+        } else {
+            groups.push(BookmarkDashboardGroup {
+                document,
+                bookmark_count: 1,
+                bookmarks: vec![bookmark],
+            });
+        }
+    }
+
+    Ok(BookmarkDashboard {
+        total_bookmarks: groups.iter().map(|group| group.bookmark_count).sum(),
+        groups,
+    })
 }
 
 pub fn upsert_annotation(
@@ -2662,6 +2761,87 @@ mod tests {
         assert!(!records[0].document_missing);
         assert_eq!(records[0].title, "Important section");
         assert_eq!(records[0].note.as_deref(), Some("Read again"));
+    }
+
+    #[test]
+    fn loads_bookmark_dashboard_with_document_groups_and_orphans() {
+        let connection = migrated_test_connection();
+        let document = PersistedDocument {
+            document_key: "desktop:/tmp/dashboard.pdf".to_string(),
+            path: Some("/tmp/dashboard.pdf".to_string()),
+            display_name: "Dashboard.pdf".to_string(),
+            file_size: Some(4096),
+            modified_at: Some("2026-07-20T00:00:00Z".to_string()),
+            page_count: Some(80),
+            last_page: 1,
+            progress: 0.0,
+            missing: false,
+            last_opened_at: None,
+            tag_ids: Vec::new(),
+        };
+        upsert_document(&connection, &document).expect("document");
+
+        for (page, title, note) in [
+            (8, "Architecture", Some("Facade boundary".to_string())),
+            (24, "Evaluation", None),
+        ] {
+            upsert_bookmark(
+                &connection,
+                PersistedBookmark {
+                    id: None,
+                    document_key: document.document_key.clone(),
+                    page,
+                    title: title.to_string(),
+                    note,
+                    created_at: format!("2026-07-20T00:{page:02}:00Z"),
+                    updated_at: format!("2026-07-20T00:{page:02}:00Z"),
+                },
+            )
+            .expect("document bookmark");
+        }
+        upsert_bookmark(
+            &connection,
+            PersistedBookmark {
+                id: None,
+                document_key: "desktop:/tmp/orphan.pdf".to_string(),
+                page: 3,
+                title: "Orphan".to_string(),
+                note: None,
+                created_at: "2026-07-20T01:00:00Z".to_string(),
+                updated_at: "2026-07-20T01:00:00Z".to_string(),
+            },
+        )
+        .expect("orphan bookmark");
+
+        let dashboard = load_bookmark_dashboard_tx(&connection).expect("bookmark dashboard");
+        let document_group = dashboard
+            .groups
+            .iter()
+            .find(|group| group.document.document_key == document.document_key)
+            .expect("document group");
+        let orphan_group = dashboard
+            .groups
+            .iter()
+            .find(|group| group.document.document_key == "desktop:/tmp/orphan.pdf")
+            .expect("orphan group");
+
+        assert_eq!(dashboard.total_bookmarks, 3);
+        assert_eq!(document_group.bookmark_count, 2);
+        assert_eq!(document_group.document.display_name, "Dashboard.pdf");
+        assert_eq!(document_group.document.file_size, Some(4096));
+        assert_eq!(document_group.document.page_count, Some(80));
+        assert_eq!(
+            document_group.bookmarks[0].note.as_deref(),
+            Some("Facade boundary")
+        );
+        assert!(orphan_group.document.missing);
+        assert_eq!(
+            orphan_group.document.display_name,
+            "desktop:/tmp/orphan.pdf"
+        );
+        assert_eq!(orphan_group.document.path, None);
+        assert_eq!(orphan_group.document.file_size, None);
+        assert_eq!(orphan_group.document.page_count, None);
     }
 
     #[test]
