@@ -522,27 +522,43 @@ describe('HomeDashboard', () => {
     expect(screen.getByTestId('favorite-workspace-document-name')).toHaveTextContent('Favorite.pdf');
   });
 
-  it('renders bookmark actions inside the home dashboard frame', async () => {
-    const onDeleteBookmark = vi.fn().mockResolvedValue(undefined);
-    const onRenameBookmark = vi.fn().mockResolvedValue(undefined);
-    const bookmark = {
-      id: 7,
-      documentKey: 'desktop:/Users/mario/Papers/Book.pdf',
-      documentDisplayName: 'Book.pdf',
-      documentPath: '/Users/mario/Papers/Book.pdf',
-      documentMissing: false,
-      page: 12,
-      title: '关键段落',
-      note: null,
-      createdAt: '2026-07-07T10:00:00+08:00',
-      updatedAt: '2026-07-07T10:00:00+08:00',
+  it('renders the shared bookmark workspace inside the home dashboard frame', () => {
+    const bookmarkDashboard = {
+      totalBookmarks: 1,
+      groups: [
+        {
+          document: {
+            documentKey: 'desktop:/Users/mario/Papers/Book.pdf',
+            displayName: 'Book.pdf',
+            path: '/Users/mario/Papers/Book.pdf',
+            missing: false,
+            fileSize: 1024,
+            pageCount: 20,
+          },
+          bookmarkCount: 1,
+          bookmarks: [
+            {
+              id: 7,
+              documentKey: 'desktop:/Users/mario/Papers/Book.pdf',
+              page: 12,
+              title: '关键段落',
+              note: '复核结论',
+              createdAt: '2026-07-07T10:00:00+08:00',
+              updatedAt: '2026-07-07T10:00:00+08:00',
+            },
+          ],
+        },
+      ],
     };
 
     renderDashboard({
       activeSidebarPage: 'bookmarks',
-      bookmarks: [bookmark],
-      onDeleteBookmark,
-      onRenameBookmark,
+      bookmarkDashboard,
+      bookmarkDashboardLoading: false,
+      bookmarkDashboardError: null,
+      onUpdateBookmark: vi.fn(),
+      onDeleteBookmarks: vi.fn(),
+      onRefreshBookmarks: vi.fn(),
     });
 
     expect(screen.getByRole('button', { name: '书签管理' })).toHaveAttribute(
@@ -550,25 +566,8 @@ describe('HomeDashboard', () => {
       'page',
     );
     expect(screen.getByRole('region', { name: '书签管理' })).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: /关键段落.*Book\.pdf.*第 12 页/ }),
-    ).toBeInTheDocument();
+    expect(screen.getByText('关键段落')).toBeInTheDocument();
     expect(screen.queryByLabelText('书签管理工作区')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '重命名书签 关键段落' }));
-    fireEvent.change(screen.getByRole('textbox', { name: '重命名书签 关键段落' }), {
-      target: { value: '核心结论' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '保存书签名称 关键段落' }));
-
-    await waitFor(() => {
-      expect(onRenameBookmark).toHaveBeenCalledWith(bookmark, '核心结论');
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: '删除书签 关键段落' }));
-    await waitFor(() => {
-      expect(onDeleteBookmark).toHaveBeenCalledWith(bookmark);
-    });
   });
 
   it('renders tag management inside the home dashboard frame', async () => {

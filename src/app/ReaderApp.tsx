@@ -17,10 +17,16 @@ import {
 import type { DocumentSession } from '../documents/documentModels';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { HomeSidebarPage } from '../home/HomeSidebar';
+import {
+  flattenBookmarkDashboard,
+  type BookmarkDeleteResult,
+  type BookmarkManagementRecord,
+  type BookmarkUpdateInput,
+} from '../home/bookmarkManagementUtils';
 import type {
+  BookmarkDashboard,
   CacheStats,
   PersistedAnnotationRecord,
-  PersistedBookmarkRecord,
   PersistedDocument,
   PersistedSessionTab,
 } from '../persistence/persistenceApi';
@@ -91,13 +97,18 @@ export function ReaderApp({
   const [cacheStats, setCacheStats] = useState(defaultCacheStats);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
-  const [globalSearchBookmarks, setGlobalSearchBookmarks] = useState<PersistedBookmarkRecord[]>([]);
+  const [bookmarkDashboard, setBookmarkDashboard] = useState<BookmarkDashboard | null>(null);
+  const [bookmarkDashboardLoading, setBookmarkDashboardLoading] = useState(false);
+  const [bookmarkDashboardError, setBookmarkDashboardError] = useState<string | null>(null);
   const [globalSearchAnnotations, setGlobalSearchAnnotations] = useState<
     PersistedAnnotationRecord[]
   >([]);
-  const [globalSearchBookmarkError, setGlobalSearchBookmarkError] = useState<string | null>(null);
   const [globalSearchAnnotationError, setGlobalSearchAnnotationError] = useState<string | null>(
     null,
+  );
+  const globalSearchBookmarks = useMemo(
+    () => flattenBookmarkDashboard(bookmarkDashboard),
+    [bookmarkDashboard],
   );
   const [pendingGlobalSearchJump, setPendingGlobalSearchJump] = useState<{
     documentKey: string;
@@ -107,7 +118,8 @@ export function ReaderApp({
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<number | null>(null);
   const tagsMutatedRef = useRef(false);
   const hadReaderSessionsRef = useRef(false);
-  const globalSearchRefreshRequestRef = useRef(0);
+  const bookmarkDashboardRequestRef = useRef(0);
+  const annotationRefreshRequestRef = useRef(0);
   const blobUrlCache = useMemo(() => new BlobUrlCache(), []);
   const pdfByteCache = useMemo(() => new PdfByteCache(), []);
   const documentPersistence = useMemo(
@@ -133,40 +145,11 @@ export function ReaderApp({
     deleteAnnotationForDocument,
     importAnnotationsForDocument,
     loadDocumentDecorations,
-    renameBookmarkForDocument,
     saveAnnotationForActiveDocument,
     toggleAnnotationTagForDocument,
     updateAnnotationForDocument,
+    updateBookmarkForDocument,
   } = useReaderDecorations({ activeSession, persistence });
-
-  const handleRenameBookmark = useCallback(
-    async (bookmark: Bookmark, title: string) => {
-      const saved = await renameBookmarkForDocument(bookmark.documentKey, bookmark, title);
-
-      if (!saved || saved.id === null) {
-        return;
-      }
-
-      setGlobalSearchBookmarks((current) =>
-        current.map((record) => (record.id === saved.id ? { ...record, ...saved } : record)),
-      );
-    },
-    [renameBookmarkForDocument],
-  );
-
-  const handleDeleteBookmark = useCallback(
-    async (bookmark: Bookmark) => {
-      if (bookmark.id === null) {
-        return;
-      }
-
-      await deleteBookmarkForDocument(bookmark.documentKey, bookmark.id);
-      setGlobalSearchBookmarks((current) =>
-        current.filter((record) => record.id !== bookmark.id),
-      );
-    },
-    [deleteBookmarkForDocument],
-  );
 
   const mergeRestoredRecentDocuments = useCallback(
     (update: SetStateAction<PersistedDocument[]>) => {
@@ -358,42 +341,118 @@ export function ReaderApp({
     setViewerSource,
   });
 
-  const refreshGlobalSearchCollections = useCallback(() => {
-    globalSearchRefreshRequestRef.current += 1;
-    const requestId = globalSearchRefreshRequestRef.current;
+  const refreshBookmarkDashboard = useCallback(async () => {
+    bookmarkDashboardRequestRef.current += 1;
+    const requestId = bookmarkDashboardRequestRef.current;
+    setBookmarkDashboardLoading(true);
+    setBookmarkDashboardError(null);
 
-    setGlobalSearchBookmarkError(null);
+    try {
+      const dashboard = await persistence.loadBookmarkDashboard();
+      if (requestId === bookmarkDashboardRequestRef.current) {
+        setBookmarkDashboard(dashboard);
+        setBookmarkDashboardError(null);
+      }
+    } catch {
+      if (requestId === bookmarkDashboardRequestRef.current) {
+        setBookmarkDashboardError(bookmarkProviderErrorMessage);
+      }
+    } finally {
+      if (requestId === bookmarkDashboardRequestRef.current) {
+        setBookmarkDashboardLoading(false);
+      }
+    }
+  }, [persistence]);
+
+  const refreshGlobalSearchAnnotations = useCallback(() => {
+    annotationRefreshRequestRef.current += 1;
+    const requestId = annotationRefreshRequestRef.current;
     setGlobalSearchAnnotationError(null);
 
     void persistence
-      .listAllBookmarks()
-      .then((bookmarks) => {
-        if (requestId === globalSearchRefreshRequestRef.current) {
-          setGlobalSearchBookmarks(bookmarks);
-          setGlobalSearchBookmarkError(null);
-        }
-      })
-      .catch(() => {
-        if (requestId === globalSearchRefreshRequestRef.current) {
-          setGlobalSearchBookmarks([]);
-          setGlobalSearchBookmarkError(bookmarkProviderErrorMessage);
-        }
-      });
-    void persistence
       .listAllAnnotations()
       .then((annotations) => {
-        if (requestId === globalSearchRefreshRequestRef.current) {
+        if (requestId === annotationRefreshRequestRef.current) {
           setGlobalSearchAnnotations(annotations);
           setGlobalSearchAnnotationError(null);
         }
       })
       .catch(() => {
-        if (requestId === globalSearchRefreshRequestRef.current) {
+        if (requestId === annotationRefreshRequestRef.current) {
           setGlobalSearchAnnotations([]);
           setGlobalSearchAnnotationError(annotationProviderErrorMessage);
         }
       });
   }, [persistence]);
+
+  const refreshGlobalSearchCollections = useCallback(() => {
+    void refreshBookmarkDashboard();
+    refreshGlobalSearchAnnotations();
+  }, [refreshBookmarkDashboard, refreshGlobalSearchAnnotations]);
+
+  const updateManagedBookmark = useCallback(
+    async (bookmark: BookmarkManagementRecord, updates: BookmarkUpdateInput) => {
+      const saved = await updateBookmarkForDocument(
+        bookmark.documentKey,
+        bookmark,
+        updates,
+      );
+      if (!saved || saved.id === null) {
+        throw new Error('bookmark is not persisted');
+      }
+      await refreshBookmarkDashboard();
+    },
+    [refreshBookmarkDashboard, updateBookmarkForDocument],
+  );
+
+  const deleteManagedBookmarks = useCallback(
+    async (
+      bookmarks: BookmarkManagementRecord[],
+    ): Promise<BookmarkDeleteResult> => {
+      const succeededIds: number[] = [];
+      const failedIds: number[] = [];
+
+      for (const bookmark of bookmarks) {
+        if (bookmark.id === null) {
+          continue;
+        }
+        try {
+          await deleteBookmarkForDocument(bookmark.documentKey, bookmark.id);
+          succeededIds.push(bookmark.id);
+        } catch {
+          failedIds.push(bookmark.id);
+        }
+      }
+
+      await refreshBookmarkDashboard();
+      return { succeededIds, failedIds };
+    },
+    [deleteBookmarkForDocument, refreshBookmarkDashboard],
+  );
+
+  const handleRenameBookmark = useCallback(
+    async (bookmark: Bookmark, title: string) => {
+      const saved = await updateBookmarkForDocument(bookmark.documentKey, bookmark, {
+        title,
+        note: bookmark.note,
+      });
+      if (saved?.id != null) {
+        await refreshBookmarkDashboard();
+      }
+    },
+    [refreshBookmarkDashboard, updateBookmarkForDocument],
+  );
+
+  const handleDeleteBookmark = useCallback(
+    async (bookmark: Bookmark) => {
+      if (bookmark.id === null) {
+        return;
+      }
+      await deleteBookmarkForDocument(bookmark.documentKey, bookmark.id);
+      await refreshBookmarkDashboard();
+    },
+    [deleteBookmarkForDocument, refreshBookmarkDashboard],
+  );
 
   const refreshRecentDocuments = useCallback(() => {
     void persistence
@@ -418,13 +477,15 @@ export function ReaderApp({
 
   const openShortcutWorkspace = useCallback(
     (workspace: Extract<AppWorkspace, 'import' | 'compare' | 'annotations' | 'bookmarks'>) => {
-      if (workspace === 'annotations' || workspace === 'bookmarks') {
-        refreshGlobalSearchCollections();
+      if (workspace === 'annotations') {
+        refreshGlobalSearchAnnotations();
       }
-
+      if (workspace === 'bookmarks') {
+        void refreshBookmarkDashboard();
+      }
       setWorkspaceOverride(workspace);
     },
-    [refreshGlobalSearchCollections],
+    [refreshBookmarkDashboard, refreshGlobalSearchAnnotations],
   );
   const openHomeSidebarPage = useCallback((page: HomeSidebarPage) => {
     setWorkspaceOverride(null);
@@ -915,8 +976,9 @@ export function ReaderApp({
         favoriteDocuments={favoriteDocuments}
         globalSearchAnnotationError={globalSearchAnnotationError}
         globalSearchAnnotations={globalSearchAnnotations}
-        globalSearchBookmarkError={globalSearchBookmarkError}
-        globalSearchBookmarks={globalSearchBookmarks}
+        bookmarkDashboard={bookmarkDashboard}
+        bookmarkDashboardError={bookmarkDashboardError}
+        bookmarkDashboardLoading={bookmarkDashboardLoading}
         lastSearchCommand={lastSearchCommand}
         pageInput={pageInput}
         persistence={persistence}
@@ -937,6 +999,7 @@ export function ReaderApp({
         closeActiveTab={closeActiveTab}
         closeToolWorkspace={closeToolWorkspace}
         deleteBookmark={handleDeleteBookmark}
+        deleteManagedBookmarks={deleteManagedBookmarks}
         deleteAnnotationForDocument={deleteAnnotationForDocument}
         handleBrowserFileChange={handleBrowserFileChange}
         handleImportBrowserFileChange={handleImportBrowserFileChange}
@@ -968,6 +1031,7 @@ export function ReaderApp({
         openSettingsWorkspace={openSettingsWorkspace}
         openShortcutWorkspace={openShortcutWorkspace}
         renameBookmark={handleRenameBookmark}
+        refreshBookmarkDashboard={refreshBookmarkDashboard}
         reopenRecentDocument={reopenRecentDocument}
         runSearch={runSearch}
         selectReaderSession={selectReaderSession}
@@ -978,6 +1042,7 @@ export function ReaderApp({
         setWorkspaceOverride={setWorkspaceOverride}
         stepHistoryBack={stepHistoryBack}
         stepHistoryForward={stepHistoryForward}
+        updateManagedBookmark={updateManagedBookmark}
       />
       <GlobalSearchPanel
         open={globalSearchOpen}
@@ -986,7 +1051,7 @@ export function ReaderApp({
         favoriteDocuments={favoriteDocuments}
         bookmarks={globalSearchBookmarks}
         annotations={globalSearchAnnotations}
-        bookmarkError={globalSearchBookmarkError}
+        bookmarkError={bookmarkDashboardError}
         annotationError={globalSearchAnnotationError}
         activeSession={
           activeSession

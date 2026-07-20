@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createEmptyDocumentState } from '../documents/documentSessionStore';
 import type { ReaderPreferences } from '../preferences/preferencesModels';
@@ -12,6 +12,11 @@ const emptyTagDashboard = {
   tags: [],
   details: [],
   recommendations: [],
+};
+
+const emptyBookmarkDashboard = {
+  totalBookmarks: 0,
+  groups: [],
 };
 
 function createTagPersistence() {
@@ -42,8 +47,9 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     favoriteDocuments: [],
     globalSearchAnnotationError: null,
     globalSearchAnnotations: [],
-    globalSearchBookmarkError: null,
-    globalSearchBookmarks: [],
+    bookmarkDashboard: emptyBookmarkDashboard,
+    bookmarkDashboardError: null,
+    bookmarkDashboardLoading: false,
     lastSearchCommand: '',
     pageInput: '',
     persistence: createTagPersistence(),
@@ -64,6 +70,10 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     closeActiveTab: vi.fn(),
     closeToolWorkspace: vi.fn(),
     deleteBookmark: vi.fn(),
+    deleteManagedBookmarks: vi.fn().mockResolvedValue({
+      succeededIds: [],
+      failedIds: [],
+    }),
     deleteAnnotationForDocument: vi.fn(),
     handleBrowserFileChange: vi.fn(),
     handleImportBrowserFileChange: vi.fn(),
@@ -92,6 +102,7 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     openSettingsWorkspace: vi.fn(),
     openShortcutWorkspace: vi.fn(),
     renameBookmark: vi.fn(),
+    refreshBookmarkDashboard: vi.fn(),
     reopenRecentDocument: vi.fn(),
     runSearch: vi.fn(),
     selectReaderSession: vi.fn(),
@@ -102,10 +113,11 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     setWorkspaceOverride: vi.fn(),
     stepHistoryBack: vi.fn(),
     stepHistoryForward: vi.fn(),
+    updateManagedBookmark: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 
-  render(<ReaderWorkspaceSwitch {...props} />);
+  return render(<ReaderWorkspaceSwitch {...props} />);
 }
 
 describe('ReaderWorkspaceSwitch', () => {
@@ -199,6 +211,67 @@ describe('ReaderWorkspaceSwitch', () => {
     });
 
     expect(screen.getByRole('button', { name: 'Transformer' })).toBeInTheDocument();
+  });
+
+  it('uses the same bookmark dashboard in home and standalone routes', () => {
+    const bookmarkDashboard = {
+      totalBookmarks: 1,
+      groups: [
+        {
+          document: {
+            documentKey: 'desktop:/tmp/shared.pdf',
+            displayName: 'shared.pdf',
+            path: '/tmp/shared.pdf',
+            missing: false,
+            fileSize: 1024,
+            pageCount: 10,
+          },
+          bookmarkCount: 1,
+          bookmarks: [
+            {
+              id: 1,
+              documentKey: 'desktop:/tmp/shared.pdf',
+              page: 4,
+              title: 'Shared bookmark',
+              note: null,
+              createdAt: '2026-07-20T00:00:00Z',
+              updatedAt: '2026-07-20T00:00:00Z',
+            },
+          ],
+        },
+      ],
+    };
+    const { unmount } = renderSwitch({
+      activeWorkspace: 'home',
+      activeSidebarPage: 'bookmarks',
+      bookmarkDashboard,
+    });
+    expect(screen.getByText('Shared bookmark')).toBeInTheDocument();
+    unmount();
+
+    renderSwitch({
+      activeWorkspace: 'bookmarks',
+      bookmarkDashboard,
+    });
+    expect(screen.getByLabelText('书签管理工作区')).toBeInTheDocument();
+    expect(screen.getByText('Shared bookmark')).toBeInTheDocument();
+  });
+
+  it('opens bookmark management and refreshes it without opening global search', () => {
+    const openHomeSidebarPage = vi.fn();
+    const openGlobalSearch = vi.fn();
+    const refreshBookmarkDashboard = vi.fn();
+    renderSwitch({
+      openHomeSidebarPage,
+      openGlobalSearch,
+      refreshBookmarkDashboard,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '书签管理' }));
+
+    expect(openHomeSidebarPage).toHaveBeenCalledWith('bookmarks');
+    expect(refreshBookmarkDashboard).toHaveBeenCalledTimes(1);
+    expect(openGlobalSearch).not.toHaveBeenCalled();
   });
 
 });

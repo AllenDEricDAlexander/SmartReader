@@ -7,13 +7,18 @@ import {
   type SetStateAction,
 } from 'react';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
-import type { PersistedBookmarkRecord, PersistedDocument } from '../persistence/persistenceApi';
+import type { BookmarkDashboard, PersistedDocument } from '../persistence/persistenceApi';
 import type { Tag } from '../tags/tagModels';
 import { TagManager } from '../tags/TagManager';
 import { HomeActionNotice } from './HomeActionNotice';
 import { HomeBlankPage, isHomeBlankPageId } from './HomeBlankPage';
 import { HomeAssistPanel } from './HomeAssistPanel';
 import { HomeBookmarksWorkspace } from './HomeBookmarksWorkspace';
+import type {
+  BookmarkDeleteResult,
+  BookmarkManagementRecord,
+  BookmarkUpdateInput,
+} from './bookmarkManagementUtils';
 import { HomeFavoriteFilesWorkspace } from './HomeFavoriteFilesWorkspace';
 import { HomeFavorites } from './HomeFavorites';
 import { HomeQuickStart } from './HomeQuickStart';
@@ -38,8 +43,9 @@ type HomeNoticeState = {
 type HomeDashboardProps = {
   recentDocuments: PersistedDocument[];
   favoriteDocuments: FavoriteDocument[];
-  bookmarks?: PersistedBookmarkRecord[];
-  bookmarkError?: string | null;
+  bookmarkDashboard?: BookmarkDashboard | null;
+  bookmarkDashboardLoading?: boolean;
+  bookmarkDashboardError?: string | null;
   availableTags?: Tag[];
   activeSidebarPage?: HomeSidebarPage;
   counts?: HomeSidebarProps['counts'];
@@ -59,10 +65,16 @@ type HomeDashboardProps = {
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
   onReopenRecentDocument(document: PersistedDocument): void | Promise<void>;
   onOpenFavoriteDocument?(document: FavoriteDocument): boolean | void | Promise<boolean | void>;
-  canOpenBookmark?(bookmark: PersistedBookmarkRecord): boolean;
-  onDeleteBookmark?(bookmark: PersistedBookmarkRecord): void | Promise<void>;
-  onOpenBookmark?(bookmark: PersistedBookmarkRecord): void | Promise<void>;
-  onRenameBookmark?(bookmark: PersistedBookmarkRecord, title: string): void | Promise<void>;
+  canOpenBookmark?(bookmark: BookmarkManagementRecord): boolean;
+  onOpenBookmark?(bookmark: BookmarkManagementRecord): void | Promise<void>;
+  onUpdateBookmark?(
+    bookmark: BookmarkManagementRecord,
+    updates: BookmarkUpdateInput,
+  ): Promise<void>;
+  onDeleteBookmarks?(
+    bookmarks: BookmarkManagementRecord[],
+  ): Promise<BookmarkDeleteResult>;
+  onRefreshBookmarks?(): void | Promise<void>;
   onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
   onToggleDocumentTag(document: PersistedDocument, tag: Tag, selected: boolean): void | Promise<void>;
   onRemoveRecentDocuments(documents: PersistedDocument[]): void | Promise<void>;
@@ -92,8 +104,9 @@ type HomeDashboardProps = {
 export function HomeDashboard({
   recentDocuments,
   favoriteDocuments,
-  bookmarks = [],
-  bookmarkError = null,
+  bookmarkDashboard = null,
+  bookmarkDashboardLoading = false,
+  bookmarkDashboardError = null,
   availableTags = [],
   activeSidebarPage = 'home',
   counts = {
@@ -117,9 +130,10 @@ export function HomeDashboard({
   onReopenRecentDocument,
   onOpenFavoriteDocument,
   canOpenBookmark = () => true,
-  onDeleteBookmark = noop,
   onOpenBookmark = noop,
-  onRenameBookmark = noop,
+  onUpdateBookmark = async () => undefined,
+  onDeleteBookmarks = async () => ({ succeededIds: [], failedIds: [] }),
+  onRefreshBookmarks = noop,
   onToggleFavorite,
   onToggleDocumentTag,
   onRemoveRecentDocuments,
@@ -320,14 +334,17 @@ export function HomeDashboard({
   );
 
   const bookmarksContent = (
-    <div className="home-content home-blank-content">
+    <div className="home-content bookmark-management-home-content">
       <HomeBookmarksWorkspace
-        bookmarks={bookmarks}
-        error={bookmarkError}
+        dashboard={bookmarkDashboard}
+        loading={bookmarkDashboardLoading}
+        error={bookmarkDashboardError}
         canOpenBookmark={canOpenBookmark}
-        onDeleteBookmark={onDeleteBookmark}
+        onOpenPdf={handleOpenPdf}
         onOpenBookmark={onOpenBookmark}
-        onRenameBookmark={onRenameBookmark}
+        onUpdateBookmark={onUpdateBookmark}
+        onDeleteBookmarks={onDeleteBookmarks}
+        onRefresh={onRefreshBookmarks}
       />
     </div>
   );

@@ -5,10 +5,15 @@ import type { FavoriteDocument } from '../favorites/favoriteModels';
 import { HomeDashboard } from '../home/HomeDashboard';
 import type { HomeSidebarPage } from '../home/HomeSidebar';
 import type {
+  BookmarkDeleteResult,
+  BookmarkManagementRecord,
+  BookmarkUpdateInput,
+} from '../home/bookmarkManagementUtils';
+import type {
+  BookmarkDashboard,
   CacheStats,
   PersistedAnnotationRecord,
   PersistedBookmark,
-  PersistedBookmarkRecord,
   PersistedDocument,
 } from '../persistence/persistenceApi';
 import type { ReaderPreferences } from '../preferences/preferencesModels';
@@ -44,8 +49,9 @@ type ReaderWorkspaceSwitchProps = {
   favoriteDocuments: FavoriteDocument[];
   globalSearchAnnotationError: string | null;
   globalSearchAnnotations: PersistedAnnotationRecord[];
-  globalSearchBookmarkError: string | null;
-  globalSearchBookmarks: PersistedBookmarkRecord[];
+  bookmarkDashboard: BookmarkDashboard | null;
+  bookmarkDashboardError: string | null;
+  bookmarkDashboardLoading: boolean;
   lastSearchCommand: string;
   pageInput: string;
   persistence: Parameters<typeof TagManager>[0]['persistence'];
@@ -66,6 +72,9 @@ type ReaderWorkspaceSwitchProps = {
   closeActiveTab(): void;
   closeToolWorkspace(): void;
   deleteBookmark(bookmark: Bookmark): void | Promise<void>;
+  deleteManagedBookmarks(
+    bookmarks: BookmarkManagementRecord[],
+  ): Promise<BookmarkDeleteResult>;
   deleteAnnotationForDocument(documentKey: string, annotationId: number): void;
   handleBrowserFileChange(event: ChangeEvent<HTMLInputElement>): void;
   handleImportBrowserFileChange(event: ChangeEvent<HTMLInputElement>): void;
@@ -99,6 +108,7 @@ type ReaderWorkspaceSwitchProps = {
   openSettingsWorkspace(initialSection?: SettingsSection): void;
   openShortcutWorkspace(workspace: AppWorkspace): void;
   renameBookmark(bookmark: Bookmark, title: string): void | Promise<void>;
+  refreshBookmarkDashboard(): void | Promise<void>;
   reopenRecentDocument(document: PersistedDocument): Promise<boolean>;
   runSearch(keyword: string): void;
   selectReaderSession(sessionId: string): void;
@@ -109,6 +119,10 @@ type ReaderWorkspaceSwitchProps = {
   setWorkspaceOverride(workspace: AppWorkspace | null): void;
   stepHistoryBack(): void;
   stepHistoryForward(): void;
+  updateManagedBookmark(
+    bookmark: BookmarkManagementRecord,
+    updates: BookmarkUpdateInput,
+  ): Promise<void>;
 };
 
 export function ReaderWorkspaceSwitch({
@@ -127,8 +141,9 @@ export function ReaderWorkspaceSwitch({
   favoriteDocuments,
   globalSearchAnnotationError,
   globalSearchAnnotations,
-  globalSearchBookmarkError,
-  globalSearchBookmarks,
+  bookmarkDashboard,
+  bookmarkDashboardError,
+  bookmarkDashboardLoading,
   lastSearchCommand,
   pageInput,
   persistence,
@@ -149,6 +164,7 @@ export function ReaderWorkspaceSwitch({
   closeActiveTab,
   closeToolWorkspace,
   deleteBookmark,
+  deleteManagedBookmarks,
   deleteAnnotationForDocument,
   handleBrowserFileChange,
   handleImportBrowserFileChange,
@@ -177,6 +193,7 @@ export function ReaderWorkspaceSwitch({
   openSettingsWorkspace,
   openShortcutWorkspace,
   renameBookmark,
+  refreshBookmarkDashboard,
   reopenRecentDocument,
   runSearch,
   selectReaderSession,
@@ -187,6 +204,7 @@ export function ReaderWorkspaceSwitch({
   setWorkspaceOverride,
   stepHistoryBack,
   stepHistoryForward,
+  updateManagedBookmark,
 }: ReaderWorkspaceSwitchProps) {
   return (
     <>
@@ -241,13 +259,14 @@ export function ReaderWorkspaceSwitch({
       ) : null}
       {activeWorkspace === 'bookmarks' ? (
         <BookmarkManagerWorkspace
-          bookmarks={globalSearchBookmarks}
-          error={globalSearchBookmarkError}
+          dashboard={bookmarkDashboard}
+          loading={bookmarkDashboardLoading}
+          error={bookmarkDashboardError}
           canOpenBookmark={(bookmark) =>
             canOpenRecordPage(bookmark.documentKey, bookmark.documentPath, bookmark.documentMissing)
           }
           onClose={closeToolWorkspace}
-          onDeleteBookmark={deleteBookmark}
+          onOpenPdf={openPdf}
           onOpenBookmark={(bookmark) =>
             void openRecordPage(
               bookmark.documentKey,
@@ -256,7 +275,9 @@ export function ReaderWorkspaceSwitch({
               bookmark.documentMissing,
             )
           }
-          onRenameBookmark={renameBookmark}
+          onUpdateBookmark={updateManagedBookmark}
+          onDeleteBookmarks={deleteManagedBookmarks}
+          onRefresh={refreshBookmarkDashboard}
         />
       ) : null}
       {activeWorkspace === 'tags' ? (
@@ -317,8 +338,9 @@ export function ReaderWorkspaceSwitch({
         <HomeDashboard
           recentDocuments={recentDocuments}
           favoriteDocuments={favoriteDocuments}
-          bookmarks={globalSearchBookmarks}
-          bookmarkError={globalSearchBookmarkError}
+          bookmarkDashboard={bookmarkDashboard}
+          bookmarkDashboardLoading={bookmarkDashboardLoading}
+          bookmarkDashboardError={bookmarkDashboardError}
           availableTags={availableTags}
           activeSidebarPage={activeSidebarPage}
           appVersion={appVersion}
@@ -341,7 +363,6 @@ export function ReaderWorkspaceSwitch({
           canOpenBookmark={(bookmark) =>
             canOpenRecordPage(bookmark.documentKey, bookmark.documentPath, bookmark.documentMissing)
           }
-          onDeleteBookmark={deleteBookmark}
           onOpenBookmark={(bookmark) =>
             void openRecordPage(
               bookmark.documentKey,
@@ -350,7 +371,9 @@ export function ReaderWorkspaceSwitch({
               bookmark.documentMissing,
             )
           }
-          onRenameBookmark={renameBookmark}
+          onUpdateBookmark={updateManagedBookmark}
+          onDeleteBookmarks={deleteManagedBookmarks}
+          onRefreshBookmarks={refreshBookmarkDashboard}
           onToggleFavorite={handleToggleFavorite}
           onToggleDocumentTag={handleToggleDocumentTag}
           onRemoveRecentDocuments={handleRemoveRecentDocuments}
@@ -362,7 +385,7 @@ export function ReaderWorkspaceSwitch({
           onOpenAnnotations={() => openShortcutWorkspace('annotations')}
           onOpenBookmarks={() => {
             openHomeSidebarPage('bookmarks');
-            openGlobalSearch();
+            void refreshBookmarkDashboard();
           }}
           onOpenHome={() => openHomeSidebarPage('home')}
           onOpenRecentFiles={() => openHomeSidebarPage('recentFiles')}

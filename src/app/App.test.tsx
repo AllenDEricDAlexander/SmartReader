@@ -2,6 +2,7 @@ import { act, createEvent, fireEvent, screen, waitFor, within } from '@testing-l
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
+  BookmarkDashboard,
   PersistedAnnotationRecord,
   PersistedBookmarkRecord,
   PersistenceApi,
@@ -94,6 +95,43 @@ function createDeferred<T>() {
   });
 
   return { promise, resolve, reject };
+}
+
+function dashboardFromRecords(
+  records: PersistedBookmarkRecord[],
+  fileSize: number | null = null,
+  pageCount: number | null = null,
+): BookmarkDashboard {
+  const groups = new Map<string, PersistedBookmarkRecord[]>();
+  for (const record of records) {
+    const group = groups.get(record.documentKey) ?? [];
+    group.push(record);
+    groups.set(record.documentKey, group);
+  }
+
+  return {
+    totalBookmarks: records.length,
+    groups: [...groups.values()].map((bookmarks) => ({
+      document: {
+        documentKey: bookmarks[0].documentKey,
+        displayName: bookmarks[0].documentDisplayName ?? bookmarks[0].documentKey,
+        path: bookmarks[0].documentPath,
+        missing: bookmarks[0].documentMissing,
+        fileSize,
+        pageCount,
+      },
+      bookmarkCount: bookmarks.length,
+      bookmarks: bookmarks.map((bookmark) => ({
+        id: bookmark.id,
+        documentKey: bookmark.documentKey,
+        page: bookmark.page,
+        title: bookmark.title,
+        note: bookmark.note,
+        createdAt: bookmark.createdAt,
+        updatedAt: bookmark.updatedAt,
+      })),
+    })),
+  };
 }
 
 function mainNavigation() {
@@ -2013,11 +2051,12 @@ describe('App', () => {
     expect(screen.getByText('当前没有快捷键冲突。')).toBeInTheDocument();
   });
 
-  it('routes top bar shortcuts to local workspaces', () => {
+  it('routes top bar shortcuts to local workspaces', async () => {
+    const persistence = createEmptyPersistence();
     renderApp(
       <App
         bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
-        persistence={createEmptyPersistence()}
+        persistence={persistence}
         viewerRenderer={testViewerRenderer}
       />,
     );
@@ -2034,8 +2073,12 @@ describe('App', () => {
     expect(screen.getByLabelText('批注管理工作区')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '返回首页' }));
+    vi.mocked(persistence.listAllAnnotations).mockClear();
     fireEvent.click(screen.getByRole('button', { name: '书签' }));
-    expect(screen.getByRole('region', { name: '书签管理' })).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: '书签管理' })).toBeInTheDocument();
+    expect(persistence.loadBookmarkDashboard).toHaveBeenCalledTimes(1);
+    expect(persistence.listAllAnnotations).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: '全局搜索' })).not.toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
     expect(screen.queryByLabelText('书签管理工作区')).not.toBeInTheDocument();
 
@@ -2318,7 +2361,9 @@ describe('App', () => {
           tagIds: [],
         },
       ]),
-      listAllBookmarks: vi.fn().mockResolvedValue(bookmarkRecords),
+      loadBookmarkDashboard: vi.fn().mockResolvedValue(
+        dashboardFromRecords(bookmarkRecords, 2048, 20),
+      ),
       listAllAnnotations: vi.fn().mockResolvedValue(annotationRecords),
       loadReaderSession: vi.fn().mockResolvedValue(null),
     };
@@ -2359,15 +2404,14 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '书签' }));
     expect(await screen.findByText('关键书签')).toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole('button', { name: /关键书签.*records\.pdf.*第 6 页/ }),
-    );
+    fireEvent.click(await screen.findByText('关键书签'));
+    fireEvent.click(screen.getByRole('button', { name: '跳转到书签 关键书签' }));
 
     expect(await screen.findByRole('tab', { name: 'records.pdf' })).toBeInTheDocument();
     await waitFor(() => {
       expect(viewerController.jumpToPage).toHaveBeenCalledWith(6);
     });
-    expect(persistence.listAllBookmarks).toHaveBeenCalled();
+    expect(persistence.loadBookmarkDashboard).toHaveBeenCalled();
     expect(persistence.listAllAnnotations).toHaveBeenCalled();
   });
 
@@ -2404,7 +2448,9 @@ describe('App', () => {
           tagIds: [],
         },
       ]),
-      listAllBookmarks: vi.fn().mockResolvedValue(bookmarkRecords),
+      loadBookmarkDashboard: vi.fn().mockResolvedValue(
+        dashboardFromRecords(bookmarkRecords, 2048, 20),
+      ),
       loadReaderSession: vi.fn().mockResolvedValue(null),
     };
 
@@ -2418,11 +2464,8 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '书签' }));
     expect(await screen.findByRole('region', { name: '书签管理' })).toBeInTheDocument();
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: /失效书签.*missing-bookmark\.pdf.*第 6 页/,
-      }),
-    );
+    fireEvent.click(await screen.findByText('失效书签'));
+    fireEvent.click(screen.getByRole('button', { name: '跳转到书签 失效书签' }));
 
     await waitFor(() => {
       expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/missing-bookmark.pdf');
@@ -2468,7 +2511,7 @@ describe('App', () => {
 
     expect(dialog).toBeInTheDocument();
     expect(await within(dialog).findByText('打开文件')).toBeInTheDocument();
-    expect(persistence.listAllBookmarks).toHaveBeenCalled();
+    expect(persistence.loadBookmarkDashboard).toHaveBeenCalled();
     expect(persistence.listAllAnnotations).toHaveBeenCalled();
   });
 
@@ -2508,7 +2551,7 @@ describe('App', () => {
           tagIds: [],
         },
       ]),
-      listAllBookmarks: vi.fn().mockRejectedValue(new Error('bookmark provider failed')),
+      loadBookmarkDashboard: vi.fn().mockRejectedValue(new Error('bookmark provider failed')),
       listAllAnnotations: vi.fn().mockResolvedValue(annotationRecords),
       loadReaderSession: vi.fn().mockResolvedValue(null),
     };
@@ -2906,11 +2949,11 @@ describe('App', () => {
         documentMissing: false,
       },
     ];
-    const firstBookmarkLoad = createDeferred<PersistedBookmarkRecord[]>();
-    const secondBookmarkLoad = createDeferred<PersistedBookmarkRecord[]>();
+    const firstBookmarkLoad = createDeferred<BookmarkDashboard>();
+    const secondBookmarkLoad = createDeferred<BookmarkDashboard>();
     const persistence = {
       ...createEmptyPersistence(),
-      listAllBookmarks: vi
+      loadBookmarkDashboard: vi
         .fn()
         .mockReturnValueOnce(firstBookmarkLoad.promise)
         .mockReturnValueOnce(secondBookmarkLoad.promise),
@@ -2933,17 +2976,17 @@ describe('App', () => {
     });
 
     await waitFor(() => {
-      expect(persistence.listAllBookmarks).toHaveBeenCalledTimes(2);
+      expect(persistence.loadBookmarkDashboard).toHaveBeenCalledTimes(2);
     });
 
     await act(async () => {
-      secondBookmarkLoad.resolve(freshBookmarks);
+      secondBookmarkLoad.resolve(dashboardFromRecords(freshBookmarks));
       await secondBookmarkLoad.promise;
     });
     expect(await within(dialog).findByText('Fresh bookmark')).toBeInTheDocument();
 
     await act(async () => {
-      firstBookmarkLoad.resolve(oldBookmarks);
+      firstBookmarkLoad.resolve(dashboardFromRecords(oldBookmarks));
       await firstBookmarkLoad.promise;
     });
 
@@ -2951,10 +2994,188 @@ describe('App', () => {
     expect(within(dialog).queryByText('Old bookmark')).not.toBeInTheDocument();
   });
 
+  it('updates a managed bookmark once and refreshes the shared dashboard', async () => {
+    const original: PersistedBookmarkRecord = {
+      id: 21,
+      documentKey: 'desktop:/tmp/edit.pdf',
+      page: 7,
+      title: 'Original bookmark',
+      note: null,
+      createdAt: '2026-07-20T00:00:00Z',
+      updatedAt: '2026-07-20T00:00:00Z',
+      documentDisplayName: 'edit.pdf',
+      documentPath: '/tmp/edit.pdf',
+      documentMissing: false,
+    };
+    const updated: PersistedBookmarkRecord = {
+      ...original,
+      title: 'Updated bookmark',
+      note: 'Review this result',
+      updatedAt: '2026-07-20T01:00:00Z',
+    };
+    const saveBookmark = vi
+      .fn()
+      .mockImplementation(async (bookmark) => ({ ...bookmark, id: original.id }));
+    const persistence = {
+      ...createEmptyPersistence(),
+      saveBookmark,
+      loadBookmarkDashboard: vi
+        .fn()
+        .mockResolvedValueOnce(dashboardFromRecords([original], 1024, 10))
+        .mockResolvedValueOnce(dashboardFromRecords([updated], 1024, 10)),
+    };
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '书签' }));
+    fireEvent.click(await screen.findByText('Original bookmark'));
+    fireEvent.click(screen.getByRole('button', { name: '编辑备注 Original bookmark' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '书签名称' }), {
+      target: { value: 'Updated bookmark' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: '书签备注' }), {
+      target: { value: 'Review this result' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存书签' }));
+
+    await waitFor(() => {
+      expect(saveBookmark).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 21,
+          title: 'Updated bookmark',
+          note: 'Review this result',
+        }),
+      );
+    });
+    expect(await screen.findAllByText('Updated bookmark')).not.toHaveLength(0);
+    expect(persistence.loadBookmarkDashboard).toHaveBeenCalledTimes(2);
+  });
+
+  it('deletes selected bookmarks sequentially and retains the failed record', async () => {
+    const records: PersistedBookmarkRecord[] = [
+      {
+        id: 31,
+        documentKey: 'desktop:/tmp/batch.pdf',
+        page: 3,
+        title: 'Delete success',
+        note: null,
+        createdAt: '2026-07-20T00:00:00Z',
+        updatedAt: '2026-07-20T00:00:00Z',
+        documentDisplayName: 'batch.pdf',
+        documentPath: '/tmp/batch.pdf',
+        documentMissing: false,
+      },
+      {
+        id: 32,
+        documentKey: 'desktop:/tmp/batch.pdf',
+        page: 4,
+        title: 'Delete failure',
+        note: null,
+        createdAt: '2026-07-20T01:00:00Z',
+        updatedAt: '2026-07-20T01:00:00Z',
+        documentDisplayName: 'batch.pdf',
+        documentPath: '/tmp/batch.pdf',
+        documentMissing: false,
+      },
+    ];
+    const calls: string[] = [];
+    const deleteBookmark = vi.fn().mockImplementation(async (id: number) => {
+      calls.push(`start:${id}`);
+      await Promise.resolve();
+      calls.push(`finish:${id}`);
+      if (id === 32) {
+        throw new Error('delete failed');
+      }
+    });
+    const persistence = {
+      ...createEmptyPersistence(),
+      deleteBookmark,
+      loadBookmarkDashboard: vi
+        .fn()
+        .mockResolvedValueOnce(dashboardFromRecords(records, 1024, 10))
+        .mockResolvedValueOnce(dashboardFromRecords([records[1]], 1024, 10)),
+    };
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '书签' }));
+    await screen.findByText('Delete success');
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择书签 Delete success' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择书签 Delete failure' }));
+    fireEvent.click(screen.getByRole('button', { name: '批量删除 2 条书签' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认批量删除' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('成功 1 条，失败 1 条');
+    });
+    expect(calls).toEqual([
+      'start:31',
+      'finish:31',
+      'start:32',
+      'finish:32',
+    ]);
+    expect(screen.queryByText('Delete success')).not.toBeInTheDocument();
+    expect(screen.getByText('Delete failure')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: '选择书签 Delete failure' })).toBeChecked();
+  });
+
+  it('retains the last successful dashboard after a background refresh fails', async () => {
+    const records: PersistedBookmarkRecord[] = [
+      {
+        id: 41,
+        documentKey: 'desktop:/tmp/retained.pdf',
+        page: 5,
+        title: 'Retained bookmark',
+        note: null,
+        createdAt: '2026-07-20T00:00:00Z',
+        updatedAt: '2026-07-20T00:00:00Z',
+        documentDisplayName: 'retained.pdf',
+        documentPath: '/tmp/retained.pdf',
+        documentMissing: false,
+      },
+    ];
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadBookmarkDashboard: vi
+        .fn()
+        .mockResolvedValueOnce(dashboardFromRecords(records, 1024, 10))
+        .mockRejectedValueOnce(new Error('refresh failed')),
+    };
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '书签' }));
+    expect(await screen.findByText('Retained bookmark')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('全局搜索'));
+    const searchDialog = await screen.findByRole('dialog', { name: '全局搜索' });
+    await within(searchDialog).findByText('书签加载失败，请重试。');
+    fireEvent.click(within(searchDialog).getByRole('button', { name: '关闭全局搜索' }));
+
+    expect(screen.getByText('Retained bookmark')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('书签加载失败，请重试。');
+    expect(screen.getByRole('button', { name: '重新加载书签' })).toBeInTheDocument();
+  });
+
   it('shows inline manager errors when persisted records fail to load', async () => {
     const persistence = {
       ...createEmptyPersistence(),
-      listAllBookmarks: vi.fn().mockRejectedValue(new Error('bookmark provider failed')),
+      loadBookmarkDashboard: vi.fn().mockRejectedValue(new Error('bookmark provider failed')),
       listAllAnnotations: vi.fn().mockRejectedValue(new Error('annotation provider failed')),
     };
 
