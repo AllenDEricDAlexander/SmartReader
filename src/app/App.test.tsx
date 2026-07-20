@@ -49,6 +49,10 @@ function createEmptyPersistence(): PersistenceApi {
     saveBookmark: vi.fn(),
     listBookmarks: vi.fn().mockResolvedValue([]),
     listAllBookmarks: vi.fn().mockResolvedValue([]),
+    loadBookmarkDashboard: vi.fn().mockResolvedValue({
+      totalBookmarks: 0,
+      groups: [],
+    }),
     deleteBookmark: vi.fn(),
     saveAnnotation: vi.fn(),
     listAnnotations: vi.fn().mockResolvedValue([]),
@@ -1423,7 +1427,9 @@ describe('App', () => {
     fireEvent.keyDown(window, { key: 'd', metaKey: true });
 
     await waitFor(() => {
-      expect(persistence.saveBookmark).toHaveBeenCalled();
+      expect(persistence.saveBookmark).toHaveBeenCalledWith(
+        expect.objectContaining({ note: null }),
+      );
     });
   });
 
@@ -2263,6 +2269,7 @@ describe('App', () => {
         documentKey: 'desktop:/tmp/records.pdf',
         page: 6,
         title: '关键书签',
+        note: null,
         createdAt: '2026-07-01T00:00:00Z',
         updatedAt: '2026-07-01T00:00:00Z',
         documentDisplayName: 'records.pdf',
@@ -2371,6 +2378,7 @@ describe('App', () => {
         documentKey: 'desktop:/tmp/missing-bookmark.pdf',
         page: 6,
         title: '失效书签',
+        note: null,
         createdAt: '2026-07-01T00:00:00Z',
         updatedAt: '2026-07-01T00:00:00Z',
         documentDisplayName: 'missing-bookmark.pdf',
@@ -2876,6 +2884,7 @@ describe('App', () => {
         documentKey: 'desktop:/tmp/old.pdf',
         page: 3,
         title: 'Old bookmark',
+        note: null,
         createdAt: '2026-07-01T00:00:00Z',
         updatedAt: '2026-07-01T00:00:00Z',
         documentDisplayName: 'old.pdf',
@@ -2889,6 +2898,7 @@ describe('App', () => {
         documentKey: 'desktop:/tmp/fresh.pdf',
         page: 8,
         title: 'Fresh bookmark',
+        note: null,
         createdAt: '2026-07-01T00:00:00Z',
         updatedAt: '2026-07-01T00:00:00Z',
         documentDisplayName: 'fresh.pdf',

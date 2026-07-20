@@ -533,6 +533,7 @@ describe('HomeDashboard', () => {
       documentMissing: false,
       page: 12,
       title: '关键段落',
+      note: null,
       createdAt: '2026-07-07T10:00:00+08:00',
       updatedAt: '2026-07-07T10:00:00+08:00',
     };

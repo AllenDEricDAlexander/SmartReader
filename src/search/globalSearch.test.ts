@@ -7,6 +7,7 @@ const bookmark: PersistedBookmarkRecord = {
   documentKey: 'desktop:/tmp/ml.pdf',
   page: 8,
   title: 'Transformer overview',
+  note: 'Encoder-decoder dependency',
   createdAt: '2026-07-01T00:00:00Z',
   updatedAt: '2026-07-01T00:00:00Z',
   documentDisplayName: 'ml.pdf',
@@ -104,6 +105,25 @@ describe('buildGlobalSearchResults', () => {
       page: 8,
       documentKey: 'desktop:/tmp/ml.pdf',
     });
+  });
+
+  it('matches bookmark notes in global search', () => {
+    const results = buildGlobalSearchResults({
+      query: 'encoder-decoder',
+      recentDocuments: [],
+      favoriteDocuments: [],
+      bookmarks: [bookmark],
+      annotations: [],
+      activeSession: null,
+    });
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        id: 'bookmark:1',
+        source: 'bookmark',
+        title: 'Transformer overview',
+      }),
+    ]);
   });
 
   it('returns annotation results', () => {

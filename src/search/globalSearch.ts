@@ -124,6 +124,7 @@ function buildBookmarkResults(
     .filter((bookmark) =>
       matchesAny(normalizedQuery, [
         bookmark.title,
+        bookmark.note ?? '',
         bookmark.documentDisplayName ?? '',
         bookmark.documentPath ?? '',
       ]),

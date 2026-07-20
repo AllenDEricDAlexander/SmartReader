@@ -11,6 +11,7 @@ export type Bookmark = {
   documentKey: string;
   page: number;
   title: string;
+  note: string | null;
   createdAt: string;
   updatedAt: string;
 };

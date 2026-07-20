@@ -66,6 +66,7 @@ export function useReaderDecorations({
       documentKey: activeSession.documentKey,
       page: activeSession.page,
       title: `Page ${activeSession.page}`,
+      note: null,
       createdAt: now,
       updatedAt: now,
     });

@@ -80,6 +80,7 @@ describe('persistenceApi', () => {
       documentKey: 'desktop:/tmp/book.pdf',
       page: 3,
       title: 'Method',
+      note: null,
       createdAt: '2026-06-16T00:00:00Z',
       updatedAt: '2026-06-16T00:00:00Z',
     });
@@ -101,7 +102,9 @@ describe('persistenceApi', () => {
     await api.listAnnotations('desktop:/tmp/book.pdf');
     await api.deleteAnnotation(9);
 
-    expect(invoke).toHaveBeenCalledWith('save_bookmark', expect.any(Object));
+    expect(invoke).toHaveBeenCalledWith('save_bookmark', {
+      bookmark: expect.objectContaining({ note: null }),
+    });
     expect(invoke).toHaveBeenCalledWith('list_bookmarks', {
       documentKey: 'desktop:/tmp/book.pdf',
     });
@@ -111,6 +114,41 @@ describe('persistenceApi', () => {
       documentKey: 'desktop:/tmp/book.pdf',
     });
     expect(invoke).toHaveBeenCalledWith('delete_annotation', { id: 9 });
+  });
+
+  it('loads the bookmark dashboard and forwards nullable notes', async () => {
+    const dashboard = {
+      totalBookmarks: 1,
+      groups: [
+        {
+          document: {
+            documentKey: 'desktop:/tmp/book.pdf',
+            displayName: 'book.pdf',
+            path: '/tmp/book.pdf',
+            missing: false,
+            fileSize: 4096,
+            pageCount: 20,
+          },
+          bookmarkCount: 1,
+          bookmarks: [
+            {
+              id: 7,
+              documentKey: 'desktop:/tmp/book.pdf',
+              page: 3,
+              title: 'Method',
+              note: null,
+              createdAt: '2026-07-20T00:00:00Z',
+              updatedAt: '2026-07-20T00:00:00Z',
+            },
+          ],
+        },
+      ],
+    };
+    const invoke = vi.fn().mockResolvedValue(dashboard);
+    const api = createPersistenceApi(invoke);
+
+    await expect(api.loadBookmarkDashboard()).resolves.toEqual(dashboard);
+    expect(invoke).toHaveBeenCalledWith('load_bookmark_dashboard');
   });
 
   it('persists reader preferences', async () => {

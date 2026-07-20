@@ -44,6 +44,7 @@ export type PersistedBookmark = {
   documentKey: string;
   page: number;
   title: string;
+  note: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -52,6 +53,26 @@ export type PersistedBookmarkRecord = PersistedBookmark & {
   documentDisplayName: string | null;
   documentPath: string | null;
   documentMissing: boolean;
+};
+
+export type BookmarkDashboardDocument = {
+  documentKey: string;
+  displayName: string;
+  path: string | null;
+  missing: boolean;
+  fileSize: number | null;
+  pageCount: number | null;
+};
+
+export type BookmarkDashboardGroup = {
+  document: BookmarkDashboardDocument;
+  bookmarkCount: number;
+  bookmarks: PersistedBookmark[];
+};
+
+export type BookmarkDashboard = {
+  totalBookmarks: number;
+  groups: BookmarkDashboardGroup[];
 };
 
 export type PersistedHighlightArea = {
@@ -98,6 +119,7 @@ export type CorePersistenceApi = {
   saveBookmark(bookmark: PersistedBookmark): Promise<PersistedBookmark>;
   listBookmarks(documentKey: string): Promise<PersistedBookmark[]>;
   listAllBookmarks(): Promise<PersistedBookmarkRecord[]>;
+  loadBookmarkDashboard(): Promise<BookmarkDashboard>;
   deleteBookmark(id: number): Promise<void>;
   saveAnnotation(annotation: PersistedAnnotation): Promise<PersistedAnnotation>;
   listAnnotations(documentKey: string): Promise<PersistedAnnotation[]>;
@@ -153,6 +175,9 @@ export function createPersistenceApi(invoke: Invoke = tauriInvoke): PersistenceA
     },
     listAllBookmarks() {
       return invoke<PersistedBookmarkRecord[]>('list_all_bookmarks');
+    },
+    loadBookmarkDashboard() {
+      return invoke<BookmarkDashboard>('load_bookmark_dashboard');
     },
     deleteBookmark(id) {
       return invoke<void>('delete_bookmark', { id });

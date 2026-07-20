@@ -17,6 +17,7 @@ describe('annotationStore bookmarks', () => {
       documentKey: 'desktop:/tmp/book.pdf',
       page: 10,
       title: 'Results',
+      note: null,
       createdAt: '2026-06-16T00:00:00Z',
       updatedAt: '2026-06-16T00:00:00Z',
     };
@@ -36,6 +37,7 @@ describe('annotationStore bookmarks', () => {
             documentKey: 'desktop:/tmp/book.pdf',
             page: 1,
             title: 'Intro',
+            note: null,
             createdAt: '2026-06-16T00:00:00Z',
             updatedAt: '2026-06-16T00:00:00Z',
           },
