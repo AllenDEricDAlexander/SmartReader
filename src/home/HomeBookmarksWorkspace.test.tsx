@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { BookmarkDashboard } from '../persistence/persistenceApi';
@@ -681,5 +683,52 @@ describe('HomeBookmarksWorkspace', () => {
       expect(screen.queryByRole('checkbox', { name: '选择当前页书签' })).not.toBeInTheDocument();
     });
     expect(screen.getByRole('status')).toHaveTextContent('成功 2 条，失败 0 条');
+  });
+
+  it('keeps bookmark styles scoped and moves the detail rail below at the desktop breakpoint', () => {
+    const styles = readFileSync(join(process.cwd(), 'src/app/styles.css'), 'utf8');
+
+    expect(styles).toMatch(
+      /\.bookmark-management-layout\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+320px;/s,
+    );
+    expect(styles).toMatch(
+      /\.home-content\.bookmark-management-home-content\s*{[^}]*padding:\s*0;[^}]*overflow:\s*hidden;/s,
+    );
+    expect(styles).toMatch(
+      /@media \(max-width:\s*1180px\)\s*{[^@]*\.bookmark-management-layout\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s,
+    );
+    expect(styles).toMatch(
+      /\.bookmark-management-groups\[data-density='compact'\][^{]*\s[^}]*padding:/s,
+    );
+    expect(styles).toMatch(
+      /\.bookmark-management-row\[aria-selected='true'\]\s*{[^}]*background:/s,
+    );
+    expect(styles).not.toMatch(
+      /(^|[\s,>])table\s*{[^}]*bookmark-management/s,
+    );
+  });
+
+  it('exposes selected, expanded, busy, and async states without color-only meaning', async () => {
+    renderWorkspace({
+      onUpdateBookmark: vi.fn(
+        () => new Promise<void>(() => undefined),
+      ),
+    });
+    const groupButton = screen.getByRole('button', { name: '收起 Transformer.pdf' });
+    expect(groupButton).toHaveAttribute('aria-expanded', 'true');
+
+    const row = screen.getByTestId('bookmark-management-row-1');
+    fireEvent.click(row);
+    expect(row).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑备注 自注意力机制' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存书签' }));
+    expect(screen.getByRole('button', { name: '保存书签' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '取消编辑' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '关闭编辑书签' })).toBeDisabled();
+    expect(screen.getByRole('dialog', { name: '编辑书签' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
   });
 });

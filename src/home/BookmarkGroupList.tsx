@@ -71,7 +71,7 @@ export function BookmarkGroupList({
       data-density={density}
     >
       {batchMode ? (
-        <div className="bookmark-management-page-selection">
+        <div className="bookmark-management-batch-toolbar">
           <input
             type="checkbox"
             aria-label="选择当前页书签"
@@ -113,14 +113,13 @@ export function BookmarkGroupList({
               onToggle={() => onToggleDocument(group.document.documentKey)}
             />
             {expanded ? (
-              <div id={contentId} className="bookmark-management-group-content">
-                <table>
+              <div id={contentId} className="bookmark-management-table-wrap">
+                <table className="bookmark-management-table">
                   <thead>
                     <tr>
                       {batchMode ? (
                         <th
                           scope="col"
-                          className="bookmark-management-checkbox-cell"
                           aria-label="选择"
                         />
                       ) : null}
@@ -185,8 +184,9 @@ function BookmarkGroupHeader({
   onToggle(): void;
 }) {
   return (
-    <header className="bookmark-management-group-header">
+    <header>
       <button
+        className="bookmark-management-group-heading"
         id={headingId}
         type="button"
         aria-expanded={expanded}
@@ -201,8 +201,10 @@ function BookmarkGroupHeader({
         )}
         <FileText size={16} aria-hidden="true" />
         <strong>{group.document.displayName}</strong>
-        <span>{group.bookmarkCount} 个书签</span>
-        {group.document.missing ? <span>源文件不可用</span> : null}
+        <small>{group.bookmarkCount} 个书签</small>
+        {group.document.missing ? (
+          <span className="bookmark-management-missing">源文件不可用</span>
+        ) : null}
       </button>
     </header>
   );
@@ -281,6 +283,7 @@ function BookmarkListItem({
   return (
     <tr
       ref={setRowRef}
+      className="bookmark-management-row"
       tabIndex={0}
       aria-selected={selected}
       data-testid={
@@ -292,7 +295,7 @@ function BookmarkListItem({
       onKeyDown={handleKeyboardSelection}
     >
       {batchMode ? (
-        <td className="bookmark-management-checkbox-cell">
+        <td>
           {bookmark.id != null ? (
             <input
               type="checkbox"
@@ -306,10 +309,10 @@ function BookmarkListItem({
           ) : null}
         </td>
       ) : null}
-      <td className="bookmark-management-title" title={bookmark.title}>
+      <td className="bookmark-management-row-main" title={bookmark.title}>
         {bookmark.title}
       </td>
-      <td>
+      <td className="bookmark-management-page-progress">
         <span>{progress.pageLabel}</span>
         {progress.percent != null ? <small>{progress.percent}%</small> : null}
       </td>
@@ -334,7 +337,7 @@ function BookmarkListItem({
         </button>
         {menuOpen ? (
           <div
-            className="bookmark-management-row-menu"
+            className="bookmark-management-menu"
             role="menu"
             aria-label={`书签操作 ${bookmark.title}`}
             onKeyDown={(event) =>

@@ -94,7 +94,7 @@ export function BookmarkEditorDialog({
     <div className="bookmark-management-dialog-backdrop">
       <form
         ref={dialogRef}
-        className="bookmark-management-dialog bookmark-management-editor"
+        className="bookmark-management-dialog"
         role="dialog"
         aria-modal="true"
         aria-label="编辑书签"
@@ -138,7 +138,7 @@ export function BookmarkEditorDialog({
         </label>
         {validationError ? <p role="alert">{validationError}</p> : null}
         {error ? <p role="alert">{error}</p> : null}
-        <footer>
+        <footer className="bookmark-management-dialog-actions">
           <button type="button" disabled={saving} onClick={requestClose}>
             取消编辑
           </button>
@@ -185,7 +185,7 @@ export function BookmarkConfirmDialog({
     <div className="bookmark-management-dialog-backdrop">
       <div
         ref={dialogRef}
-        className="bookmark-management-dialog bookmark-management-confirm"
+        className="bookmark-management-dialog"
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -194,7 +194,7 @@ export function BookmarkConfirmDialog({
       >
         <h2>{title}</h2>
         <p>{message}</p>
-        <footer>
+        <footer className="bookmark-management-dialog-actions">
           <button ref={cancelRef} type="button" disabled={busy} onClick={onCancel}>
             {cancelLabel}
           </button>

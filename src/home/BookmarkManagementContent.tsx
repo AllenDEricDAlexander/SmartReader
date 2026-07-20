@@ -308,9 +308,15 @@ export function BookmarkManagementContent({
           </div>
         ) : null}
         {copyStatus ? (
-          <p role={copyStatus.tone}>{copyStatus.message}</p>
+          <p className="bookmark-management-status" role={copyStatus.tone}>
+            {copyStatus.message}
+          </p>
         ) : null}
-        {deleteStatus ? <p role="status">{deleteStatus}</p> : null}
+        {deleteStatus ? (
+          <p className="bookmark-management-status" role="status">
+            {deleteStatus}
+          </p>
+        ) : null}
         <div className="bookmark-management-layout">
           <main className="bookmark-management-main">{body}</main>
           <BookmarkDetailPanel

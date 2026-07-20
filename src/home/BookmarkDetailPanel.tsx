@@ -52,7 +52,7 @@ export function BookmarkDetailPanel({
 
   return (
     <aside className="bookmark-management-detail" aria-label="书签详情">
-      <header className="bookmark-management-detail-heading">
+      <header>
         <div>
           <span>书签详情</span>
           <h2>{bookmark.title}</h2>
@@ -62,7 +62,7 @@ export function BookmarkDetailPanel({
         </button>
       </header>
 
-      <section className="bookmark-management-preview-card">
+      <section className="bookmark-management-page-preview">
         <FileText size={28} aria-hidden="true" />
         <strong>{progress.pageLabel}</strong>
         {progress.ratioLabel ? <span>{progress.ratioLabel}</span> : null}
@@ -95,7 +95,9 @@ export function BookmarkDetailPanel({
             <dd>{bookmark.documentPageCount ?? '—'}</dd>
           </div>
         </dl>
-        {bookmark.documentMissing ? <p>源文件不可用</p> : null}
+        {bookmark.documentMissing ? (
+          <p className="bookmark-management-missing">源文件不可用</p>
+        ) : null}
         <button
           type="button"
           aria-label={`打开文档 ${displayName}`}
@@ -112,7 +114,7 @@ export function BookmarkDetailPanel({
         <p>未识别章节</p>
       </section>
 
-      <nav className="bookmark-management-adjacent" aria-label="相邻书签">
+      <nav className="bookmark-management-neighbors" aria-label="相邻书签">
         <button
           type="button"
           aria-label={
