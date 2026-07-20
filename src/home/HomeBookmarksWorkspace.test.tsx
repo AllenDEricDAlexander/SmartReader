@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { BookmarkDashboard } from '../persistence/persistenceApi';
+import type { BookmarkDeleteResult } from './bookmarkManagementUtils';
 import { HomeBookmarksWorkspace } from './HomeBookmarksWorkspace';
 
 const dashboard: BookmarkDashboard = {
@@ -519,5 +520,166 @@ describe('HomeBookmarksWorkspace', () => {
     expect(screen.getByRole('button', { name: '编辑备注 正向过程' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '复制引用 正向过程' })).toBeEnabled();
     expect(screen.getAllByText('源文件不可用').length).toBeGreaterThan(0);
+  });
+
+  it('cancels single delete with safe default focus', () => {
+    const props = renderWorkspace();
+    fireEvent.click(screen.getByText('自注意力机制'));
+    const trigger = screen.getByRole('button', { name: '删除书签 自注意力机制' });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const dialog = screen.getByRole('dialog', { name: '删除书签' });
+    expect(dialog).toHaveTextContent('自注意力机制');
+    expect(dialog).toHaveTextContent('此操作不可撤销');
+    expect(screen.getByRole('button', { name: '取消删除' })).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
+    expect(screen.getByRole('button', { name: '确认删除' })).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: 'Tab' });
+    expect(screen.getByRole('button', { name: '取消删除' })).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: '取消删除' }));
+    expect(props.onDeleteBookmarks).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: '删除书签' })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('selects the next same-document bookmark after successful single delete', async () => {
+    const onDeleteBookmarks = vi.fn().mockResolvedValue({
+      succeededIds: [1],
+      failedIds: [],
+    });
+    renderWorkspace({ onDeleteBookmarks });
+    fireEvent.click(screen.getByText('自注意力机制'));
+    fireEvent.click(screen.getByRole('button', { name: '删除书签 自注意力机制' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
+
+    await waitFor(() => {
+      expect(onDeleteBookmarks).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 1, title: '自注意力机制' }),
+      ]);
+    });
+    expect(screen.getByRole('complementary', { name: '书签详情' })).toHaveTextContent(
+      '多头注意力',
+    );
+  });
+
+  it('keeps the selected bookmark when single delete fails', async () => {
+    renderWorkspace({
+      onDeleteBookmarks: vi.fn().mockResolvedValue({
+        succeededIds: [],
+        failedIds: [1],
+      }),
+    });
+    fireEvent.click(screen.getByText('自注意力机制'));
+    fireEvent.click(screen.getByRole('button', { name: '删除书签 自注意力机制' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('删除书签失败，请重试。');
+    expect(screen.getByTestId('bookmark-management-row-1')).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('disables every confirmation action while deletion is pending', () => {
+    renderWorkspace({
+      onDeleteBookmarks: vi.fn(
+        () => new Promise<BookmarkDeleteResult>(() => undefined),
+      ),
+    });
+    fireEvent.click(screen.getByText('自注意力机制'));
+    fireEvent.click(screen.getByRole('button', { name: '删除书签 自注意力机制' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
+
+    expect(screen.getByRole('dialog', { name: '删除书签' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: '确认删除' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '取消删除' })).toBeDisabled();
+  });
+
+  it('selects only the current page in batch mode and cancels without clearing detail', () => {
+    const pagedDashboard: BookmarkDashboard = {
+      totalBookmarks: 21,
+      groups: [
+        {
+          ...dashboard.groups[0],
+          bookmarkCount: 21,
+          bookmarks: Array.from({ length: 21 }, (_, index) => ({
+            id: index + 1,
+            documentKey: 'desktop:/papers/transformer.pdf',
+            page: index + 1,
+            title: `Bookmark ${index + 1}`,
+            note: null,
+            createdAt: `2026-07-${String((index % 20) + 1).padStart(2, '0')}T09:00:00+08:00`,
+            updatedAt: '2026-07-20T09:00:00+08:00',
+          })),
+        },
+      ],
+    };
+    renderWorkspace({ dashboard: pagedDashboard });
+    fireEvent.click(screen.getByText('Bookmark 1'));
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择当前页书签' }));
+
+    expect(screen.getByText('已选择 20 条书签')).toBeInTheDocument();
+    expect(screen.getAllByRole('checkbox', { name: /选择书签/ })).toHaveLength(20);
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(screen.getByRole('checkbox', { name: '选择当前页书签' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '选择书签 Bookmark 21' })).not.toBeChecked();
+    expect(screen.getByText('已选择 20 条书签')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '取消批量操作' }));
+    expect(screen.queryByRole('checkbox', { name: '选择当前页书签' })).not.toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: '书签详情' })).toHaveTextContent(
+      'Bookmark 1',
+    );
+  });
+
+  it('retains only failed IDs after partial batch deletion', async () => {
+    const onDeleteBookmarks = vi.fn().mockResolvedValue({
+      succeededIds: [1],
+      failedIds: [2],
+    });
+    renderWorkspace({ onDeleteBookmarks });
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择书签 自注意力机制' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择书签 多头注意力' }));
+    fireEvent.click(screen.getByRole('button', { name: '批量删除 2 条书签' }));
+
+    expect(screen.getByRole('dialog', { name: '批量删除书签' })).toHaveTextContent('2 条');
+    fireEvent.click(screen.getByRole('button', { name: '确认批量删除' }));
+
+    await waitFor(() => {
+      expect(onDeleteBookmarks).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 1 }),
+        expect.objectContaining({ id: 2 }),
+      ]);
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('成功 1 条，失败 1 条');
+    expect(screen.getByRole('checkbox', { name: '选择书签 自注意力机制' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '选择书签 多头注意力' })).toBeChecked();
+    expect(screen.getByText('已选择 1 条书签')).toBeInTheDocument();
+  });
+
+  it('exits batch mode after all selected bookmarks are deleted', async () => {
+    renderWorkspace({
+      onDeleteBookmarks: vi.fn().mockResolvedValue({
+        succeededIds: [1, 2],
+        failedIds: [],
+      }),
+    });
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择书签 自注意力机制' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择书签 多头注意力' }));
+    fireEvent.click(screen.getByRole('button', { name: '批量删除 2 条书签' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认批量删除' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('checkbox', { name: '选择当前页书签' })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('成功 2 条，失败 0 条');
   });
 });

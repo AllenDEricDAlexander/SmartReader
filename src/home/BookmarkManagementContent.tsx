@@ -11,12 +11,17 @@ import { BookmarkToolbar } from './BookmarkToolbar';
 import {
   buildBookmarkReference,
   findAdjacentBookmarks,
+  findSelectionAfterDelete,
   flattenBookmarkDashboard,
   type BookmarkDeleteResult,
   type BookmarkManagementRecord,
   type BookmarkUpdateInput,
 } from './bookmarkManagementUtils';
 import { useBookmarkManagement } from './useBookmarkManagement';
+
+type DeleteConfirmation =
+  | { kind: 'single'; bookmarks: BookmarkManagementRecord[] }
+  | { kind: 'batch'; bookmarks: BookmarkManagementRecord[] };
 
 export type BookmarkManagementContentProps = {
   dashboard: BookmarkDashboard | null;
@@ -42,6 +47,7 @@ export function BookmarkManagementContent({
   onOpenPdf,
   onOpenBookmark,
   onUpdateBookmark,
+  onDeleteBookmarks,
   onRefresh,
   onClose,
 }: BookmarkManagementContentProps) {
@@ -58,7 +64,14 @@ export function BookmarkManagementContent({
     tone: 'status' | 'alert';
     message: string;
   } | null>(null);
-  const [, setDeleteTarget] = useState<BookmarkManagementRecord | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] =
+    useState<DeleteConfirmation | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteStatus, setDeleteStatus] = useState<string | null>(null);
+  const selectedBatchBookmarks = records.filter(
+    (record) => record.id != null && management.selectedBatchIds.has(record.id),
+  );
   const adjacent =
     management.selectedBookmark?.id == null
       ? { previous: null, next: null }
@@ -95,6 +108,58 @@ export function BookmarkManagementContent({
       setCopyStatus({ tone: 'status', message: '引用已复制' });
     } catch {
       setCopyStatus({ tone: 'alert', message: '复制引用失败，请重试。' });
+    }
+  };
+  const requestSingleDelete = (bookmark: BookmarkManagementRecord) => {
+    setDeleteError(null);
+    setDeleteConfirmation({ kind: 'single', bookmarks: [bookmark] });
+  };
+  const confirmDelete = async () => {
+    if (!deleteConfirmation) {
+      return;
+    }
+
+    const target = deleteConfirmation;
+    const fallbackId =
+      target.kind === 'single' && target.bookmarks[0].id != null
+        ? findSelectionAfterDelete(
+            management.derived.allMatchingBookmarks,
+            target.bookmarks[0].id,
+          )
+        : null;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    setDeleteStatus(null);
+
+    try {
+      const result = await onDeleteBookmarks(target.bookmarks);
+      if (target.kind === 'single') {
+        const id = target.bookmarks[0].id;
+        if (id != null && result.succeededIds.includes(id)) {
+          management.setSelectedBookmarkId(fallbackId);
+          setDeleteConfirmation(null);
+        } else {
+          setDeleteError('删除书签失败，请重试。');
+        }
+        return;
+      }
+
+      management.setSelectedBatchIds(new Set(result.failedIds));
+      setDeleteStatus(
+        `批量删除完成：成功 ${result.succeededIds.length} 条，失败 ${result.failedIds.length} 条`,
+      );
+      setDeleteConfirmation(null);
+      if (result.failedIds.length === 0) {
+        management.setBatchMode(false);
+      }
+    } catch {
+      setDeleteError(
+        target.kind === 'single'
+          ? '删除书签失败，请重试。'
+          : '批量删除失败，所选书签未发生变化。',
+      );
+    } finally {
+      setDeleteBusy(false);
     }
   };
   const heading = (
@@ -171,6 +236,17 @@ export function BookmarkManagementContent({
           onStartBatch={management.startBatchMode}
           onCancelBatch={management.cancelBatchMode}
         />
+        {management.batchMode ? (
+          <BookmarkBatchToolbar
+            selectedCount={selectedBatchBookmarks.length}
+            onRequestDelete={() =>
+              setDeleteConfirmation({
+                kind: 'batch',
+                bookmarks: selectedBatchBookmarks,
+              })
+            }
+          />
+        ) : null}
         <p className="bookmark-management-status">
           当前页 {management.derived.visibleBookmarks.length} 条，共{' '}
           {management.derived.totalBookmarks} 条书签
@@ -202,7 +278,7 @@ export function BookmarkManagementContent({
               onOpenBookmark={(bookmark) => void onOpenBookmark(bookmark)}
               onEditBookmark={(bookmark) => openEditor(bookmark, 'title')}
               onCopyBookmark={(bookmark) => void copyReference(bookmark)}
-              onDeleteBookmark={setDeleteTarget}
+              onDeleteBookmark={requestSingleDelete}
             />
             <BookmarkPagination
               page={management.page}
@@ -234,6 +310,7 @@ export function BookmarkManagementContent({
         {copyStatus ? (
           <p role={copyStatus.tone}>{copyStatus.message}</p>
         ) : null}
+        {deleteStatus ? <p role="status">{deleteStatus}</p> : null}
         <div className="bookmark-management-layout">
           <main className="bookmark-management-main">{body}</main>
           <BookmarkDetailPanel
@@ -249,7 +326,7 @@ export function BookmarkManagementContent({
             onOpen={(bookmark) => void onOpenBookmark(bookmark)}
             onEdit={openEditor}
             onCopy={(bookmark) => void copyReference(bookmark)}
-            onDelete={setDeleteTarget}
+            onDelete={requestSingleDelete}
           />
         </div>
       </div>
@@ -283,7 +360,58 @@ export function BookmarkManagementContent({
           }}
         />
       ) : null}
+      {deleteConfirmation ? (
+        <>
+          <BookmarkConfirmDialog
+            title={
+              deleteConfirmation.kind === 'single'
+                ? '删除书签'
+                : '批量删除书签'
+            }
+            message={
+              deleteConfirmation.kind === 'single'
+                ? `确定删除“${deleteConfirmation.bookmarks[0].title}”吗？此操作不可撤销。`
+                : `确定删除选中的 ${deleteConfirmation.bookmarks.length} 条书签吗？此操作不可撤销。`
+            }
+            confirmLabel={
+              deleteConfirmation.kind === 'single' ? '确认删除' : '确认批量删除'
+            }
+            cancelLabel={
+              deleteConfirmation.kind === 'single' ? '取消删除' : '取消批量删除'
+            }
+            danger
+            busy={deleteBusy}
+            onCancel={() => {
+              setDeleteError(null);
+              setDeleteConfirmation(null);
+            }}
+            onConfirm={() => void confirmDelete()}
+          />
+          {deleteError ? <p role="alert">{deleteError}</p> : null}
+        </>
+      ) : null}
     </section>
+  );
+}
+
+function BookmarkBatchToolbar({
+  selectedCount,
+  onRequestDelete,
+}: {
+  selectedCount: number;
+  onRequestDelete(): void;
+}) {
+  return (
+    <div
+      className="bookmark-management-batch-toolbar"
+      role="region"
+      aria-label="书签批量操作"
+    >
+      <strong>已选择 {selectedCount} 条书签</strong>
+      <button type="button" disabled={selectedCount === 0} onClick={onRequestDelete}>
+        批量删除 {selectedCount} 条书签
+      </button>
+    </div>
   );
 }
 

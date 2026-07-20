@@ -70,7 +70,30 @@ export function BookmarkGroupList({
       data-testid="bookmark-management-list"
       data-density={density}
     >
-      {groups.map((group, groupIndex) => {
+      {batchMode ? (
+        <div className="bookmark-management-page-selection">
+          <input
+            type="checkbox"
+            aria-label="选择当前页书签"
+            checked={allVisibleSelected}
+            ref={(element) => {
+              if (element) {
+                const selectedOnPage = groups
+                  .flatMap((group) => group.bookmarks)
+                  .filter(
+                    (bookmark) =>
+                      bookmark.id != null && selectedBatchIds.has(bookmark.id),
+                  ).length;
+                element.indeterminate = selectedOnPage > 0 && !allVisibleSelected;
+              }
+            }}
+            onChange={(event) =>
+              onToggleVisibleBatchSelection(event.currentTarget.checked)
+            }
+          />
+        </div>
+      ) : null}
+      {groups.map((group) => {
         const expanded = expandedDocumentKeys.has(group.document.documentKey);
         const encodedKey = encodeURIComponent(group.document.documentKey);
         const headingId = `bookmark-group-${encodedKey}`;
@@ -95,18 +118,11 @@ export function BookmarkGroupList({
                   <thead>
                     <tr>
                       {batchMode ? (
-                        <th scope="col" className="bookmark-management-checkbox-cell">
-                          {groupIndex === 0 ? (
-                            <input
-                              type="checkbox"
-                              aria-label="选择当前页全部书签"
-                              checked={allVisibleSelected}
-                              onChange={(event) =>
-                                onToggleVisibleBatchSelection(event.currentTarget.checked)
-                              }
-                            />
-                          ) : null}
-                        </th>
+                        <th
+                          scope="col"
+                          className="bookmark-management-checkbox-cell"
+                          aria-label="选择"
+                        />
                       ) : null}
                       <th scope="col">书签名称</th>
                       <th scope="col">页码</th>
