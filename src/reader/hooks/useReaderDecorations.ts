@@ -80,21 +80,30 @@ export function useReaderDecorations({
     }));
   }, [activeSession, persistence]);
 
-  const renameBookmarkForDocument = useCallback(
-    async (documentKey: string, bookmark: Bookmark, title: string) => {
+  const updateBookmarkForDocument = useCallback(
+    async (
+      documentKey: string,
+      bookmark: Bookmark,
+      updates: Pick<Bookmark, 'title' | 'note'>,
+    ) => {
       if (bookmark.id === null) {
         return undefined;
       }
 
-      const normalizedTitle = title.trim();
+      const normalizedTitle = updates.title.trim();
+      const normalizedNote = updates.note?.trim() || null;
 
-      if (!normalizedTitle || normalizedTitle === bookmark.title) {
+      if (
+        !normalizedTitle ||
+        (normalizedTitle === bookmark.title && normalizedNote === bookmark.note)
+      ) {
         return bookmark;
       }
 
       const saved = await persistence.saveBookmark({
         ...bookmark,
         title: normalizedTitle,
+        note: normalizedNote,
         updatedAt: new Date().toISOString(),
       });
 
@@ -114,6 +123,15 @@ export function useReaderDecorations({
       return saved;
     },
     [persistence],
+  );
+
+  const renameBookmarkForDocument = useCallback(
+    (documentKey: string, bookmark: Bookmark, title: string) =>
+      updateBookmarkForDocument(documentKey, bookmark, {
+        title,
+        note: bookmark.note,
+      }),
+    [updateBookmarkForDocument],
   );
 
   const deleteBookmarkForDocument = useCallback(
@@ -283,5 +301,6 @@ export function useReaderDecorations({
     saveAnnotationForActiveDocument,
     toggleAnnotationTagForDocument,
     updateAnnotationForDocument,
+    updateBookmarkForDocument,
   };
 }
