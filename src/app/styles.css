@@ -4391,6 +4391,13 @@ select {
   grid-template-rows: auto minmax(0, 1fr);
   background: var(--sr-bg);
   color: var(--sr-text);
+  overflow: hidden;
+}
+
+.app-shell.bookmarks-mode {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .home-content.bookmark-management-home-content {
@@ -4408,14 +4415,16 @@ select {
 }
 
 .bookmark-management-body {
+  height: 100%;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .bookmark-management-body > .bookmark-management-layout {
-  flex: 1;
+  flex: 1 1 0;
 }
 
 .bookmark-management-heading {
@@ -4459,6 +4468,7 @@ select {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
+  overflow: hidden;
 }
 
 .bookmark-management-main {
