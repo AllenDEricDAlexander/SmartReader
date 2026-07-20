@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { ChevronDown, ChevronRight, FileText } from 'lucide-react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { ChevronDown, ChevronRight, FileText, MoreVertical } from 'lucide-react';
 import { formatDateTime } from './homeDisplayUtils';
 import {
   bookmarkRecordKey,
@@ -23,6 +23,11 @@ type BookmarkGroupListProps = {
   onToggleBatchSelection(id: number, selected: boolean): void;
   onToggleVisibleBatchSelection(selected: boolean): void;
   onPendingFocusHandled(): void;
+  canOpenBookmark(bookmark: BookmarkManagementRecord): boolean;
+  onOpenBookmark(bookmark: BookmarkManagementRecord): void;
+  onEditBookmark(bookmark: BookmarkManagementRecord): void;
+  onCopyBookmark(bookmark: BookmarkManagementRecord): void;
+  onDeleteBookmark(bookmark: BookmarkManagementRecord): void;
 };
 
 export function BookmarkGroupList({
@@ -39,6 +44,11 @@ export function BookmarkGroupList({
   onToggleBatchSelection,
   onToggleVisibleBatchSelection,
   onPendingFocusHandled,
+  canOpenBookmark,
+  onOpenBookmark,
+  onEditBookmark,
+  onCopyBookmark,
+  onDeleteBookmark,
 }: BookmarkGroupListProps) {
   const rowRefs = useRef(new Map<number, HTMLTableRowElement>());
 
@@ -127,6 +137,11 @@ export function BookmarkGroupList({
                         }}
                         onSelect={() => onSelectBookmark(bookmark)}
                         onToggleBatchSelection={onToggleBatchSelection}
+                        canOpen={canOpenBookmark(bookmark)}
+                        onOpen={() => onOpenBookmark(bookmark)}
+                        onEdit={() => onEditBookmark(bookmark)}
+                        onCopy={() => onCopyBookmark(bookmark)}
+                        onDelete={() => onDeleteBookmark(bookmark)}
                       />
                     ))}
                   </tbody>
@@ -185,6 +200,11 @@ function BookmarkListItem({
   setRowRef,
   onSelect,
   onToggleBatchSelection,
+  canOpen,
+  onOpen,
+  onEdit,
+  onCopy,
+  onDelete,
 }: {
   bookmark: BookmarkManagementRecord;
   selected: boolean;
@@ -193,21 +213,65 @@ function BookmarkListItem({
   setRowRef(row: HTMLTableRowElement | null): void;
   onSelect(): void;
   onToggleBatchSelection(id: number, selected: boolean): void;
+  canOpen: boolean;
+  onOpen(): void;
+  onEdit(): void;
+  onCopy(): void;
+  onDelete(): void;
 }) {
   const progress = formatBookmarkPageProgress(bookmark);
-  const handleKeyboardSelection = (event: React.KeyboardEvent<HTMLTableRowElement>) => {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const handleKeyboardSelection = (event: KeyboardEvent<HTMLTableRowElement>) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       onSelect();
     }
   };
+  const menuItems = [
+    {
+      label: `跳转到书签 ${bookmark.title}`,
+      disabled: !canOpen,
+      action: onOpen,
+    },
+    {
+      label: `编辑书签 ${bookmark.title}`,
+      disabled: false,
+      action: onEdit,
+    },
+    {
+      label: `复制引用 ${bookmark.title}`,
+      disabled: false,
+      action: onCopy,
+    },
+    {
+      label: `删除书签 ${bookmark.title}`,
+      disabled: false,
+      action: onDelete,
+    },
+  ];
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+    menuItemRefs.current.find((item) => item && !item.disabled)?.focus();
+  }, [menuOpen]);
+
+  const closeMenu = () => setMenuOpen(false);
+  const restoreTriggerFocus = () => triggerRef.current?.focus();
 
   return (
     <tr
       ref={setRowRef}
       tabIndex={0}
       aria-selected={selected}
-      data-testid="bookmark-management-row"
+      data-testid={
+        bookmark.id == null
+          ? 'bookmark-management-row'
+          : `bookmark-management-row-${bookmark.id}`
+      }
       onClick={onSelect}
       onKeyDown={handleKeyboardSelection}
     >
@@ -231,7 +295,7 @@ function BookmarkListItem({
       </td>
       <td>
         <span>{progress.pageLabel}</span>
-        {progress.ratioLabel ? <small>{progress.ratioLabel}</small> : null}
+        {progress.percent != null ? <small>{progress.percent}%</small> : null}
       </td>
       <td>{formatDateTime(bookmark.createdAt)}</td>
       <td className="bookmark-management-note" title={bookmark.note ?? undefined}>
@@ -241,7 +305,90 @@ function BookmarkListItem({
         className="bookmark-management-row-actions"
         onClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => event.stopPropagation()}
-      />
+      >
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-label={`打开书签操作 ${bookmark.title}`}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((current) => !current)}
+        >
+          <MoreVertical size={16} aria-hidden="true" />
+        </button>
+        {menuOpen ? (
+          <div
+            className="bookmark-management-row-menu"
+            role="menu"
+            aria-label={`书签操作 ${bookmark.title}`}
+            onKeyDown={(event) =>
+              moveMenuFocus(
+                event,
+                menuItemRefs.current.filter(
+                  (item): item is HTMLButtonElement => item != null,
+                ),
+                closeMenu,
+                restoreTriggerFocus,
+              )
+            }
+          >
+            {menuItems.map((item, index) => (
+              <button
+                key={item.label}
+                ref={(element) => {
+                  menuItemRefs.current[index] = element;
+                }}
+                type="button"
+                role="menuitem"
+                aria-label={item.label}
+                disabled={item.disabled}
+                onClick={() => {
+                  closeMenu();
+                  item.action();
+                }}
+              >
+                {item.label.replace(` ${bookmark.title}`, '')}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </td>
     </tr>
   );
+}
+
+function moveMenuFocus(
+  event: KeyboardEvent<HTMLElement>,
+  items: HTMLButtonElement[],
+  close: () => void,
+  restore: () => void,
+) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    close();
+    restore();
+    return;
+  }
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    return;
+  }
+
+  event.preventDefault();
+  const enabledItems = items.filter((item) => !item.disabled);
+  if (enabledItems.length === 0) {
+    return;
+  }
+  const current = Math.max(
+    0,
+    enabledItems.indexOf(document.activeElement as HTMLButtonElement),
+  );
+  const index =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? enabledItems.length - 1
+        : event.key === 'ArrowDown'
+          ? (current + 1) % enabledItems.length
+          : (current - 1 + enabledItems.length) % enabledItems.length;
+  enabledItems[index]?.focus();
 }

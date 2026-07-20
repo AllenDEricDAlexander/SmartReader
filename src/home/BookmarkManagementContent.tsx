@@ -1,9 +1,16 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import type { BookmarkDashboard } from '../persistence/persistenceApi';
+import { BookmarkDetailPanel } from './BookmarkDetailPanel';
+import {
+  BookmarkConfirmDialog,
+  BookmarkEditorDialog,
+} from './BookmarkEditorDialog';
 import { BookmarkGroupList } from './BookmarkGroupList';
 import { BookmarkToolbar } from './BookmarkToolbar';
 import {
+  buildBookmarkReference,
+  findAdjacentBookmarks,
   flattenBookmarkDashboard,
   type BookmarkDeleteResult,
   type BookmarkManagementRecord,
@@ -31,12 +38,65 @@ export function BookmarkManagementContent({
   dashboard,
   loading,
   error,
+  canOpenBookmark,
   onOpenPdf,
+  onOpenBookmark,
+  onUpdateBookmark,
   onRefresh,
   onClose,
 }: BookmarkManagementContentProps) {
   const records = useMemo(() => flattenBookmarkDashboard(dashboard), [dashboard]);
   const management = useBookmarkManagement({ records });
+  const [editor, setEditor] = useState<{
+    bookmark: BookmarkManagementRecord;
+    initialFocus: 'title' | 'note';
+  } | null>(null);
+  const [editorSaving, setEditorSaving] = useState(false);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<{
+    tone: 'status' | 'alert';
+    message: string;
+  } | null>(null);
+  const [, setDeleteTarget] = useState<BookmarkManagementRecord | null>(null);
+  const adjacent =
+    management.selectedBookmark?.id == null
+      ? { previous: null, next: null }
+      : findAdjacentBookmarks(records, management.selectedBookmark.id);
+  const openEditor = (
+    bookmark: BookmarkManagementRecord,
+    initialFocus: 'title' | 'note',
+  ) => {
+    setEditor({ bookmark, initialFocus });
+    setEditorError(null);
+  };
+  const saveEditor = async (updates: BookmarkUpdateInput) => {
+    if (!editor) {
+      return;
+    }
+    setEditorSaving(true);
+    setEditorError(null);
+    try {
+      await onUpdateBookmark(editor.bookmark, updates);
+      setEditor(null);
+    } catch {
+      setEditorError('书签保存失败，请重试。');
+    } finally {
+      setEditorSaving(false);
+    }
+  };
+  const copyReference = async (bookmark: BookmarkManagementRecord) => {
+    setCopyStatus(null);
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('clipboard unavailable');
+      }
+      await navigator.clipboard.writeText(buildBookmarkReference(bookmark));
+      setCopyStatus({ tone: 'status', message: '引用已复制' });
+    } catch {
+      setCopyStatus({ tone: 'alert', message: '复制引用失败，请重试。' });
+    }
+  };
   const heading = (
     <header className="bookmark-management-heading">
       <div>
@@ -138,6 +198,11 @@ export function BookmarkManagementContent({
               onToggleBatchSelection={management.toggleBatchSelection}
               onToggleVisibleBatchSelection={management.toggleVisibleBatchSelection}
               onPendingFocusHandled={() => management.setPendingFocusId(null)}
+              canOpenBookmark={canOpenBookmark}
+              onOpenBookmark={(bookmark) => void onOpenBookmark(bookmark)}
+              onEditBookmark={(bookmark) => openEditor(bookmark, 'title')}
+              onCopyBookmark={(bookmark) => void copyReference(bookmark)}
+              onDeleteBookmark={setDeleteTarget}
             />
             <BookmarkPagination
               page={management.page}
@@ -166,13 +231,58 @@ export function BookmarkManagementContent({
             </button>
           </div>
         ) : null}
+        {copyStatus ? (
+          <p role={copyStatus.tone}>{copyStatus.message}</p>
+        ) : null}
         <div className="bookmark-management-layout">
           <main className="bookmark-management-main">{body}</main>
-          <aside className="bookmark-management-detail" aria-label="书签详情">
-            请选择一条书签查看详情
-          </aside>
+          <BookmarkDetailPanel
+            bookmark={management.selectedBookmark}
+            previous={adjacent.previous}
+            next={adjacent.next}
+            canOpen={
+              management.selectedBookmark != null &&
+              canOpenBookmark(management.selectedBookmark)
+            }
+            onClearSelection={() => management.setSelectedBookmarkId(null)}
+            onNavigate={management.navigateToBookmark}
+            onOpen={(bookmark) => void onOpenBookmark(bookmark)}
+            onEdit={openEditor}
+            onCopy={(bookmark) => void copyReference(bookmark)}
+            onDelete={setDeleteTarget}
+          />
         </div>
       </div>
+      {editor ? (
+        <BookmarkEditorDialog
+          bookmark={editor.bookmark}
+          initialFocus={editor.initialFocus}
+          saving={editorSaving}
+          error={editorError}
+          onSave={(updates) => void saveEditor(updates)}
+          onRequestClose={(dirty) => {
+            if (dirty) {
+              setDiscardConfirmOpen(true);
+            } else {
+              setEditor(null);
+            }
+          }}
+        />
+      ) : null}
+      {editor && discardConfirmOpen ? (
+        <BookmarkConfirmDialog
+          title="放弃书签更改"
+          message="当前名称或备注尚未保存。"
+          confirmLabel="放弃更改"
+          cancelLabel="继续编辑"
+          danger
+          onCancel={() => setDiscardConfirmOpen(false)}
+          onConfirm={() => {
+            setDiscardConfirmOpen(false);
+            setEditor(null);
+          }}
+        />
+      ) : null}
     </section>
   );
 }

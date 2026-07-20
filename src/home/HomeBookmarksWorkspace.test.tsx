@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { BookmarkDashboard } from '../persistence/persistenceApi';
 import { HomeBookmarksWorkspace } from './HomeBookmarksWorkspace';
@@ -265,5 +265,259 @@ describe('HomeBookmarksWorkspace', () => {
       'data-density',
       'compact',
     );
+  });
+
+  it('selects a row without jumping and exposes real detail data', () => {
+    const props = renderWorkspace();
+
+    fireEvent.click(screen.getByText('自注意力机制'));
+
+    expect(props.onOpenBookmark).not.toHaveBeenCalled();
+    expect(screen.getByRole('complementary', { name: '书签详情' })).toHaveTextContent(
+      'Transformer.pdf',
+    );
+    expect(screen.getByRole('complementary', { name: '书签详情' })).toHaveTextContent(
+      '/papers/transformer.pdf',
+    );
+    expect(screen.getByText('未识别章节')).toBeInTheDocument();
+    expect(screen.getByText('32 / 89')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '跳转到书签 自注意力机制' }));
+    expect(props.onOpenBookmark).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1, page: 32 }),
+    );
+  });
+
+  it('clears the selected detail without opening the document', () => {
+    const props = renderWorkspace();
+    fireEvent.click(screen.getByText('自注意力机制'));
+    fireEvent.click(screen.getByRole('button', { name: '关闭书签详情' }));
+
+    expect(screen.getByRole('complementary', { name: '书签详情' })).toHaveTextContent(
+      '请选择一条书签查看详情',
+    );
+    expect(screen.getByTestId('bookmark-management-row-1')).toHaveAttribute(
+      'aria-selected',
+      'false',
+    );
+    expect(props.onOpenBookmark).not.toHaveBeenCalled();
+  });
+
+  it('retains a visible selection across group collapse and re-expand', () => {
+    renderWorkspace();
+    fireEvent.click(screen.getByText('自注意力机制'));
+    fireEvent.click(screen.getByRole('button', { name: '收起 Transformer.pdf' }));
+
+    expect(screen.getByRole('complementary', { name: '书签详情' })).toHaveTextContent(
+      '自注意力机制',
+    );
+    fireEvent.click(screen.getByRole('button', { name: '展开 Transformer.pdf' }));
+    expect(screen.getByTestId('bookmark-management-row-1')).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('clears detail when the selected bookmark is hidden by filtering', async () => {
+    renderWorkspace();
+    fireEvent.click(screen.getByText('自注意力机制'));
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索书签' }), {
+      target: { value: '噪声调度' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: '书签详情' })).toHaveTextContent(
+        '请选择一条书签查看详情',
+      );
+    });
+  });
+
+  it('navigates to the next bookmark and focuses its row', () => {
+    renderWorkspace();
+    fireEvent.click(screen.getByText('自注意力机制'));
+
+    fireEvent.click(screen.getByRole('button', { name: '下一条书签 多头注意力' }));
+
+    expect(screen.getByTestId('bookmark-management-row-2')).toHaveFocus();
+    expect(screen.getByTestId('bookmark-management-row-2')).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByRole('complementary', { name: '书签详情' })).toHaveTextContent(
+      '多头注意力',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '上一条书签 自注意力机制' }));
+    expect(screen.getByTestId('bookmark-management-row-1')).toHaveFocus();
+    expect(screen.getByTestId('bookmark-management-row-1')).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('edits title and note together and preserves input after a failed save', async () => {
+    const onUpdateBookmark = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('write failed'))
+      .mockResolvedValueOnce(undefined);
+    renderWorkspace({ onUpdateBookmark });
+    fireEvent.click(screen.getByText('自注意力机制'));
+    fireEvent.click(screen.getByRole('button', { name: '编辑备注 自注意力机制' }));
+
+    expect(screen.getByRole('textbox', { name: '书签备注' })).toHaveFocus();
+    fireEvent.change(screen.getByRole('textbox', { name: '书签名称' }), {
+      target: { value: '  核心结论  ' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: '书签备注' }), {
+      target: { value: '  重新核对  ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存书签' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('书签保存失败，请重试。');
+    expect(screen.getByRole('textbox', { name: '书签名称' })).toHaveValue('  核心结论  ');
+    expect(screen.getByRole('textbox', { name: '书签备注' })).toHaveValue('  重新核对  ');
+
+    fireEvent.click(screen.getByRole('button', { name: '保存书签' }));
+    await waitFor(() => {
+      expect(onUpdateBookmark).toHaveBeenLastCalledWith(
+        expect.objectContaining({ id: 1 }),
+        { title: '核心结论', note: '重新核对' },
+      );
+    });
+    expect(screen.queryByRole('dialog', { name: '编辑书签' })).not.toBeInTheDocument();
+  });
+
+  it('focuses title from the row menu, validates it, and normalizes blank note to null', async () => {
+    const onUpdateBookmark = vi.fn().mockResolvedValue(undefined);
+    renderWorkspace({ onUpdateBookmark });
+    fireEvent.click(screen.getByRole('button', { name: '打开书签操作 自注意力机制' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '编辑书签 自注意力机制' }));
+
+    expect(screen.getByRole('textbox', { name: '书签名称' })).toHaveFocus();
+    fireEvent.change(screen.getByRole('textbox', { name: '书签名称' }), {
+      target: { value: '   ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存书签' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('书签名称不能为空。');
+
+    fireEvent.change(screen.getByRole('textbox', { name: '书签名称' }), {
+      target: { value: '核心结论' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: '书签备注' }), {
+      target: { value: '   ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存书签' }));
+    await waitFor(() => {
+      expect(onUpdateBookmark).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1 }),
+        { title: '核心结论', note: null },
+      );
+    });
+  });
+
+  it('confirms before discarding dirty editor values', () => {
+    renderWorkspace();
+    fireEvent.click(screen.getByText('自注意力机制'));
+    fireEvent.click(screen.getByRole('button', { name: '编辑备注 自注意力机制' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '书签备注' }), {
+      target: { value: 'changed' },
+    });
+
+    fireEvent.keyDown(screen.getByRole('dialog', { name: '编辑书签' }), { key: 'Escape' });
+    expect(screen.getByRole('dialog', { name: '放弃书签更改' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '继续编辑' })).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: '放弃更改' }));
+    expect(screen.queryByRole('dialog', { name: '编辑书签' })).not.toBeInTheDocument();
+  });
+
+  it('traps editor focus and restores it to the opening action', () => {
+    renderWorkspace();
+    fireEvent.click(screen.getByText('自注意力机制'));
+    const trigger = screen.getByRole('button', { name: '编辑备注 自注意力机制' });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const dialog = screen.getByRole('dialog', { name: '编辑书签' });
+    const buttons = within(dialog).getAllByRole('button');
+    const first = buttons[0];
+    const last = buttons.at(-1)!;
+    last.focus();
+    fireEvent.keyDown(dialog, { key: 'Tab' });
+    expect(first).toHaveFocus();
+    first.focus();
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
+    expect(last).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: '取消编辑' }));
+    expect(trigger).toHaveFocus();
+  });
+
+  it('copies a reference and reports unavailable clipboard access', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    renderWorkspace();
+    fireEvent.click(screen.getByText('自注意力机制'));
+    fireEvent.click(screen.getByRole('button', { name: '复制引用 自注意力机制' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('《Transformer.pdf》，“自注意力机制”，第 32 页');
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('引用已复制');
+
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: undefined,
+    });
+    fireEvent.click(screen.getByRole('button', { name: '复制引用 自注意力机制' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('复制引用失败，请重试。');
+  });
+
+  it('supports row-menu arrows, Home, End, and Escape', () => {
+    renderWorkspace();
+    const trigger = screen.getByRole('button', { name: '打开书签操作 自注意力机制' });
+    fireEvent.click(trigger);
+    const menu = screen.getByRole('menu', { name: '书签操作 自注意力机制' });
+    const items = within(menu).getAllByRole('menuitem');
+
+    expect(items[0]).toHaveFocus();
+    fireEvent.keyDown(menu, { key: 'End' });
+    expect(items.at(-1)).toHaveFocus();
+    fireEvent.keyDown(menu, { key: 'Home' });
+    expect(items[0]).toHaveFocus();
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(items[1]).toHaveFocus();
+    fireEvent.keyDown(menu, { key: 'Escape' });
+    expect(trigger).toHaveFocus();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('disables open and jump for missing files but keeps edit and copy enabled', () => {
+    const missingDashboard: BookmarkDashboard = {
+      totalBookmarks: 1,
+      groups: [
+        {
+          ...dashboard.groups[1],
+          document: {
+            ...dashboard.groups[1].document,
+            missing: true,
+          },
+        },
+      ],
+    };
+    renderWorkspace({
+      dashboard: missingDashboard,
+      canOpenBookmark: () => false,
+    });
+    fireEvent.click(screen.getByText('正向过程'));
+
+    expect(screen.getByRole('button', { name: '打开文档 Diffusion.pdf' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '跳转到书签 正向过程' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '编辑备注 正向过程' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '复制引用 正向过程' })).toBeEnabled();
+    expect(screen.getAllByText('源文件不可用').length).toBeGreaterThan(0);
   });
 });

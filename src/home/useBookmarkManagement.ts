@@ -153,8 +153,23 @@ export function useBookmarkManagement({ records, now }: UseBookmarkManagementInp
     if (record.id == null) {
       return;
     }
+
+    const targetDocumentKey = documentKey === 'all' ? 'all' : record.documentKey;
+    const targetPage = deriveBookmarkPage(records, {
+      query: '',
+      documentKey: targetDocumentKey,
+      dateFilter: 'all',
+      sortMode,
+      page: 1,
+      pageSize,
+      now: effectiveNow,
+    });
+
+    setQueryState('');
+    setDateFilterState('all');
+    setDocumentKeyState(targetDocumentKey);
     setExpandedDocumentKeys((current) => new Set(current).add(record.documentKey));
-    setPage(findBookmarkPage(derived.allMatchingBookmarks, record.id, pageSize));
+    setPage(findBookmarkPage(targetPage.allMatchingBookmarks, record.id, pageSize));
     setSelectedBookmarkId(record.id);
     setPendingFocusId(record.id);
   };
