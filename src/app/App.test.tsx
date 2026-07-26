@@ -1591,7 +1591,7 @@ describe('App', () => {
     fireEvent.change(await screen.findByLabelText('Annotation note'), {
       target: { value: '更新后的笔记' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save note' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存笔记' }));
 
     await waitFor(() => {
       expect(persistence.saveAnnotation).toHaveBeenLastCalledWith(

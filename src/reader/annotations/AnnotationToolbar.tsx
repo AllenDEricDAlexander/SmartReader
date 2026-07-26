@@ -42,6 +42,7 @@ export function AnnotationToolbar({
           导入 JSON
           <textarea
             aria-label="Annotation import JSON"
+            placeholder="粘贴批注 JSON，失焦后导入"
             onBlur={(event) => {
               if (event.target.value.trim()) {
                 onImportAnnotations(event.target.value);
@@ -52,16 +53,16 @@ export function AnnotationToolbar({
       </div>
       <label className="filter-control">
         <Filter size={14} />
-        <span>Filter</span>
+        <span>筛选</span>
         <select
           aria-label="Annotation filter"
           value={filter}
           onChange={(event) => onFilterChange(event.target.value)}
         >
-          <option value="all">All</option>
-          <option value="note">Notes</option>
-          <option value="highlight">Highlights</option>
-          <option value="underline">Underlines</option>
+          <option value="all">全部</option>
+          <option value="note">笔记</option>
+          <option value="highlight">高亮</option>
+          <option value="underline">下划线</option>
         </select>
       </label>
     </div>

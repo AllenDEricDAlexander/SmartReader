@@ -13,6 +13,12 @@ type AnnotationDetailProps = {
   onToggleTag(annotation: ReaderAnnotation, tag: Tag, selected: boolean): void | Promise<void>;
 };
 
+const typeLabels: Record<ReaderAnnotation['type'], string> = {
+  note: '笔记',
+  highlight: '高亮',
+  underline: '下划线',
+};
+
 function getAnnotationText(annotation: ReaderAnnotation): string {
   return annotation.text ?? annotation.quote ?? '';
 }
@@ -35,9 +41,9 @@ export function AnnotationDetail({
     return (
       <section className="panel-section">
         <div className="panel-title">
-          <h3>Annotation detail</h3>
+          <h3>批注详情</h3>
         </div>
-        <p className="muted-copy">Select an annotation to inspect it.</p>
+        <p className="muted-copy">在左侧选择一条批注，可在此查看原文、编辑笔记和标签。</p>
       </section>
     );
   }
@@ -50,26 +56,26 @@ export function AnnotationDetail({
   return (
     <section className="panel-section">
       <div className="panel-title">
-        <h3>Annotation detail</h3>
+        <h3>批注详情</h3>
       </div>
       <dl className="document-facts">
         <div>
-          <dt>Type</dt>
-          <dd>{annotation.type}</dd>
+          <dt>类型</dt>
+          <dd>{typeLabels[annotation.type]}</dd>
         </div>
         <div>
-          <dt>Location</dt>
-          <dd>Page {annotation.page}</dd>
+          <dt>位置</dt>
+          <dd>第 {annotation.page} 页</dd>
         </div>
         <div>
-          <dt>Color</dt>
+          <dt>颜色</dt>
           <dd>
             <span className="color-dot inline" style={{ backgroundColor: annotation.color }} />
             {annotation.color}
           </dd>
         </div>
         <div>
-          <dt>Updated</dt>
+          <dt>更新时间</dt>
           <dd>{new Date(annotation.updatedAt).toLocaleString()}</dd>
         </div>
       </dl>
@@ -77,11 +83,12 @@ export function AnnotationDetail({
         <blockquote className="annotation-quote">{annotation.quote}</blockquote>
       ) : null}
       <label className="annotation-note-field">
-        Note
+        笔记内容
         <input
           aria-label="Annotation note"
           value={noteText}
           disabled={!noteEditable}
+          placeholder={noteEditable ? '输入笔记…' : '仅页面笔记可编辑'}
           onChange={(event) => setNoteText(event.target.value)}
         />
       </label>
@@ -94,14 +101,14 @@ export function AnnotationDetail({
       <div className="control-grid two">
         <button type="button" onClick={() => onJumpToPage(annotation.page)}>
           <LocateFixed size={14} />
-          Jump
+          跳转
         </button>
         <button
           type="button"
           onClick={() => void onSaveNote(annotation, noteText)}
           disabled={!noteEditable || !noteChanged}
         >
-          Save note
+          保存笔记
         </button>
         <button
           type="button"
@@ -109,7 +116,7 @@ export function AnnotationDetail({
           disabled={!annotationText}
         >
           <Copy size={14} />
-          Copy text
+          复制文本
         </button>
         {persisted ? (
           <button
@@ -118,7 +125,7 @@ export function AnnotationDetail({
             onClick={() => onDeleteAnnotation(annotation.id!)}
           >
             <Trash2 size={14} />
-            Delete
+            删除
           </button>
         ) : null}
       </div>

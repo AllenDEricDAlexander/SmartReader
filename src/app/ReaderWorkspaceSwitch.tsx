@@ -301,7 +301,6 @@ export function ReaderWorkspaceSwitch({
           documents={documents}
           lastSearchCommand={lastSearchCommand}
           pageInput={pageInput}
-          recentDocuments={recentDocuments}
           searchText={searchText}
           selectedAnnotation={selectedAnnotation}
           sidebarOpen={sidebarOpen}
@@ -323,7 +322,6 @@ export function ReaderWorkspaceSwitch({
           openPdfAndIgnoreResult={openPdfAndIgnoreResult}
           openSettingsWorkspace={openSettingsWorkspace}
           renameBookmark={renameBookmark}
-          reopenRecentDocument={reopenRecentDocument}
           runSearch={runSearch}
           selectReaderSession={selectReaderSession}
           setPageInput={setPageInput}

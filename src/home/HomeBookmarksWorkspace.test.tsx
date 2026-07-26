@@ -698,13 +698,19 @@ describe('HomeBookmarksWorkspace', () => {
       /\.home-content\.bookmark-management-home-content\s*{[^}]*height:\s*100%;[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);[^}]*align-content:\s*stretch;/s,
     );
     expect(styles).toMatch(
-      /\.app-shell\.bookmarks-mode\s*{[^}]*display:\s*grid;[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);[^}]*overflow:\s*hidden;/s,
+      /\.app-shell\.bookmarks-mode\s*{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s,
     );
     expect(styles).toMatch(
-      /\.bookmark-management-body\s*{[^}]*height:\s*100%;[^}]*overflow:\s*hidden;/s,
+      /\.tool-workspace\.bookmark-management-standalone\s*{[^}]*flex:\s*1\s+1\s+0;[^}]*height:\s*auto;[^}]*display:\s*flex;/s,
     );
     expect(styles).toMatch(
-      /\.bookmark-management-body\s*>\s*\.bookmark-management-layout\s*{[^}]*flex:\s*1\s+1\s+0;/s,
+      /\.bookmark-management-content\s*{[^}]*height:\s*auto;[^}]*flex:\s*1\s+1\s+0;[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s,
+    );
+    expect(styles).toMatch(
+      /\.bookmark-management-body\s*{[^}]*flex:\s*1\s+1\s+0;[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s,
+    );
+    expect(styles).not.toMatch(
+      /\.(?:bookmark-management-content|bookmark-management-body|bookmark-management-layout)\s*{[^}]*overflow:\s*hidden;/s,
     );
     expect(styles).toMatch(
       /@media \(max-width:\s*1180px\)\s*{[^@]*\.bookmark-management-layout\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s,

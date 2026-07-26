@@ -1252,11 +1252,13 @@ button:disabled,
   background: var(--sr-surface-muted);
 }
 
-.file-picker-button {
+.file-picker-button,
+.toolbar-file-button {
   position: relative;
 }
 
 .file-picker-button input,
+.toolbar-file-button input,
 .file-picker-input {
   position: absolute;
   width: 1px;
@@ -4384,20 +4386,19 @@ select {
 
 .bookmark-management-content {
   width: 100%;
-  height: 100%;
+  height: auto;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   background: var(--sr-bg);
   color: var(--sr-text);
-  overflow: hidden;
 }
 
 .app-shell.bookmarks-mode {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .home-content.bookmark-management-home-content {
@@ -4411,16 +4412,17 @@ select {
 }
 
 .tool-workspace.bookmark-management-standalone {
-  grid-template-rows: minmax(0, 1fr);
+  flex: 1 1 0;
+  height: auto;
+  display: flex;
 }
 
 .bookmark-management-body {
-  height: 100%;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 .bookmark-management-body > .bookmark-management-layout {
@@ -4468,7 +4470,6 @@ select {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
-  overflow: hidden;
 }
 
 .bookmark-management-main {

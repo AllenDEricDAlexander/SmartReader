@@ -9,20 +9,31 @@ type ReaderTabsProps = {
 
 export function ReaderTabs({ sessions, activeSessionId, onSelectSession }: ReaderTabsProps) {
   return (
-    <header className="reader-tabs" aria-label="Open documents">
-      {sessions.map((session) => (
-        <button
-          key={session.id}
-          type="button"
-          role="tab"
-          aria-selected={session.id === activeSessionId}
-          className={session.id === activeSessionId ? 'tab active' : 'tab'}
-          onClick={() => onSelectSession(session.id)}
-        >
-          <FileText size={14} />
-          {session.title}
-        </button>
-      ))}
+    <header className="reader-tabs" aria-label="已打开文档" role="tablist">
+      {sessions.map((session) => {
+        const active = session.id === activeSessionId;
+        const pageHint = session.totalPages
+          ? `${session.page}/${session.totalPages}`
+          : `p.${session.page}`;
+
+        return (
+          <button
+            key={session.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            className={active ? 'tab active' : 'tab'}
+            title={`${session.title} · ${pageHint}`}
+            onClick={() => onSelectSession(session.id)}
+          >
+            <FileText size={14} />
+            <span className="tab-title">{session.title}</span>
+            <span className="tab-page-hint" aria-hidden="true">
+              {pageHint}
+            </span>
+          </button>
+        );
+      })}
     </header>
   );
 }

@@ -8,8 +8,14 @@ type AnnotationListProps = {
   onDeleteAnnotation(annotationId: number): void;
 };
 
+const typeLabels: Record<ReaderAnnotation['type'], string> = {
+  note: '笔记',
+  highlight: '高亮',
+  underline: '下划线',
+};
+
 function getAnnotationPreview(annotation: ReaderAnnotation): string {
-  return annotation.text ?? annotation.quote ?? annotation.type;
+  return annotation.text ?? annotation.quote ?? typeLabels[annotation.type];
 }
 
 export function AnnotationList({
@@ -20,7 +26,7 @@ export function AnnotationList({
   onDeleteAnnotation,
 }: AnnotationListProps) {
   if (annotations.length === 0) {
-    return <p className="muted-copy">No annotations yet</p>;
+    return <p className="muted-copy">暂无批注。可选中 PDF 文本添加高亮，或新增页面笔记。</p>;
   }
 
   return (
@@ -46,7 +52,7 @@ export function AnnotationList({
               <span className="color-dot" style={{ backgroundColor: annotation.color }} />
               <span className="annotation-card-copy">
                 <strong>
-                  Page {annotation.page} · {annotation.type}
+                  第 {annotation.page} 页 · {typeLabels[annotation.type]}
                 </strong>
                 <span>{preview}</span>
               </span>
@@ -58,7 +64,7 @@ export function AnnotationList({
                 aria-label="Delete annotation"
                 onClick={() => onDeleteAnnotation(annotation.id!)}
               >
-                Delete
+                删除
               </button>
             ) : null}
           </article>

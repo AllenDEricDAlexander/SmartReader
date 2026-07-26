@@ -20,23 +20,30 @@ export function SearchPanel({
     <section className="panel-section">
       <div className="panel-title">
         <Search size={16} />
-        <h3>Search</h3>
+        <h3>搜索</h3>
       </div>
       <div className="search-panel-controls">
         <input
           aria-label="Panel search text"
           className="toolbar-input wide"
           value={searchText}
+          placeholder="输入关键词…"
           onChange={(event) => onSearchTextChange(event.target.value)}
           onFocus={onOpenSearch}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              onSearch();
+            }
+          }}
         />
         <button type="button" onClick={onSearch}>
-          Run
+          查找
         </button>
       </div>
       <div className="search-panel-meta">
-        <span>{searchText.trim() ? `Query: ${searchText.trim()}` : 'No query entered'}</span>
-        <span>{lastSearchCommand || 'No search command run'}</span>
+        <span>{searchText.trim() ? `关键词：${searchText.trim()}` : '尚未输入关键词'}</span>
+        <span>{lastSearchCommand || '尚未执行搜索'}</span>
       </div>
       <SearchResultsList results={[]} onJumpToPage={() => undefined} />
     </section>

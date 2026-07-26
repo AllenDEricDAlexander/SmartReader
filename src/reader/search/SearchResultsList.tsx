@@ -12,7 +12,11 @@ type SearchResultsListProps = {
 
 export function SearchResultsList({ results, onJumpToPage }: SearchResultsListProps) {
   if (results.length === 0) {
-    return <p className="muted-copy">Viewer match details are not available yet.</p>;
+    return (
+      <p className="muted-copy">
+        暂无匹配列表。请使用工具栏「查找 / 上一处 / 下一处」在页面内导航。
+      </p>
+    );
   }
 
   return (
@@ -25,8 +29,8 @@ export function SearchResultsList({ results, onJumpToPage }: SearchResultsListPr
           onClick={() => onJumpToPage(result.page)}
           role="listitem"
         >
-          <span>Page {result.page}</span>
-          <strong>{result.matchCount} match</strong>
+          <span>第 {result.page} 页</span>
+          <strong>{result.matchCount} 处匹配</strong>
           <small>{result.excerpt}</small>
         </button>
       ))}

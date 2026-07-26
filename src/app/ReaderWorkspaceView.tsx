@@ -1,7 +1,7 @@
 import type { Dispatch, ReactNode, SetStateAction, WheelEvent } from 'react';
 import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
 import type { DocumentSession, DocumentState } from '../documents/documentModels';
-import type { PersistedBookmark, PersistedDocument } from '../persistence/persistenceApi';
+import type { PersistedBookmark } from '../persistence/persistenceApi';
 import type { Tag } from '../tags/tagModels';
 import { ReaderLeftPanel } from '../reader/ReaderLeftPanel';
 import { ReaderRightPanel } from '../reader/ReaderRightPanel';
@@ -22,7 +22,6 @@ type ReaderWorkspaceViewProps = {
   documents: DocumentState;
   lastSearchCommand: string;
   pageInput: string;
-  recentDocuments: PersistedDocument[];
   searchText: string;
   selectedAnnotation: ReaderAnnotation | null;
   sidebarOpen: boolean;
@@ -44,7 +43,6 @@ type ReaderWorkspaceViewProps = {
   openPdfAndIgnoreResult(): void;
   openSettingsWorkspace(initialSection?: SettingsSection): void;
   renameBookmark(bookmark: Bookmark, title: string): void | Promise<void>;
-  reopenRecentDocument(document: PersistedDocument): Promise<boolean>;
   runSearch(keyword: string): void;
   selectReaderSession(sessionId: string): void;
   setPageInput(value: string): void;
@@ -65,7 +63,6 @@ export function ReaderWorkspaceView({
   documents,
   lastSearchCommand,
   pageInput,
-  recentDocuments,
   searchText,
   selectedAnnotation,
   sidebarOpen,
@@ -87,7 +84,6 @@ export function ReaderWorkspaceView({
   openPdfAndIgnoreResult,
   openSettingsWorkspace,
   renameBookmark,
-  reopenRecentDocument,
   runSearch,
   selectReaderSession,
   setPageInput,
@@ -97,6 +93,13 @@ export function ReaderWorkspaceView({
   stepHistoryBack,
   stepHistoryForward,
 }: ReaderWorkspaceViewProps) {
+  const goToAdjacentPage = (delta: number) => {
+    const nextPage = Math.max(1, activeSession.page + delta);
+    const capped =
+      activeSession.totalPages != null ? Math.min(activeSession.totalPages, nextPage) : nextPage;
+    jumpToPage(capped);
+  };
+
   return (
     <ReaderWorkspace
       sidebarOpen={sidebarOpen}
@@ -112,13 +115,18 @@ export function ReaderWorkspaceView({
           activeSession={activeSession}
           searchText={searchText}
           pageInput={pageInput}
+          sidebarOpen={sidebarOpen}
           onOpenPdf={openPdfAndIgnoreResult}
           onBrowserFileChange={handleBrowserFileChange}
           onSearchTextChange={setSearchText}
           onPageInputChange={setPageInput}
           onOpenSearch={() => activeViewerController.openSearch()}
           onSearch={() => runSearch(searchText)}
+          onSearchNext={() => activeViewerController.searchNext()}
+          onSearchPrevious={() => activeViewerController.searchPrevious()}
           onJumpToPage={() => jumpToPage(Number(pageInput))}
+          onPagePrevious={() => goToAdjacentPage(-1)}
+          onPageNext={() => goToAdjacentPage(1)}
           onFitWidth={() => activeViewerController.fitWidth()}
           onFitPage={() => activeViewerController.fitPage()}
           onZoomIn={() => activeViewerController.zoomIn()}
@@ -137,14 +145,10 @@ export function ReaderWorkspaceView({
       leftPanel={
         <ReaderLeftPanel
           activeSession={activeSession}
-          recentDocuments={recentDocuments}
           bookmarks={activeBookmarks}
           annotations={activeAnnotations}
           selectedAnnotationId={selectedAnnotation?.id ?? null}
-          searchText={searchText}
-          lastSearchCommand={lastSearchCommand}
           onJumpToPage={jumpToActiveDocumentPage}
-          onReopenRecentDocument={(document) => void reopenRecentDocument(document)}
           onAddBookmark={addBookmarkForActivePage}
           onDeleteBookmark={deleteBookmark}
           onRenameBookmark={renameBookmark}
@@ -154,9 +158,6 @@ export function ReaderWorkspaceView({
             deleteAnnotationForDocument(activeSession.documentKey, annotationId)
           }
           onImportAnnotations={(json) => importAnnotationsForDocument(activeSession.documentKey, json)}
-          onSearchTextChange={setSearchText}
-          onOpenSearch={() => activeViewerController.openSearch()}
-          onSearch={() => runSearch(searchText)}
         />
       }
       viewer={

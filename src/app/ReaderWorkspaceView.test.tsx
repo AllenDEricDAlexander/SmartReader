@@ -32,7 +32,6 @@ describe('ReaderWorkspaceView', () => {
       activeSessionId: activeSession.id,
       sidebarOpen: true,
     };
-    const recentDocuments: PersistedDocument[] = [];
     const annotations: ReaderAnnotation[] = [];
 
     render(
@@ -46,7 +45,6 @@ describe('ReaderWorkspaceView', () => {
         documents={documents}
         lastSearchCommand=""
         pageInput="2"
-        recentDocuments={recentDocuments}
         searchText=""
         selectedAnnotation={null}
         sidebarOpen={true}
@@ -68,7 +66,6 @@ describe('ReaderWorkspaceView', () => {
         openPdfAndIgnoreResult={vi.fn()}
         openSettingsWorkspace={vi.fn()}
         renameBookmark={vi.fn()}
-        reopenRecentDocument={vi.fn()}
         runSearch={vi.fn()}
         selectReaderSession={vi.fn()}
         setPageInput={vi.fn()}

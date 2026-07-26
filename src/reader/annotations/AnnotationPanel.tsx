@@ -46,7 +46,7 @@ export function AnnotationPanel({
     <section className="panel-section annotation-panel">
       <div className="panel-title">
         <StickyNote size={16} />
-        <h3>Annotations</h3>
+        <h3>书签与批注</h3>
       </div>
       <div className="segmented-control" role="tablist" aria-label="Annotation panel tabs">
         <button
@@ -56,7 +56,7 @@ export function AnnotationPanel({
           aria-selected={activeTab === 'bookmarks'}
           onClick={() => setActiveTab('bookmarks')}
         >
-          Bookmarks
+          书签 {bookmarks.length > 0 ? `(${bookmarks.length})` : ''}
         </button>
         <button
           type="button"
@@ -65,7 +65,7 @@ export function AnnotationPanel({
           aria-selected={activeTab === 'annotations'}
           onClick={() => setActiveTab('annotations')}
         >
-          Annotations
+          批注 {annotations.length > 0 ? `(${annotations.length})` : ''}
         </button>
       </div>
       <AnnotationToolbar
@@ -91,7 +91,10 @@ export function AnnotationPanel({
                   onClick={() => onJumpToPage(bookmark.page)}
                 >
                   <BookMarked size={14} />
-                  {bookmark.title}
+                  <span className="bookmark-row-copy">
+                    <strong>{bookmark.title}</strong>
+                    <span>第 {bookmark.page} 页</span>
+                  </span>
                 </button>
                 <BookmarkActions
                   bookmark={bookmark}
@@ -101,7 +104,7 @@ export function AnnotationPanel({
               </article>
             ))
           ) : (
-            <p className="muted-copy">No bookmarks yet</p>
+            <p className="muted-copy">暂无书签。点击工具栏书签按钮可添加当前页。</p>
           )}
         </div>
       ) : (
