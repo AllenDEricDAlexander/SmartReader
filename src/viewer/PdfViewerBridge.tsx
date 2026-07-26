@@ -2,7 +2,7 @@ import { SpecialZoomLevel, Worker, Viewer } from '@react-pdf-viewer/core';
 import { highlightPlugin, Trigger, type HighlightArea } from '@react-pdf-viewer/highlight';
 import type { Match } from '@react-pdf-viewer/search';
 import { toolbarPlugin } from '@react-pdf-viewer/toolbar';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   annotationColors,
   defaultAnnotationColor,
@@ -107,11 +107,13 @@ function ActivePdfViewerBridge({
   const currentZoomRef = useRef(1);
   const hasReportedLoadRef = useRef(false);
   const onLoadErrorRef = useRef(onLoadError);
+  const onProgressChangeRef = useRef(onProgressChange);
   const [loadError, setLoadError] = useState<ViewerLoadError | null>(null);
 
   useEffect(() => {
     onLoadErrorRef.current = onLoadError;
-  }, [onLoadError]);
+    onProgressChangeRef.current = onProgressChange;
+  }, [onLoadError, onProgressChange]);
 
   useLayoutEffect(() => {
     currentPageRef.current = 1;
@@ -143,28 +145,36 @@ function ActivePdfViewerBridge({
     return () => window.clearTimeout(timeoutId);
   }, [source.sessionId, source.url, loadingTimeoutMs, handleLoadError]);
 
-  const reportPage = (page: number, totalPages: number | null) => {
-    hasReportedLoadRef.current = true;
-    currentPageRef.current = page;
-    totalPageCountRef.current = totalPages;
-    onProgressChange({
+  // Progress reporting feeds app state, which re-renders this subtree. Keeping
+  // these callbacks stable stops that feedback from reaching the viewer as new
+  // props on every scrolled page.
+  const reportProgress = useCallback(() => {
+    onProgressChangeRef.current({
       sessionId: source.sessionId,
       page: currentPageRef.current,
       totalPages: totalPageCountRef.current,
       zoom: currentZoomRef.current,
     });
-  };
+  }, [source.sessionId]);
 
-  const reportZoom = (zoom: number) => {
-    hasReportedLoadRef.current = true;
-    currentZoomRef.current = zoom;
-    onProgressChange({
-      sessionId: source.sessionId,
-      page: currentPageRef.current,
-      totalPages: totalPageCountRef.current,
-      zoom: currentZoomRef.current,
-    });
-  };
+  const reportPage = useCallback(
+    (page: number, totalPages: number | null) => {
+      hasReportedLoadRef.current = true;
+      currentPageRef.current = page;
+      totalPageCountRef.current = totalPages;
+      reportProgress();
+    },
+    [reportProgress],
+  );
+
+  const reportZoom = useCallback(
+    (zoom: number) => {
+      hasReportedLoadRef.current = true;
+      currentZoomRef.current = zoom;
+      reportProgress();
+    },
+    [reportProgress],
+  );
 
   useEffect(() => {
     if (!renderer || !controller) {
@@ -228,7 +238,7 @@ function ActivePdfViewerBridge({
   );
 }
 
-function ReactPdfViewer({
+const ReactPdfViewer = memo(function ReactPdfViewer({
   fileUrl,
   annotations,
   onHighlightSelection,
@@ -244,12 +254,18 @@ function ReactPdfViewer({
   const scaleRef = useRef(1);
   const searchStateRef = useRef<ViewerSearchState>(emptySearchState);
   const onSearchStateChangeRef = useRef(onSearchStateChange);
+  const onHighlightSelectionRef = useRef(onHighlightSelection);
 
   useEffect(() => {
     onSearchStateChangeRef.current = onSearchStateChange;
-  }, [onSearchStateChange]);
-  // The toolbar plugin is mounted only to compose the page/search/zoom plugins
-  // the controller drives; SmartReader renders its own reader toolbar instead.
+    onHighlightSelectionRef.current = onHighlightSelection;
+  }, [onSearchStateChange, onHighlightSelection]);
+
+  // These plugin factories are themselves React hooks: each one calls useMemo
+  // internally to build its store, so the store already survives re-renders and
+  // the factory must be called unconditionally here. Wrapping them in useMemo
+  // would break the Rules of Hooks. Re-render churn is instead kept away from
+  // this component by the memo() boundary below.
   const toolbarPluginInstance = toolbarPlugin({
     pageNavigationPlugin: { enableShortcuts: false },
     searchPlugin: { enableShortcuts: false },
@@ -257,6 +273,8 @@ function ReactPdfViewer({
   });
   const { pageNavigationPluginInstance, searchPluginInstance, zoomPluginInstance } =
     toolbarPluginInstance;
+  // Selection callbacks are read through a ref so a changing handler identity
+  // never has to reach this component as a new prop.
   const highlightPluginInstance = highlightPlugin({
     trigger: Trigger.TextSelection,
     renderHighlightTarget: (props) => (
@@ -264,7 +282,7 @@ function ReactPdfViewer({
         left={props.selectionRegion.left}
         top={props.selectionRegion.top + props.selectionRegion.height}
         onApply={(kind, color) => {
-          onHighlightSelection?.({
+          onHighlightSelectionRef.current?.({
             selectedText: props.selectedText,
             page: props.selectionRegion.pageIndex + 1,
             areas: props.highlightAreas.map(mapHighlightArea),
@@ -368,12 +386,14 @@ function ReactPdfViewer({
     return () => controller.clear();
   }, [controller, pageNavigationPluginInstance, searchPluginInstance, zoomPluginInstance]);
 
+  const plugins = [toolbarPluginInstance, highlightPluginInstance];
+
   return (
     <div className="pdf-viewer-bridge">
       <Worker workerUrl="/pdf.worker.min.js">
         <Viewer
           fileUrl={fileUrl}
-          plugins={[toolbarPluginInstance, highlightPluginInstance]}
+          plugins={plugins}
           renderLoader={(percentage) => (
             <div className="viewer-loading" role="status">
               Loading PDF {Math.round(percentage)}%
@@ -392,7 +412,7 @@ function ReactPdfViewer({
       </Worker>
     </div>
   );
-}
+});
 
 function ReactPdfLoadError({
   errorMessage,

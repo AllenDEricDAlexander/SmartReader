@@ -37,6 +37,7 @@ import type { Tag } from '../tags/tagModels';
 import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
 import { useDocumentOpening } from '../reader/hooks/useDocumentOpening';
 import { useReaderCommands } from '../reader/hooks/useReaderCommands';
+import { useStableCallback } from '../reader/hooks/useStableCallback';
 import { useReaderDecorations } from '../reader/hooks/useReaderDecorations';
 import { useReaderNavigation } from '../reader/hooks/useReaderNavigation';
 import { useReaderPersistence } from '../reader/hooks/useReaderPersistence';
@@ -46,6 +47,9 @@ import type { GlobalSearchResult } from '../search/globalSearch';
 import { ViewerController } from '../viewer/viewerController';
 import {
   emptySearchState,
+  type ViewerHighlightSelection,
+  type ViewerLoadError,
+  type ViewerProgress,
   type ViewerSearchState,
   type ViewerSource,
 } from '../viewer/viewerTypes';
@@ -60,6 +64,8 @@ import {
   upsertRecentDocument,
 } from './readerAppMappers';
 
+const emptyBookmarks: Bookmark[] = [];
+const emptyAnnotations: ReaderAnnotation[] = [];
 const bookmarkProviderErrorMessage = '书签加载失败，请重试。';
 const annotationProviderErrorMessage = '批注加载失败，请重试。';
 const defaultCacheStats: CacheStats = {
@@ -530,12 +536,14 @@ export function ReaderApp({
     shortcuts: readerPreferences.shortcuts,
   });
 
+  // Falling back to a fresh `[]` gave these a new identity on every render,
+  // which defeated memoisation all the way down into the viewer.
   const activeBookmarks = activeSession
-    ? (bookmarksByDocument[activeSession.documentKey] ?? [])
-    : [];
+    ? (bookmarksByDocument[activeSession.documentKey] ?? emptyBookmarks)
+    : emptyBookmarks;
   const activeAnnotations = activeSession
-    ? (annotationsByDocument[activeSession.documentKey] ?? [])
-    : [];
+    ? (annotationsByDocument[activeSession.documentKey] ?? emptyAnnotations)
+    : emptyAnnotations;
   const favoriteDocumentKeys = useMemo(
     () => new Set(favoriteDocuments.map((document) => document.documentKey)),
     [favoriteDocuments],
@@ -925,61 +933,86 @@ export function ReaderApp({
     [activeWorkspace, handleDrop],
   );
 
-  const viewerContent = (
-    <ReaderViewerContent
-      activeSession={activeSession}
-      viewerSource={viewerSource}
-      annotations={activeAnnotations}
-      controller={bridgeViewerController}
-      renderer={viewerRenderer}
-      onOpenPdf={openPdfAndIgnoreResult}
-      onRetry={reopenDesktopSession}
-      onHighlightSelection={(selection) => {
-        // The markup menu decides the kind and colour, so a selection can become
-        // a highlight, an underline, or a note anchored to the quoted text.
-        void saveAnnotationForActiveDocument({
-          page: selection.page,
-          type: selection.kind,
-          color: selection.color,
-          text: null,
-          quote: selection.selectedText,
-          areas: selection.areas,
-        }).then((saved) => {
-          if (saved?.id != null) {
-            setSelectedAnnotationId(saved.id);
-          }
-        });
-      }}
-      onSearchStateChange={setSearchState}
-      onProgressChange={(progress) => {
-        setDocuments((current) => {
-          const next = updateSessionProgress(current, progress.sessionId, {
-            page: progress.page,
-            totalPages: progress.totalPages,
-            zoom: progress.zoom,
-          });
-          const updatedSession = next.sessions.find(
-            (session) => session.id === progress.sessionId,
-          );
+  const handleHighlightSelection = useStableCallback((selection: ViewerHighlightSelection) => {
+    // The markup menu decides the kind and colour, so a selection can become
+    // a highlight, an underline, or a note anchored to the quoted text.
+    void saveAnnotationForActiveDocument({
+      page: selection.page,
+      type: selection.kind,
+      color: selection.color,
+      text: null,
+      quote: selection.selectedText,
+      areas: selection.areas,
+    }).then((saved) => {
+      if (saved?.id != null) {
+        setSelectedAnnotationId(saved.id);
+      }
+    });
+  });
 
-          if (updatedSession?.source.kind === 'desktop-path') {
-            const existingRecentDocument = recentDocuments.find(
-              (document) => document.documentKey === updatedSession.documentKey,
-            );
-            syncRecentDocumentProgress(
-              mapSessionToPersistedDocument(updatedSession, existingRecentDocument),
-            );
-          }
+  const handleViewerProgress = useStableCallback((progress: ViewerProgress) => {
+    setDocuments((current) => {
+      const next = updateSessionProgress(current, progress.sessionId, {
+        page: progress.page,
+        totalPages: progress.totalPages,
+        zoom: progress.zoom,
+      });
+      const updatedSession = next.sessions.find((session) => session.id === progress.sessionId);
 
-          return next;
-        });
-      }}
-      onLoadError={(error) => {
-        setDocuments((current) =>
-          activeSession ? markSessionError(current, activeSession.id, error.message) : current,
+      if (updatedSession?.source.kind === 'desktop-path') {
+        const existingRecentDocument = recentDocuments.find(
+          (document) => document.documentKey === updatedSession.documentKey,
         );
-      }}
-    />
+        syncRecentDocumentProgress(
+          mapSessionToPersistedDocument(updatedSession, existingRecentDocument),
+        );
+      }
+
+      return next;
+    });
+  });
+
+  const handleViewerLoadError = useStableCallback((error: ViewerLoadError) => {
+    setDocuments((current) =>
+      activeSession ? markSessionError(current, activeSession.id, error.message) : current,
+    );
+  });
+
+  const handleSearchStateChange = useStableCallback((state: ViewerSearchState) => {
+    setSearchState(state);
+  });
+
+  // Memoised so viewer props only change when the document, its annotations or
+  // the controller actually change — not on every progress update.
+  const viewerContent = useMemo(
+    () => (
+      <ReaderViewerContent
+        activeSession={activeSession}
+        viewerSource={viewerSource}
+        annotations={activeAnnotations}
+        controller={bridgeViewerController}
+        renderer={viewerRenderer}
+        onOpenPdf={openPdfAndIgnoreResult}
+        onRetry={reopenDesktopSession}
+        onHighlightSelection={handleHighlightSelection}
+        onSearchStateChange={handleSearchStateChange}
+        onProgressChange={handleViewerProgress}
+        onLoadError={handleViewerLoadError}
+      />
+    ),
+    [
+      activeSession,
+      viewerSource,
+      activeAnnotations,
+      bridgeViewerController,
+      viewerRenderer,
+      openPdfAndIgnoreResult,
+      reopenDesktopSession,
+      handleHighlightSelection,
+      handleSearchStateChange,
+      handleViewerProgress,
+      handleViewerLoadError,
+    ],
   );
 
   return (

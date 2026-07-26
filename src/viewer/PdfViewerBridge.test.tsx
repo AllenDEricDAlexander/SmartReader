@@ -309,4 +309,71 @@ describe('PdfViewerBridge', () => {
 
     expect(controller.fitPage()).toBe(false);
   });
+
+  it('keeps progress callbacks stable when the parent passes new handlers', () => {
+    // Viewer progress feeds app state, which re-renders this subtree with fresh
+    // handler identities. If those reached the viewer as new props they would
+    // defeat its memo boundary on every scrolled page.
+    const seenPageHandlers: unknown[] = [];
+    const seenZoomHandlers: unknown[] = [];
+    const renderer: PdfRenderer = ({ onPageChange, onZoomChange }) => {
+      seenPageHandlers.push(onPageChange);
+      seenZoomHandlers.push(onZoomChange);
+      return <div>Rendered PDF</div>;
+    };
+
+    const { rerender } = render(
+      <PdfViewerBridge
+        source={{ sessionId: 'session-a', url: 'blob:book' }}
+        renderer={renderer}
+        onProgressChange={vi.fn()}
+      />,
+    );
+
+    rerender(
+      <PdfViewerBridge
+        source={{ sessionId: 'session-a', url: 'blob:book' }}
+        renderer={renderer}
+        onProgressChange={vi.fn()}
+      />,
+    );
+
+    expect(seenPageHandlers.length).toBeGreaterThan(1);
+    expect(new Set(seenPageHandlers).size).toBe(1);
+    expect(new Set(seenZoomHandlers).size).toBe(1);
+  });
+
+  it('reports progress through the newest parent handler', () => {
+    const renderer: PdfRenderer = ({ onPageChange }) => (
+      <button type="button" onClick={() => onPageChange(3, 12)}>
+        Report page
+      </button>
+    );
+    const stale = vi.fn();
+    const fresh = vi.fn();
+
+    const { rerender } = render(
+      <PdfViewerBridge
+        source={{ sessionId: 'session-a', url: 'blob:book' }}
+        renderer={renderer}
+        onProgressChange={stale}
+      />,
+    );
+    rerender(
+      <PdfViewerBridge
+        source={{ sessionId: 'session-a', url: 'blob:book' }}
+        renderer={renderer}
+        onProgressChange={fresh}
+      />,
+    );
+
+    act(() => {
+      screen.getByRole('button', { name: 'Report page' }).click();
+    });
+
+    expect(stale).not.toHaveBeenCalled();
+    expect(fresh).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'session-a', page: 3, totalPages: 12 }),
+    );
+  });
 });
