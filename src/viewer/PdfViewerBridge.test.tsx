@@ -6,6 +6,7 @@ import { ViewerController } from './viewerController';
 const pdfViewerCoreMock = vi.hoisted(() => ({
   mode: 'ready' as 'ready' | 'error',
   errorMessage: 'Mock PDF failure',
+  lastViewerProps: null as Record<string, unknown> | null,
 }));
 
 vi.mock('@react-pdf-viewer/core', async () => {
@@ -18,10 +19,12 @@ vi.mock('@react-pdf-viewer/core', async () => {
     },
     Viewer: (props: {
       renderError(error: { message?: string }): React.ReactElement;
-    }) =>
-      pdfViewerCoreMock.mode === 'error'
+    }) => {
+      pdfViewerCoreMock.lastViewerProps = props as unknown as Record<string, unknown>;
+      return pdfViewerCoreMock.mode === 'error'
         ? props.renderError({ message: pdfViewerCoreMock.errorMessage })
-        : React.createElement('div', null, 'Real PDF viewer'),
+        : React.createElement('div', null, 'Real PDF viewer');
+    },
     Worker: ({ children }: { children?: React.ReactNode }) =>
       React.createElement('div', null, children),
   };
@@ -308,6 +311,58 @@ describe('PdfViewerBridge', () => {
     unmount();
 
     expect(controller.fitPage()).toBe(false);
+  });
+
+  it('opens the real viewer at the restored page and zoom', () => {
+    render(
+      <PdfViewerBridge
+        source={{ sessionId: 'session-a', url: 'blob:book', restore: { page: 42, zoom: 1.5 } }}
+        onProgressChange={vi.fn()}
+      />,
+    );
+
+    // initialPage is zero-based in react-pdf-viewer.
+    expect(pdfViewerCoreMock.lastViewerProps?.initialPage).toBe(41);
+    expect(pdfViewerCoreMock.lastViewerProps?.defaultScale).toBe(1.5);
+  });
+
+  it('opens at the first page when there is nothing to restore', () => {
+    render(
+      <PdfViewerBridge
+        source={{ sessionId: 'session-a', url: 'blob:book' }}
+        onProgressChange={vi.fn()}
+      />,
+    );
+
+    expect(pdfViewerCoreMock.lastViewerProps?.initialPage).toBe(0);
+    expect(pdfViewerCoreMock.lastViewerProps?.defaultScale).toBeUndefined();
+  });
+
+  it('reports the restored page on load instead of resetting to page 1', () => {
+    // A restored document must not have its saved position overwritten by the
+    // viewer's own initial load report.
+    const renderer: PdfRenderer = ({ onPageChange }) => (
+      <button type="button" onClick={() => onPageChange(42, 500)}>
+        Load
+      </button>
+    );
+    const onProgressChange = vi.fn();
+
+    render(
+      <PdfViewerBridge
+        source={{ sessionId: 'session-a', url: 'blob:book', restore: { page: 42, zoom: 1.5 } }}
+        renderer={renderer}
+        onProgressChange={onProgressChange}
+      />,
+    );
+
+    act(() => {
+      screen.getByRole('button', { name: 'Load' }).click();
+    });
+
+    expect(onProgressChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 42, totalPages: 500 }),
+    );
   });
 
   it('keeps progress callbacks stable when the parent passes new handlers', () => {

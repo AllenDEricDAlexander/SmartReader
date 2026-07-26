@@ -74,7 +74,13 @@ export function useDocumentOpening({
         if (session) {
           pdfByteCache.set(documentKey, bytes);
           const url = blobUrlCache.createForSession(session.id, bytes);
-          setViewerSource({ sessionId: session.id, url });
+          // Re-opening a document that is already in a tab keeps its position;
+          // a genuinely new session simply carries page 1.
+          setViewerSource({
+            sessionId: session.id,
+            url,
+            restore: { page: session.page, zoom: session.zoom },
+          });
 
           void loadDocumentDecorations(documentKey);
         }
@@ -129,7 +135,11 @@ export function useDocumentOpening({
         const opened = await bridge.readDesktopPdf(session.source.path);
         pdfByteCache.set(session.documentKey, opened.bytes);
         const url = blobUrlCache.createForSession(session.id, opened.bytes);
-        setViewerSource({ sessionId: session.id, url });
+        setViewerSource({
+          sessionId: session.id,
+          url,
+          restore: { page: session.page, zoom: session.zoom },
+        });
         setDocuments((current) =>
           updateSessionProgress(current, session.id, {
             page: session.page,

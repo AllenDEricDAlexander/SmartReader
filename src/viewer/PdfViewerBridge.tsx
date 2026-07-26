@@ -14,6 +14,7 @@ import '@react-pdf-viewer/page-navigation/lib/styles/index.css';
 import '@react-pdf-viewer/search/lib/styles/index.css';
 import '@react-pdf-viewer/toolbar/lib/styles/index.css';
 import '@react-pdf-viewer/zoom/lib/styles/index.css';
+import { createRenderRange } from './renderRange';
 import type { ViewerController } from './viewerController';
 import {
   emptySearchState,
@@ -21,6 +22,7 @@ import {
   type ViewerHighlightSelection,
   type ViewerLoadError,
   type ViewerProgress,
+  type ViewerRestoreState,
   type ViewerSearchMatch,
   type ViewerSearchState,
   type ViewerSelectionKind,
@@ -227,6 +229,7 @@ function ActivePdfViewerBridge({
   return (
     <ReactPdfViewer
       fileUrl={source.url}
+      restore={source.restore}
       annotations={annotations}
       controller={controller}
       onHighlightSelection={onHighlightSelection}
@@ -240,6 +243,7 @@ function ActivePdfViewerBridge({
 
 const ReactPdfViewer = memo(function ReactPdfViewer({
   fileUrl,
+  restore,
   annotations,
   onHighlightSelection,
   controller,
@@ -248,9 +252,14 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
   onLoadError,
   onSearchStateChange,
 }: PdfRendererProps & {
+  restore?: ViewerRestoreState;
   controller?: ViewerController;
   onLoadError?(error: ViewerLoadError): void;
 }) {
+  // The viewer opens directly at the restored position. Rendering page 1 and
+  // jumping afterwards costs a wasted render and shows the wrong page first.
+  const initialPage = Math.max(0, (restore?.page ?? 1) - 1);
+  const renderRange = useMemo(() => createRenderRange(), []);
   const scaleRef = useRef(1);
   const searchStateRef = useRef<ViewerSearchState>(emptySearchState);
   const onSearchStateChangeRef = useRef(onSearchStateChange);
@@ -394,6 +403,9 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
         <Viewer
           fileUrl={fileUrl}
           plugins={plugins}
+          initialPage={initialPage}
+          defaultScale={restore?.zoom}
+          setRenderRange={renderRange}
           renderLoader={(percentage) => (
             <div className="viewer-loading" role="status">
               Loading PDF {Math.round(percentage)}%
@@ -402,7 +414,11 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
           renderError={(error) => (
             <ReactPdfLoadError errorMessage={error.message} onLoadError={onLoadError} />
           )}
-          onDocumentLoad={(event) => onPageChange(1, event.doc.numPages)}
+          onDocumentLoad={(event) =>
+            // Report the page actually opened. Reporting a hard-coded 1 here
+            // overwrote the restored reading position on every open.
+            onPageChange(Math.min(initialPage + 1, event.doc.numPages), event.doc.numPages)
+          }
           onPageChange={(event) => onPageChange(event.currentPage + 1, event.doc.numPages)}
           onZoom={(event) => {
             scaleRef.current = event.scale;

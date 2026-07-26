@@ -102,7 +102,13 @@ export function useSessionRestore({
           const url = blobUrlCache.createForSession(session.id, opened.bytes);
 
           if (session.id === restoredState.activeSessionId) {
-            setViewerSource({ sessionId: session.id, url });
+            // Hand the persisted position to the viewer so it opens there
+            // directly rather than painting page 1 and jumping afterwards.
+            setViewerSource({
+              sessionId: session.id,
+              url,
+              restore: { page: session.page, zoom: session.zoom },
+            });
           }
         } catch (error) {
           if (!isCancelled()) {

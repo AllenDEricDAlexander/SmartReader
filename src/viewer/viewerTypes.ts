@@ -1,6 +1,18 @@
 export type ViewerSource = {
   sessionId: string;
   url: string;
+  /**
+   * Reading position to open at, so a restored document paints at the right
+   * place instead of rendering page 1 and jumping afterwards. Omitted for a
+   * first-time open.
+   */
+  restore?: ViewerRestoreState;
+};
+
+export type ViewerRestoreState = {
+  /** 1-based, matching the rest of the reader. */
+  page: number;
+  zoom?: number;
 };
 
 export type ViewerProgress = {
