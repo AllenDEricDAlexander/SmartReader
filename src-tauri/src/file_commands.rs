@@ -24,12 +24,17 @@ impl serde::Serialize for FileCommandError {
     }
 }
 
+/// Everything about a local PDF except its contents.
+///
+/// Kept separate from the bytes on purpose: serde encodes `Vec<u8>` as a JSON
+/// array of numbers, so returning the two together turned a 50 MB document into
+/// a ~150 MB JSON string that the webview then parsed into a 50-million element
+/// array before a single page could render.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopPdfFile {
+pub struct DesktopPdfMetadata {
     pub path: String,
     pub name: String,
-    pub bytes: Vec<u8>,
     pub file_size: u64,
     pub modified_at: Option<String>,
 }
@@ -41,8 +46,45 @@ pub struct CachedPdfFile {
     pub bytes: Vec<u8>,
 }
 
+/// Describes a local PDF without reading it. Only the header is inspected, so
+/// this stays cheap enough to use as a freshness check before deciding whether
+/// cached bytes can be reused.
 #[tauri::command]
-pub fn read_desktop_pdf(path: String) -> Result<DesktopPdfFile, FileCommandError> {
+pub fn stat_desktop_pdf(path: String) -> Result<DesktopPdfMetadata, FileCommandError> {
+    let path_ref = Path::new(&path);
+
+    if !path_ref.exists() {
+        return Err(FileCommandError::Missing);
+    }
+
+    if !path_ref.is_file() {
+        return Err(FileCommandError::NotAFile);
+    }
+
+    validate_pdf_header(path_ref)?;
+
+    let metadata = fs::metadata(path_ref)?;
+    let modified_at = metadata.modified().ok().and_then(|modified| {
+        OffsetDateTime::from(modified)
+            .format(&time::format_description::well_known::Rfc3339)
+            .ok()
+    });
+
+    Ok(DesktopPdfMetadata {
+        path: path_ref.to_string_lossy().to_string(),
+        name: path_ref
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Untitled.pdf")
+            .to_string(),
+        file_size: metadata.len(),
+        modified_at,
+    })
+}
+
+/// Returns the raw PDF as a binary IPC payload rather than JSON.
+#[tauri::command]
+pub fn read_desktop_pdf_bytes(path: String) -> Result<tauri::ipc::Response, FileCommandError> {
     let path_ref = Path::new(&path);
 
     if !path_ref.exists() {
@@ -56,24 +98,18 @@ pub fn read_desktop_pdf(path: String) -> Result<DesktopPdfFile, FileCommandError
     let bytes = fs::read(path_ref)?;
     validate_pdf_bytes(&bytes)?;
 
-    let metadata = fs::metadata(path_ref)?;
-    let modified_at = metadata.modified().ok().and_then(|modified| {
-        OffsetDateTime::from(modified)
-            .format(&time::format_description::well_known::Rfc3339)
-            .ok()
-    });
+    Ok(tauri::ipc::Response::new(bytes))
+}
 
-    Ok(DesktopPdfFile {
-        path: path_ref.to_string_lossy().to_string(),
-        name: path_ref
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("Untitled.pdf")
-            .to_string(),
-        bytes,
-        file_size: metadata.len(),
-        modified_at,
-    })
+/// Reads just enough of the file to confirm the PDF magic number.
+fn validate_pdf_header(path: &Path) -> Result<(), FileCommandError> {
+    use std::io::Read;
+
+    let mut file = fs::File::open(path)?;
+    let mut header = [0u8; 5];
+    let read = file.read(&mut header)?;
+
+    validate_pdf_bytes(&header[..read])
 }
 
 #[tauri::command]
@@ -115,6 +151,24 @@ mod tests {
     fn rejects_non_pdf_header() {
         let error = validate_pdf_bytes(b"not a pdf").expect_err("invalid");
         assert!(matches!(error, FileCommandError::InvalidPdf));
+    }
+
+    #[test]
+    fn header_validation_reads_only_the_magic_number() {
+        let dir = std::env::temp_dir().join("smartreader-header-test");
+        fs::create_dir_all(&dir).expect("temp dir");
+        let file = dir.join("book.pdf");
+        fs::write(&file, b"%PDF-1.7\nplenty more content").expect("write");
+
+        assert!(validate_pdf_header(&file).is_ok());
+
+        fs::write(&file, b"nope").expect("write");
+        assert!(matches!(
+            validate_pdf_header(&file).expect_err("invalid"),
+            FileCommandError::InvalidPdf
+        ));
+
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

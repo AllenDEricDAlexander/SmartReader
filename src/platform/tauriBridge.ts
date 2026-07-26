@@ -6,13 +6,32 @@ import { isTauriRuntimeAvailable } from './tauriRuntime';
 type OpenDialog = typeof tauriOpen;
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
-type DesktopPdfResponse = {
+type DesktopPdfMetadataResponse = {
   path: string;
   name: string;
-  bytes: number[];
   fileSize: number;
   modifiedAt: string | null;
 };
+
+/**
+ * Shapes a raw IPC payload can arrive as. A binary command result reaches the
+ * webview as an ArrayBuffer, but the transport is runtime-provided, so this
+ * stays tolerant of a typed array (or the legacy number array) instead of
+ * failing to open the document.
+ */
+type RawPdfBytes = ArrayBuffer | Uint8Array | number[];
+
+export function toPdfBytes(payload: RawPdfBytes): Uint8Array {
+  if (payload instanceof Uint8Array) {
+    return payload;
+  }
+
+  if (payload instanceof ArrayBuffer) {
+    return new Uint8Array(payload);
+  }
+
+  return Uint8Array.from(payload);
+}
 
 export type OpenedDesktopPdf = {
   source: DesktopPathFileSource;
@@ -60,16 +79,21 @@ export function createTauriBridge(
 }
 
 async function readDesktopPdfWithInvoke(invoke: Invoke, path: string): Promise<OpenedDesktopPdf> {
-  const response = await invoke<DesktopPdfResponse>('read_desktop_pdf', { path });
+  // Metadata and contents travel separately: the description is small and JSON
+  // suits it, while the document itself is transferred as raw binary.
+  const [metadata, payload] = await Promise.all([
+    invoke<DesktopPdfMetadataResponse>('stat_desktop_pdf', { path }),
+    invoke<RawPdfBytes>('read_desktop_pdf_bytes', { path }),
+  ]);
 
   return {
     source: {
       kind: 'desktop-path',
-      path: response.path,
-      name: response.name,
+      path: metadata.path,
+      name: metadata.name,
     },
-    bytes: new Uint8Array(response.bytes),
-    fileSize: response.fileSize,
-    modifiedAt: response.modifiedAt,
+    bytes: toPdfBytes(payload),
+    fileSize: metadata.fileSize,
+    modifiedAt: metadata.modifiedAt,
   };
 }
