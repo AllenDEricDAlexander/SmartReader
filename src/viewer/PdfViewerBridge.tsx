@@ -1,4 +1,4 @@
-import { SpecialZoomLevel, Worker, Viewer } from '@react-pdf-viewer/core';
+import { PasswordStatus, SpecialZoomLevel, Worker, Viewer } from '@react-pdf-viewer/core';
 import { highlightPlugin, Trigger, type HighlightArea } from '@react-pdf-viewer/highlight';
 import type { Match } from '@react-pdf-viewer/search';
 import { toolbarPlugin } from '@react-pdf-viewer/toolbar';
@@ -14,6 +14,7 @@ import '@react-pdf-viewer/page-navigation/lib/styles/index.css';
 import '@react-pdf-viewer/search/lib/styles/index.css';
 import '@react-pdf-viewer/toolbar/lib/styles/index.css';
 import '@react-pdf-viewer/zoom/lib/styles/index.css';
+import { PdfPasswordPrompt } from './PdfPasswordPrompt';
 import { createRenderRange } from './renderRange';
 import type { ViewerController } from './viewerController';
 import {
@@ -131,6 +132,13 @@ function ActivePdfViewerBridge({
     onLoadErrorRef.current?.(error);
   }, []);
 
+  // A document asking for a password has responded — it is waiting on the user,
+  // not hung. Without this the watchdog fires while the password is being typed
+  // and reports a perfectly good file as broken.
+  const handlePasswordRequired = useCallback(() => {
+    hasReportedLoadRef.current = true;
+  }, []);
+
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       if (hasReportedLoadRef.current) {
@@ -236,6 +244,7 @@ function ActivePdfViewerBridge({
       onPageChange={reportPage}
       onZoomChange={reportZoom}
       onLoadError={handleLoadError}
+      onPasswordRequired={handlePasswordRequired}
       onSearchStateChange={onSearchStateChange}
     />
   );
@@ -250,11 +259,13 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
   onPageChange,
   onZoomChange,
   onLoadError,
+  onPasswordRequired,
   onSearchStateChange,
 }: PdfRendererProps & {
   restore?: ViewerRestoreState;
   controller?: ViewerController;
   onLoadError?(error: ViewerLoadError): void;
+  onPasswordRequired?(): void;
 }) {
   // The viewer opens directly at the restored position. Rendering page 1 and
   // jumping afterwards costs a wasted render and shows the wrong page first.
@@ -413,6 +424,13 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
           )}
           renderError={(error) => (
             <ReactPdfLoadError errorMessage={error.message} onLoadError={onLoadError} />
+          )}
+          onDocumentAskPassword={onPasswordRequired}
+          renderProtectedView={({ passwordStatus, verifyPassword }) => (
+            <PdfPasswordPrompt
+              status={passwordStatus === PasswordStatus.WrongPassword ? 'wrong' : 'required'}
+              onSubmit={verifyPassword}
+            />
           )}
           onDocumentLoad={(event) =>
             // Report the page actually opened. Reporting a hard-coded 1 here

@@ -2175,6 +2175,59 @@ select {
   mix-blend-mode: normal;
 }
 
+.viewer-password-prompt {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--sr-bg);
+}
+
+.viewer-password-card {
+  width: min(360px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--sr-border);
+  border-radius: var(--sr-radius);
+  background: var(--sr-surface);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+}
+
+.viewer-password-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sr-primary);
+}
+
+.viewer-password-title h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.viewer-password-field {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--sr-text-muted);
+}
+
+.viewer-password-field input {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--sr-border);
+  border-radius: 7px;
+  background: var(--sr-surface);
+  color: var(--sr-text);
+}
+
+.viewer-password-error {
+  margin: 0;
+  color: var(--sr-danger);
+  font-size: 12px;
+}
+
 .selection-markup-menu {
   position: absolute;
   z-index: 3;

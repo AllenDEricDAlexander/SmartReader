@@ -1,12 +1,13 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PdfViewerBridge, type PdfRenderer } from './PdfViewerBridge';
 import { ViewerController } from './viewerController';
 
 const pdfViewerCoreMock = vi.hoisted(() => ({
-  mode: 'ready' as 'ready' | 'error',
+  mode: 'ready' as 'ready' | 'error' | 'password',
   errorMessage: 'Mock PDF failure',
   lastViewerProps: null as Record<string, unknown> | null,
+  verifyPassword: vi.fn(),
 }));
 
 vi.mock('@react-pdf-viewer/core', async () => {
@@ -17,13 +18,36 @@ vi.mock('@react-pdf-viewer/core', async () => {
       PageFit: 'PageFit',
       PageWidth: 'PageWidth',
     },
+    PasswordStatus: {
+      RequiredPassword: 'RequiredPassword',
+      WrongPassword: 'WrongPassword',
+    },
     Viewer: (props: {
       renderError(error: { message?: string }): React.ReactElement;
+      renderProtectedView(p: {
+        passwordStatus: string;
+        verifyPassword(password: string): void;
+      }): React.ReactElement;
+      onDocumentAskPassword?(): void;
     }) => {
       pdfViewerCoreMock.lastViewerProps = props as unknown as Record<string, unknown>;
-      return pdfViewerCoreMock.mode === 'error'
-        ? props.renderError({ message: pdfViewerCoreMock.errorMessage })
-        : React.createElement('div', null, 'Real PDF viewer');
+      const askPassword = props.onDocumentAskPassword;
+      React.useEffect(() => {
+        if (pdfViewerCoreMock.mode === 'password') {
+          askPassword?.();
+        }
+      }, [askPassword]);
+
+      if (pdfViewerCoreMock.mode === 'error') {
+        return props.renderError({ message: pdfViewerCoreMock.errorMessage });
+      }
+      if (pdfViewerCoreMock.mode === 'password') {
+        return props.renderProtectedView({
+          passwordStatus: 'RequiredPassword',
+          verifyPassword: pdfViewerCoreMock.verifyPassword,
+        });
+      }
+      return React.createElement('div', null, 'Real PDF viewer');
     },
     Worker: ({ children }: { children?: React.ReactNode }) =>
       React.createElement('div', null, children),
@@ -311,6 +335,52 @@ describe('PdfViewerBridge', () => {
     unmount();
 
     expect(controller.fitPage()).toBe(false);
+  });
+
+  it('prompts for a password instead of waiting for the load watchdog', async () => {
+    vi.useFakeTimers();
+    pdfViewerCoreMock.mode = 'password';
+    const onLoadError = vi.fn();
+
+    try {
+      render(
+        <PdfViewerBridge
+          source={{ sessionId: 'session-a', url: 'blob:locked' }}
+          loadingTimeoutMs={1000}
+          onLoadError={onLoadError}
+          onProgressChange={vi.fn()}
+        />,
+      );
+
+      // Well past the watchdog: an encrypted document is waiting on the user,
+      // so it must not be reported as a failed load.
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(onLoadError).not.toHaveBeenCalled();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('文档密码')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('forwards a typed password to the viewer', () => {
+    pdfViewerCoreMock.mode = 'password';
+    pdfViewerCoreMock.verifyPassword.mockClear();
+
+    render(
+      <PdfViewerBridge
+        source={{ sessionId: 'session-a', url: 'blob:locked' }}
+        onProgressChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('PDF 密码'), { target: { value: 'hunter2' } });
+    fireEvent.click(screen.getByRole('button', { name: '解锁文档' }));
+
+    expect(pdfViewerCoreMock.verifyPassword).toHaveBeenCalledWith('hunter2');
   });
 
   it('opens the real viewer at the restored page and zoom', () => {
