@@ -4,6 +4,7 @@ export type ViewerActions = {
   search(keyword: string): void;
   searchNext(): void;
   searchPrevious(): void;
+  jumpToMatch(index: number): void;
   zoomIn(): void;
   zoomOut(): void;
   fitWidth(): void;
@@ -39,6 +40,10 @@ export class ViewerController {
 
   searchPrevious(): boolean {
     return this.run((actions) => actions.searchPrevious());
+  }
+
+  jumpToMatch(index: number): boolean {
+    return this.run((actions) => actions.jumpToMatch(index));
   }
 
   zoomIn(): boolean {

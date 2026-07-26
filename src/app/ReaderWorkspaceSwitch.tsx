@@ -21,6 +21,7 @@ import { SettingsWorkspace, type SettingsSection } from '../settings/SettingsWor
 import type { Tag } from '../tags/tagModels';
 import { TagManager } from '../tags/TagManager';
 import type { ViewerActions } from '../viewer/viewerController';
+import type { ViewerSearchState } from '../viewer/viewerTypes';
 import { AnnotationManagerWorkspace } from '../workspaces/AnnotationManagerWorkspace';
 import { BookmarkManagerWorkspace } from '../workspaces/BookmarkManagerWorkspace';
 import { CompareWorkspace } from '../workspaces/CompareWorkspace';
@@ -57,6 +58,7 @@ type ReaderWorkspaceSwitchProps = {
   persistence: Parameters<typeof TagManager>[0]['persistence'];
   readerPreferences: ReaderPreferences;
   recentDocuments: PersistedDocument[];
+  searchState: ViewerSearchState;
   searchText: string;
   selectedAnnotation: ReaderAnnotation | null;
   sessionRestoreCount: number;
@@ -91,6 +93,7 @@ type ReaderWorkspaceSwitchProps = {
   importAnnotationsForDocument(documentKey: string, json: string): Promise<void>;
   jumpToActiveDocumentPage(page: number): void;
   jumpToPage(page: number): void;
+  jumpToSearchMatch(index: number): void;
   onTagsChange(update: SetStateAction<Tag[]>): void;
   openCompareDocument(document: PersistedDocument): void | Promise<void>;
   openFavoriteDocument(document: FavoriteDocument): void | Promise<void | boolean>;
@@ -149,6 +152,7 @@ export function ReaderWorkspaceSwitch({
   persistence,
   readerPreferences,
   recentDocuments,
+  searchState,
   searchText,
   selectedAnnotation,
   sessionRestoreCount,
@@ -181,6 +185,7 @@ export function ReaderWorkspaceSwitch({
   importAnnotationsForDocument,
   jumpToActiveDocumentPage,
   jumpToPage,
+  jumpToSearchMatch,
   onTagsChange,
   openCompareDocument,
   openFavoriteDocument,
@@ -301,6 +306,7 @@ export function ReaderWorkspaceSwitch({
           documents={documents}
           lastSearchCommand={lastSearchCommand}
           pageInput={pageInput}
+          searchState={searchState}
           searchText={searchText}
           selectedAnnotation={selectedAnnotation}
           sidebarOpen={sidebarOpen}
@@ -319,6 +325,7 @@ export function ReaderWorkspaceSwitch({
           importAnnotationsForDocument={importAnnotationsForDocument}
           jumpToActiveDocumentPage={jumpToActiveDocumentPage}
           jumpToPage={jumpToPage}
+          jumpToSearchMatch={jumpToSearchMatch}
           openPdfAndIgnoreResult={openPdfAndIgnoreResult}
           openSettingsWorkspace={openSettingsWorkspace}
           renameBookmark={renameBookmark}

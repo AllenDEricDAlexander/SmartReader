@@ -10,6 +10,7 @@ import { ReaderTabs } from '../reader/ReaderTabs';
 import { ReaderToolbar } from '../reader/ReaderToolbar';
 import { ReaderWorkspace } from '../reader/ReaderWorkspace';
 import type { ViewerActions } from '../viewer/viewerController';
+import type { ViewerSearchState } from '../viewer/viewerTypes';
 import type { SettingsSection } from '../settings/SettingsWorkspace';
 
 type ReaderWorkspaceViewProps = {
@@ -22,6 +23,7 @@ type ReaderWorkspaceViewProps = {
   documents: DocumentState;
   lastSearchCommand: string;
   pageInput: string;
+  searchState: ViewerSearchState;
   searchText: string;
   selectedAnnotation: ReaderAnnotation | null;
   sidebarOpen: boolean;
@@ -40,6 +42,7 @@ type ReaderWorkspaceViewProps = {
   importAnnotationsForDocument(documentKey: string, json: string): Promise<void>;
   jumpToActiveDocumentPage(page: number): void;
   jumpToPage(page: number): void;
+  jumpToSearchMatch(index: number): void;
   openPdfAndIgnoreResult(): void;
   openSettingsWorkspace(initialSection?: SettingsSection): void;
   renameBookmark(bookmark: Bookmark, title: string): void | Promise<void>;
@@ -63,6 +66,7 @@ export function ReaderWorkspaceView({
   documents,
   lastSearchCommand,
   pageInput,
+  searchState,
   searchText,
   selectedAnnotation,
   sidebarOpen,
@@ -81,6 +85,7 @@ export function ReaderWorkspaceView({
   importAnnotationsForDocument,
   jumpToActiveDocumentPage,
   jumpToPage,
+  jumpToSearchMatch,
   openPdfAndIgnoreResult,
   openSettingsWorkspace,
   renameBookmark,
@@ -114,6 +119,7 @@ export function ReaderWorkspaceView({
         <ReaderToolbar
           activeSession={activeSession}
           searchText={searchText}
+          searchState={searchState}
           pageInput={pageInput}
           sidebarOpen={sidebarOpen}
           onOpenPdf={openPdfAndIgnoreResult}
@@ -171,6 +177,7 @@ export function ReaderWorkspaceView({
           selectedAnnotation={selectedAnnotation}
           tags={availableTags}
           searchText={searchText}
+          searchState={searchState}
           lastSearchCommand={lastSearchCommand}
           isFavorite={activeSessionIsFavorite}
           onSearchTextChange={setSearchText}
@@ -179,6 +186,7 @@ export function ReaderWorkspaceView({
           onClearSearch={clearSearch}
           onSearchNext={() => activeViewerController.searchNext()}
           onSearchPrevious={() => activeViewerController.searchPrevious()}
+          onJumpToMatch={jumpToSearchMatch}
           onJumpToPage={jumpToActiveDocumentPage}
           onFitWidth={() => activeViewerController.fitWidth()}
           onFitPage={() => activeViewerController.fitPage()}

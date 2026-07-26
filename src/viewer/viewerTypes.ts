@@ -31,8 +31,36 @@ export type ViewerHighlightArea = {
   width: number;
 };
 
+/**
+ * The annotation kinds a reader can produce directly from a text selection.
+ * Page-level notes are created from the toolbar instead and never reach here.
+ */
+export type ViewerSelectionKind = 'highlight' | 'underline' | 'note';
+
 export type ViewerHighlightSelection = {
   selectedText: string;
   page: number;
   areas: ViewerHighlightArea[];
+  kind: ViewerSelectionKind;
+  color: string;
+};
+
+export type ViewerSearchMatch = {
+  /** 1-based position across the whole document, matching `jumpToMatch`. */
+  index: number;
+  page: number;
+  excerpt: string;
+};
+
+export type ViewerSearchState = {
+  keyword: string;
+  matches: ViewerSearchMatch[];
+  /** 1-based index of the focused match, or 0 when nothing is focused. */
+  currentIndex: number;
+};
+
+export const emptySearchState: ViewerSearchState = {
+  keyword: '',
+  matches: [],
+  currentIndex: 0,
 };

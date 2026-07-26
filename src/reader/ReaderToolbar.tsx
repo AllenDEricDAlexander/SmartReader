@@ -16,10 +16,12 @@ import {
 } from 'lucide-react';
 import type { ChangeEventHandler } from 'react';
 import type { DocumentSession } from '../documents/documentModels';
+import type { ViewerSearchState } from '../viewer/viewerTypes';
 
 type ReaderToolbarProps = {
   activeSession: DocumentSession | null;
   searchText: string;
+  searchState: ViewerSearchState;
   pageInput: string;
   sidebarOpen: boolean;
   onOpenPdf(): void | Promise<void>;
@@ -51,6 +53,7 @@ type ReaderToolbarProps = {
 export function ReaderToolbar({
   activeSession,
   searchText,
+  searchState,
   pageInput,
   sidebarOpen,
   onOpenPdf,
@@ -80,6 +83,14 @@ export function ReaderToolbar({
 }: ReaderToolbarProps) {
   const totalPages = activeSession?.totalPages ?? null;
   const zoomPercent = Math.round((activeSession?.zoom ?? 1) * 100);
+  const hasMatches = searchState.matches.length > 0;
+  // Only report counts once a search has actually run, so an empty result is
+  // distinguishable from "no search yet".
+  const matchSummary = !searchState.keyword
+    ? null
+    : hasMatches
+      ? `${searchState.currentIndex} / ${searchState.matches.length}`
+      : '无匹配';
 
   return (
     <section className="reader-toolbar" aria-label="阅读工具栏">
@@ -133,12 +144,18 @@ export function ReaderToolbar({
         <button type="button" className="toolbar-text-button" onClick={onSearch} aria-label="Search PDF">
           查找
         </button>
+        {matchSummary ? (
+          <span className="toolbar-match-count" aria-live="polite">
+            {matchSummary}
+          </span>
+        ) : null}
         <button
           type="button"
           className="toolbar-icon-button"
           onClick={onSearchPrevious}
           aria-label="Previous match"
           title="上一处匹配"
+          disabled={!hasMatches}
         >
           <ChevronLeft size={16} />
         </button>
@@ -148,6 +165,7 @@ export function ReaderToolbar({
           onClick={onSearchNext}
           aria-label="Next match"
           title="下一处匹配"
+          disabled={!hasMatches}
         >
           <ChevronRight size={16} />
         </button>

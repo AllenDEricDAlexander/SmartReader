@@ -24,9 +24,12 @@ vi.mock('../platform/openWithEvents', () => ({
   }),
 }));
 
+const selectionKinds = ['highlight', 'underline', 'note'] as const;
+
 function TestPdfRenderer({
   fileUrl,
   onPageChange,
+  onHighlightSelection,
 }: Parameters<PdfRenderer>[0]) {
   useEffect(() => {
     if (fileUrl === 'blob:progress-sync') {
@@ -34,7 +37,28 @@ function TestPdfRenderer({
     }
   }, [fileUrl, onPageChange]);
 
-  return <div>PDF {fileUrl}</div>;
+  return (
+    <div>
+      PDF {fileUrl}
+      {/* Stands in for the markup menu the real viewer shows on a text selection. */}
+      {selectionKinds.map((kind) => (
+        <button
+          key={kind}
+          type="button"
+          aria-label={`模拟标注 ${kind}`}
+          onClick={() =>
+            onHighlightSelection?.({
+              selectedText: '被选中的原文',
+              page: 2,
+              areas: [{ pageIndex: 1, top: 10, left: 12, height: 2, width: 30 }],
+              kind,
+              color: '#4ade80',
+            })
+          }
+        />
+      ))}
+    </div>
+  );
 }
 
 const testViewerRenderer: PdfRenderer = (props) => <TestPdfRenderer {...props} />;
@@ -690,6 +714,7 @@ describe('App', () => {
       search: vi.fn(),
       searchNext: vi.fn(),
       searchPrevious: vi.fn(),
+      jumpToMatch: vi.fn(),
       zoomIn: vi.fn().mockReturnValue(true),
       zoomOut: vi.fn().mockReturnValue(true),
       fitWidth: vi.fn(),
@@ -1318,6 +1343,7 @@ describe('App', () => {
       search: vi.fn().mockReturnValue(true),
       searchNext: vi.fn().mockReturnValue(true),
       searchPrevious: vi.fn().mockReturnValue(true),
+      jumpToMatch: vi.fn().mockReturnValue(true),
       zoomIn: vi.fn().mockReturnValue(true),
       zoomOut: vi.fn().mockReturnValue(true),
       fitWidth: vi.fn().mockReturnValue(true),
@@ -1357,6 +1383,7 @@ describe('App', () => {
       search: vi.fn().mockReturnValue(true),
       searchNext: vi.fn().mockReturnValue(true),
       searchPrevious: vi.fn().mockReturnValue(true),
+      jumpToMatch: vi.fn().mockReturnValue(true),
       zoomIn: vi.fn().mockReturnValue(true),
       zoomOut: vi.fn().mockReturnValue(true),
       fitWidth: vi.fn().mockReturnValue(true),
@@ -1395,6 +1422,7 @@ describe('App', () => {
       search: vi.fn().mockReturnValue(true),
       searchNext: vi.fn().mockReturnValue(true),
       searchPrevious: vi.fn().mockReturnValue(true),
+      jumpToMatch: vi.fn().mockReturnValue(true),
       zoomIn: vi.fn().mockReturnValue(true),
       zoomOut: vi.fn().mockReturnValue(true),
       fitWidth: vi.fn().mockReturnValue(true),
@@ -1435,6 +1463,7 @@ describe('App', () => {
       search: vi.fn().mockReturnValue(true),
       searchNext: vi.fn().mockReturnValue(true),
       searchPrevious: vi.fn().mockReturnValue(true),
+      jumpToMatch: vi.fn().mockReturnValue(true),
       zoomIn: vi.fn().mockReturnValue(true),
       zoomOut: vi.fn().mockReturnValue(true),
       fitWidth: vi.fn().mockReturnValue(true),
@@ -1511,6 +1540,96 @@ describe('App', () => {
     });
 
     expect(screen.getByText('页面笔记')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['highlight', 'highlight'],
+    ['underline', 'underline'],
+  ] as const)(
+    'saves a %s annotation from a text selection with the chosen colour',
+    async (kind, expectedType) => {
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue(`blob:selection-${kind}`);
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+      const persistence = {
+        ...createEmptyPersistence(),
+        saveAnnotation: vi.fn().mockImplementation(async (annotation) => ({ ...annotation, id: 7 })),
+      };
+
+      renderApp(
+        <App
+          bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+          persistence={persistence}
+          viewerRenderer={testViewerRenderer}
+        />,
+      );
+
+      fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+        target: { files: [new File(['%PDF-1.7'], 'mark.pdf', { type: 'application/pdf' })] },
+      });
+
+      await screen.findByRole('tab', { name: 'mark.pdf' });
+      fireEvent.click(screen.getByLabelText(`模拟标注 ${kind}`));
+
+      await waitFor(() => {
+        expect(persistence.saveAnnotation).toHaveBeenCalledWith(
+          expect.objectContaining({
+            page: 2,
+            type: expectedType,
+            color: '#4ade80',
+            quote: '被选中的原文',
+            areas: [{ pageIndex: 1, top: 10, left: 12, height: 2, width: 30 }],
+          }),
+        );
+      });
+    },
+  );
+
+  it('anchors a note to the selected text and focuses it for editing', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:selection-note');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const persistence = {
+      ...createEmptyPersistence(),
+      saveAnnotation: vi.fn().mockImplementation(async (annotation) => ({ ...annotation, id: 11 })),
+    };
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [new File(['%PDF-1.7'], 'quote.pdf', { type: 'application/pdf' })] },
+    });
+
+    await screen.findByRole('tab', { name: 'quote.pdf' });
+    fireEvent.click(screen.getByLabelText('模拟标注 note'));
+
+    await waitFor(() => {
+      expect(persistence.saveAnnotation).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'note', quote: '被选中的原文', page: 2 }),
+      );
+    });
+
+    // A selection note keeps the quote and stays editable, so the reader can
+    // type straight into the detail panel.
+    expect(
+      await screen.findByText('被选中的原文', { selector: 'blockquote' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Annotation note')).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText('Annotation note'), {
+      target: { value: '这段值得复习' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存笔记' }));
+
+    await waitFor(() => {
+      expect(persistence.saveAnnotation).toHaveBeenLastCalledWith(
+        expect.objectContaining({ id: 11, text: '这段值得复习', quote: '被选中的原文' }),
+      );
+    });
   });
 
   it('adds a page note and lets the user tag the annotation', async () => {
@@ -2373,6 +2492,7 @@ describe('App', () => {
       search: vi.fn().mockReturnValue(true),
       searchNext: vi.fn().mockReturnValue(true),
       searchPrevious: vi.fn().mockReturnValue(true),
+      jumpToMatch: vi.fn().mockReturnValue(true),
       zoomIn: vi.fn().mockReturnValue(true),
       zoomOut: vi.fn().mockReturnValue(true),
       fitWidth: vi.fn().mockReturnValue(true),

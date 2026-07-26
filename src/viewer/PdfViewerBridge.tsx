@@ -1,8 +1,13 @@
 import { SpecialZoomLevel, Worker, Viewer } from '@react-pdf-viewer/core';
 import { highlightPlugin, Trigger, type HighlightArea } from '@react-pdf-viewer/highlight';
+import type { Match } from '@react-pdf-viewer/search';
 import { toolbarPlugin } from '@react-pdf-viewer/toolbar';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { ReaderAnnotation } from '../annotations/annotationModels';
+import {
+  annotationColors,
+  defaultAnnotationColor,
+  type ReaderAnnotation,
+} from '../annotations/annotationModels';
 import '@react-pdf-viewer/core/lib/styles/index.css';
 import '@react-pdf-viewer/highlight/lib/styles/index.css';
 import '@react-pdf-viewer/page-navigation/lib/styles/index.css';
@@ -10,12 +15,16 @@ import '@react-pdf-viewer/search/lib/styles/index.css';
 import '@react-pdf-viewer/toolbar/lib/styles/index.css';
 import '@react-pdf-viewer/zoom/lib/styles/index.css';
 import type { ViewerController } from './viewerController';
-import type {
-  ViewerHighlightArea,
-  ViewerHighlightSelection,
-  ViewerLoadError,
-  ViewerProgress,
-  ViewerSource,
+import {
+  emptySearchState,
+  type ViewerHighlightArea,
+  type ViewerHighlightSelection,
+  type ViewerLoadError,
+  type ViewerProgress,
+  type ViewerSearchMatch,
+  type ViewerSearchState,
+  type ViewerSelectionKind,
+  type ViewerSource,
 } from './viewerTypes';
 
 export type PdfRendererProps = {
@@ -25,6 +34,7 @@ export type PdfRendererProps = {
   onPageChange(page: number, totalPages: number | null): void;
   onZoomChange(zoom: number): void;
   onLoadError?(error: ViewerLoadError): void;
+  onSearchStateChange?(state: ViewerSearchState): void;
 };
 
 export type PdfRenderer = (props: PdfRendererProps) => JSX.Element;
@@ -36,6 +46,7 @@ export type PdfViewerBridgeProps = {
   onProgressChange(progress: ViewerProgress): void;
   loadingTimeoutMs?: number;
   onLoadError?(error: ViewerLoadError): void;
+  onSearchStateChange?(state: ViewerSearchState): void;
   controller?: ViewerController;
   renderer?: PdfRenderer;
 };
@@ -47,6 +58,7 @@ export function PdfViewerBridge({
   onProgressChange,
   loadingTimeoutMs = 15000,
   onLoadError,
+  onSearchStateChange,
   controller,
   renderer,
 }: PdfViewerBridgeProps) {
@@ -64,6 +76,7 @@ export function PdfViewerBridge({
       onProgressChange={onProgressChange}
       loadingTimeoutMs={loadingTimeoutMs}
       onLoadError={onLoadError}
+      onSearchStateChange={onSearchStateChange}
     />
   );
 }
@@ -75,6 +88,7 @@ function ActivePdfViewerBridge({
   onProgressChange,
   loadingTimeoutMs,
   onLoadError,
+  onSearchStateChange,
   controller,
   renderer,
 }: {
@@ -84,6 +98,7 @@ function ActivePdfViewerBridge({
   onProgressChange(progress: ViewerProgress): void;
   loadingTimeoutMs: number;
   onLoadError?(error: ViewerLoadError): void;
+  onSearchStateChange?(state: ViewerSearchState): void;
   controller?: ViewerController;
   renderer?: PdfRenderer;
 }) {
@@ -162,6 +177,7 @@ function ActivePdfViewerBridge({
       search: () => undefined,
       searchNext: () => undefined,
       searchPrevious: () => undefined,
+      jumpToMatch: () => undefined,
       zoomIn: () => undefined,
       zoomOut: () => undefined,
       fitWidth: () => undefined,
@@ -194,6 +210,7 @@ function ActivePdfViewerBridge({
       onPageChange: reportPage,
       onZoomChange: reportZoom,
       onLoadError: handleLoadError,
+      onSearchStateChange,
     });
   }
 
@@ -206,6 +223,7 @@ function ActivePdfViewerBridge({
       onPageChange={reportPage}
       onZoomChange={reportZoom}
       onLoadError={handleLoadError}
+      onSearchStateChange={onSearchStateChange}
     />
   );
 }
@@ -218,11 +236,18 @@ function ReactPdfViewer({
   onPageChange,
   onZoomChange,
   onLoadError,
+  onSearchStateChange,
 }: PdfRendererProps & {
   controller?: ViewerController;
   onLoadError?(error: ViewerLoadError): void;
 }) {
   const scaleRef = useRef(1);
+  const searchStateRef = useRef<ViewerSearchState>(emptySearchState);
+  const onSearchStateChangeRef = useRef(onSearchStateChange);
+
+  useEffect(() => {
+    onSearchStateChangeRef.current = onSearchStateChange;
+  }, [onSearchStateChange]);
   const searchButtonRef = useRef<HTMLButtonElement | null>(null);
   const toolbarPluginInstance = toolbarPlugin({
     pageNavigationPlugin: { enableShortcuts: false },
@@ -238,35 +263,42 @@ function ReactPdfViewer({
   const highlightPluginInstance = highlightPlugin({
     trigger: Trigger.TextSelection,
     renderHighlightTarget: (props) => (
-      <button
-        type="button"
-        className="highlight-target"
-        onClick={() => {
+      <SelectionMarkupMenu
+        onApply={(kind, color) => {
           onHighlightSelection?.({
             selectedText: props.selectedText,
             page: props.selectionRegion.pageIndex + 1,
             areas: props.highlightAreas.map(mapHighlightArea),
+            kind,
+            color,
           });
           props.cancel();
         }}
-      >
-        Save highlight
-      </button>
+        onDismiss={props.cancel}
+      />
     ),
     renderHighlights: (props) => (
       <>
         {annotations
           .flatMap((annotation) =>
-            annotation.areas.map((area) => ({ area, color: annotation.color })),
+            annotation.areas.map((area) => ({
+              area,
+              color: annotation.color,
+              type: annotation.type,
+            })),
           )
           .filter(({ area }) => area.pageIndex === props.pageIndex)
-          .map(({ area, color }, index) => (
+          .map(({ area, color, type }, index) => (
             <div
               key={`${area.pageIndex}-${area.top}-${area.left}-${index}`}
-              className="reader-highlight"
+              className={`reader-highlight reader-highlight-${type}`}
               style={{
                 ...props.getCssProperties(area, props.rotation),
-                background: color,
+                // An underline only paints its baseline, so it uses a border
+                // instead of a fill; a note marks its anchor with a soft tint.
+                ...(type === 'underline'
+                  ? { borderBottom: `2px solid ${color}` }
+                  : { background: color }),
               }}
             />
           ))}
@@ -279,20 +311,50 @@ function ReactPdfViewer({
       return undefined;
     }
 
+    const publishSearchState = (state: ViewerSearchState) => {
+      searchStateRef.current = state;
+      onSearchStateChangeRef.current?.(state);
+    };
+
+    // `jumpToMatch` is 1-based and wraps at both ends, so the focused index is
+    // tracked here and fed back in rather than inferred from the returned match.
+    const focusMatch = (index: number) => {
+      const { matches } = searchStateRef.current;
+
+      if (matches.length === 0) {
+        return;
+      }
+
+      const wrapped = ((index - 1 + matches.length) % matches.length) + 1;
+      searchPluginInstance.jumpToMatch(wrapped);
+      publishSearchState({ ...searchStateRef.current, currentIndex: wrapped });
+    };
+
     controller.bind({
       jumpToPage: (page) => pageNavigationPluginInstance.jumpToPage(Math.max(0, page - 1)),
       openSearch: () => {
         searchButtonRef.current?.click();
       },
       search: (keyword) => {
-        void searchPluginInstance.highlight(keyword);
+        const trimmed = keyword.trim();
+
+        if (!trimmed) {
+          searchPluginInstance.clearHighlights();
+          publishSearchState(emptySearchState);
+          return;
+        }
+
+        void searchPluginInstance.highlight(trimmed).then((matches) => {
+          publishSearchState({
+            keyword: trimmed,
+            matches: matches.map(toSearchMatch),
+            currentIndex: matches.length > 0 ? 1 : 0,
+          });
+        });
       },
-      searchNext: () => {
-        searchPluginInstance.jumpToNextMatch();
-      },
-      searchPrevious: () => {
-        searchPluginInstance.jumpToPreviousMatch();
-      },
+      searchNext: () => focusMatch(searchStateRef.current.currentIndex + 1),
+      searchPrevious: () => focusMatch(searchStateRef.current.currentIndex - 1),
+      jumpToMatch: (index) => focusMatch(index),
       zoomIn: () => {
         zoomPluginInstance.zoomTo(Math.min(3, scaleRef.current + 0.1));
       },
@@ -393,6 +455,88 @@ function ReactPdfLoadError({
       <p>{message}</p>
     </section>
   );
+}
+
+const selectionActions: { kind: ViewerSelectionKind; label: string }[] = [
+  { kind: 'highlight', label: '高亮' },
+  { kind: 'underline', label: '下划线' },
+  { kind: 'note', label: '笔记' },
+];
+
+/**
+ * Markup menu shown next to a text selection. It lets the reader pick a colour
+ * and choose between a highlight, an underline, or a note anchored to the
+ * selected text, instead of always producing the same yellow highlight.
+ */
+function SelectionMarkupMenu({
+  onApply,
+  onDismiss,
+}: {
+  onApply(kind: ViewerSelectionKind, color: string): void;
+  onDismiss(): void;
+}) {
+  const [color, setColor] = useState(defaultAnnotationColor);
+
+  return (
+    <div className="selection-markup-menu" role="group" aria-label="标注所选文本">
+      <div className="selection-markup-colors">
+        {annotationColors.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={
+              option.value === color
+                ? 'selection-color-swatch selected'
+                : 'selection-color-swatch'
+            }
+            style={{ backgroundColor: option.value }}
+            aria-label={option.label}
+            aria-pressed={option.value === color}
+            onClick={() => setColor(option.value)}
+          />
+        ))}
+      </div>
+      <div className="selection-markup-actions">
+        {selectionActions.map((action) => (
+          <button
+            key={action.kind}
+            type="button"
+            className="selection-markup-action"
+            onClick={() => onApply(action.kind, color)}
+          >
+            {action.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          className="selection-markup-action ghost"
+          aria-label="取消标注"
+          onClick={onDismiss}
+        >
+          取消
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const excerptPadding = 40;
+
+/**
+ * Builds a result-list entry from a viewer match. `highlight()` returns matches
+ * in document order, so the array position doubles as the 1-based global index
+ * that `jumpToMatch` expects.
+ */
+function toSearchMatch(match: Match, position: number): ViewerSearchMatch {
+  const start = Math.max(0, match.startIndex - excerptPadding);
+  const end = Math.min(match.pageText.length, match.endIndex + excerptPadding);
+  const excerpt = match.pageText.slice(start, end).replace(/\s+/g, ' ').trim();
+
+  return {
+    index: position + 1,
+    page: match.pageIndex + 1,
+    excerpt: `${start > 0 ? '…' : ''}${excerpt}${end < match.pageText.length ? '…' : ''}`,
+  };
 }
 
 function mapHighlightArea(area: HighlightArea): ViewerHighlightArea {

@@ -37,6 +37,7 @@ describe('ReaderViewerContent', () => {
         onHighlightSelection={vi.fn()}
         onProgressChange={vi.fn()}
         onLoadError={vi.fn()}
+        onSearchStateChange={vi.fn()}
       />,
     );
 
@@ -55,6 +56,7 @@ describe('ReaderViewerContent', () => {
         onHighlightSelection={vi.fn()}
         onProgressChange={vi.fn()}
         onLoadError={vi.fn()}
+        onSearchStateChange={vi.fn()}
       />,
     );
 
@@ -77,6 +79,7 @@ describe('ReaderViewerContent', () => {
         onHighlightSelection={vi.fn()}
         onProgressChange={vi.fn()}
         onLoadError={vi.fn()}
+        onSearchStateChange={vi.fn()}
       />,
     );
 

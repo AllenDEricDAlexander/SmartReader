@@ -44,7 +44,11 @@ import { useSessionRestore } from '../reader/hooks/useSessionRestore';
 import { GlobalSearchPanel } from '../search/GlobalSearchPanel';
 import type { GlobalSearchResult } from '../search/globalSearch';
 import { ViewerController } from '../viewer/viewerController';
-import type { ViewerSource } from '../viewer/viewerTypes';
+import {
+  emptySearchState,
+  type ViewerSearchState,
+  type ViewerSource,
+} from '../viewer/viewerTypes';
 import type { AppWorkspace, ReaderAppProps } from './appTypes';
 import { ReaderViewerContent } from './ReaderViewerContent';
 import { ReaderWorkspaceSwitch } from './ReaderWorkspaceSwitch';
@@ -83,6 +87,7 @@ export function ReaderApp({
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchText, setSearchText] = useState('');
   const [lastSearchCommand, setLastSearchCommand] = useState('');
+  const [searchState, setSearchState] = useState<ViewerSearchState>(emptySearchState);
   const [pageInput, setPageInput] = useState('');
   const [workspaceOverride, setWorkspaceOverride] = useState<AppWorkspace | null>(null);
   const [homeSidebarPage, setHomeSidebarPage] = useState<HomeSidebarPage>('home');
@@ -680,7 +685,18 @@ export function ReaderApp({
   const runSearch = useCallback(
     (keyword: string) => {
       activeViewerController.search(keyword);
-      setLastSearchCommand(keyword.trim() ? `Searched "${keyword.trim()}"` : 'Cleared search');
+      setLastSearchCommand(keyword.trim() ? `已搜索“${keyword.trim()}”` : '已清除搜索');
+
+      if (!keyword.trim()) {
+        setSearchState(emptySearchState);
+      }
+    },
+    [activeViewerController],
+  );
+  const jumpToSearchMatch = useCallback(
+    (index: number) => {
+      activeViewerController.jumpToMatch(index);
+      setSearchState((current) => ({ ...current, currentIndex: index }));
     },
     [activeViewerController],
   );
@@ -912,16 +928,23 @@ export function ReaderApp({
       renderer={viewerRenderer}
       onOpenPdf={openPdfAndIgnoreResult}
       onRetry={reopenDesktopSession}
-      onHighlightSelection={(selection) =>
+      onHighlightSelection={(selection) => {
+        // The markup menu decides the kind and colour, so a selection can become
+        // a highlight, an underline, or a note anchored to the quoted text.
         void saveAnnotationForActiveDocument({
           page: selection.page,
-          type: 'highlight',
-          color: '#facc15',
+          type: selection.kind,
+          color: selection.color,
           text: null,
           quote: selection.selectedText,
           areas: selection.areas,
-        })
-      }
+        }).then((saved) => {
+          if (saved?.id != null) {
+            setSelectedAnnotationId(saved.id);
+          }
+        });
+      }}
+      onSearchStateChange={setSearchState}
       onProgressChange={(progress) => {
         setDocuments((current) => {
           const next = updateSessionProgress(current, progress.sessionId, {
@@ -984,6 +1007,7 @@ export function ReaderApp({
         persistence={persistence}
         readerPreferences={readerPreferences}
         recentDocuments={recentDocuments}
+        searchState={searchState}
         searchText={searchText}
         selectedAnnotation={selectedAnnotation}
         sessionRestoreCount={sessionRestoreCount}
@@ -1016,6 +1040,7 @@ export function ReaderApp({
         importAnnotationsForDocument={importAnnotationsForDocument}
         jumpToActiveDocumentPage={jumpToActiveDocumentPage}
         jumpToPage={jumpToPage}
+        jumpToSearchMatch={jumpToSearchMatch}
         onTagsChange={(update) => {
           tagsMutatedRef.current = true;
           setAvailableTags(update);

@@ -1,5 +1,6 @@
 import { FileText, Star } from 'lucide-react';
 import type { ReaderAnnotation } from '../annotations/annotationModels';
+import type { ViewerSearchState } from '../viewer/viewerTypes';
 import type { DocumentSession } from '../documents/documentModels';
 import type { Tag } from '../tags/tagModels';
 import { AnnotationDetail } from './annotations/AnnotationDetail';
@@ -10,6 +11,7 @@ type ReaderRightPanelProps = {
   selectedAnnotation: ReaderAnnotation | null;
   tags: Tag[];
   searchText: string;
+  searchState: ViewerSearchState;
   lastSearchCommand: string;
   isFavorite: boolean;
   onSearchTextChange(value: string): void;
@@ -18,6 +20,7 @@ type ReaderRightPanelProps = {
   onClearSearch(): void;
   onSearchNext(): void;
   onSearchPrevious(): void;
+  onJumpToMatch(index: number): void;
   onJumpToPage(page: number): void;
   onFitWidth(): void;
   onFitPage(): void;
@@ -40,6 +43,7 @@ export function ReaderRightPanel({
   selectedAnnotation,
   tags,
   searchText,
+  searchState,
   lastSearchCommand,
   isFavorite,
   onSearchTextChange,
@@ -48,6 +52,7 @@ export function ReaderRightPanel({
   onClearSearch,
   onSearchNext,
   onSearchPrevious,
+  onJumpToMatch,
   onJumpToPage,
   onFitWidth,
   onFitPage,
@@ -107,11 +112,13 @@ export function ReaderRightPanel({
       <SearchInspector
         query={searchText}
         lastSearchCommand={lastSearchCommand}
+        searchState={searchState}
         onQueryChange={onSearchTextChange}
         onOpenSearch={onOpenSearch}
         onSearch={onSearch}
         onPrevious={onSearchPrevious}
         onNext={onSearchNext}
+        onJumpToMatch={onJumpToMatch}
         onJumpToPage={() => onJumpToPage(activeSession?.page ?? 1)}
         onFitWidth={onFitWidth}
         onFitPage={onFitPage}

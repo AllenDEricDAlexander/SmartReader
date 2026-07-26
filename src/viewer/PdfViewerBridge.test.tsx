@@ -117,6 +117,8 @@ describe('PdfViewerBridge', () => {
             selectedText: annotations[0]?.quote ?? '',
             page: 4,
             areas: [{ pageIndex: 3, top: 1, left: 2, height: 3, width: 4 }],
+            kind: 'highlight',
+            color: '#facc15',
           });
         }}
       >
@@ -161,6 +163,8 @@ describe('PdfViewerBridge', () => {
       selectedText: 'Selected text',
       page: 4,
       areas: [{ pageIndex: 3, top: 1, left: 2, height: 3, width: 4 }],
+      kind: 'highlight',
+      color: '#facc15',
     });
   });
 

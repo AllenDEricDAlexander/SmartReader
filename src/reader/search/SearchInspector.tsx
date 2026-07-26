@@ -1,13 +1,17 @@
 import { Search } from 'lucide-react';
+import type { ViewerSearchState } from '../../viewer/viewerTypes';
+import { SearchResultsList } from './SearchResultsList';
 
 type SearchInspectorProps = {
   query: string;
   lastSearchCommand: string;
+  searchState: ViewerSearchState;
   onQueryChange(value: string): void;
   onOpenSearch(): void;
   onSearch(): void;
   onPrevious(): void;
   onNext(): void;
+  onJumpToMatch(index: number): void;
   onJumpToPage(): void;
   onFitWidth(): void;
   onFitPage(): void;
@@ -17,11 +21,13 @@ type SearchInspectorProps = {
 export function SearchInspector({
   query,
   lastSearchCommand,
+  searchState,
   onQueryChange,
   onOpenSearch,
   onSearch,
   onPrevious,
   onNext,
+  onJumpToMatch,
   onJumpToPage,
   onFitWidth,
   onFitPage,
@@ -58,11 +64,21 @@ export function SearchInspector({
       </div>
       <div className="search-match-strip" aria-live="polite">
         <strong>{query.trim() ? query.trim() : '未输入关键词'}</strong>
-        <span>{lastSearchCommand || '尚未执行搜索'}</span>
+        <span>
+          {searchState.keyword
+            ? searchState.matches.length > 0
+              ? `第 ${searchState.currentIndex} / ${searchState.matches.length} 处匹配`
+              : '没有找到匹配内容'
+            : lastSearchCommand || '尚未执行搜索'}
+        </span>
       </div>
-      <p className="muted-copy">
-        当前支持在文档中高亮关键词，并用上一处 / 下一处跳转。匹配总数与结果摘要需更完整的 viewer 能力，后续版本补充。
-      </p>
+      {searchState.matches.length > 0 ? (
+        <SearchResultsList
+          matches={searchState.matches}
+          currentIndex={searchState.currentIndex}
+          onJumpToMatch={onJumpToMatch}
+        />
+      ) : null}
       <div className="control-grid two">
         <button type="button" onClick={onPrevious}>
           上一处
