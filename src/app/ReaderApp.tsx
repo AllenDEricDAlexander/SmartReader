@@ -167,6 +167,17 @@ export function ReaderApp({
     updateBookmarkForDocument,
   } = useReaderDecorations({ activeSession, persistence });
 
+  // Single release entrance for viewer-held resources. Closing a tab revokes
+  // its own blob URL; this covers teardown paths that never go through a close,
+  // such as a failed restore replacing the whole session set.
+  useEffect(
+    () => () => {
+      blobUrlCache.clear();
+      pdfByteCache.clear();
+    },
+    [blobUrlCache, pdfByteCache],
+  );
+
   const mergeRestoredRecentDocuments = useCallback(
     (update: SetStateAction<PersistedDocument[]>) => {
       if (typeof update === 'function') {
