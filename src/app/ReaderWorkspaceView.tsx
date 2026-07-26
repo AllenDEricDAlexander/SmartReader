@@ -10,7 +10,7 @@ import { ReaderTabs } from '../reader/ReaderTabs';
 import { ReaderToolbar } from '../reader/ReaderToolbar';
 import { ReaderWorkspace } from '../reader/ReaderWorkspace';
 import type { ViewerActions } from '../viewer/viewerController';
-import type { ViewerSearchState } from '../viewer/viewerTypes';
+import type { ViewerSearchOptions, ViewerSearchState } from '../viewer/viewerTypes';
 import type { SettingsSection } from '../settings/SettingsWorkspace';
 
 type ReaderWorkspaceViewProps = {
@@ -24,6 +24,7 @@ type ReaderWorkspaceViewProps = {
   lastSearchCommand: string;
   pageInput: string;
   searchState: ViewerSearchState;
+  searchOptions: ViewerSearchOptions;
   searchInputRef: RefObject<HTMLInputElement>;
   searchText: string;
   selectedAnnotation: ReaderAnnotation | null;
@@ -44,6 +45,7 @@ type ReaderWorkspaceViewProps = {
   jumpToActiveDocumentPage(page: number): void;
   jumpToPage(page: number): void;
   jumpToSearchMatch(index: number): void;
+  setSearchOptions(options: ViewerSearchOptions): void;
   openPdfAndIgnoreResult(): void;
   openSettingsWorkspace(initialSection?: SettingsSection): void;
   renameBookmark(bookmark: Bookmark, title: string): void | Promise<void>;
@@ -68,6 +70,7 @@ export function ReaderWorkspaceView({
   lastSearchCommand,
   pageInput,
   searchState,
+  searchOptions,
   searchInputRef,
   searchText,
   selectedAnnotation,
@@ -88,6 +91,7 @@ export function ReaderWorkspaceView({
   jumpToActiveDocumentPage,
   jumpToPage,
   jumpToSearchMatch,
+  setSearchOptions,
   openPdfAndIgnoreResult,
   openSettingsWorkspace,
   renameBookmark,
@@ -180,6 +184,7 @@ export function ReaderWorkspaceView({
           tags={availableTags}
           searchText={searchText}
           searchState={searchState}
+          searchOptions={searchOptions}
           lastSearchCommand={lastSearchCommand}
           isFavorite={activeSessionIsFavorite}
           onSearchTextChange={setSearchText}
@@ -188,6 +193,7 @@ export function ReaderWorkspaceView({
           onSearchNext={() => activeViewerController.searchNext()}
           onSearchPrevious={() => activeViewerController.searchPrevious()}
           onJumpToMatch={jumpToSearchMatch}
+          onSearchOptionsChange={setSearchOptions}
           onJumpToPage={jumpToActiveDocumentPage}
           onFitWidth={() => activeViewerController.fitWidth()}
           onFitPage={() => activeViewerController.fitPage()}

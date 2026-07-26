@@ -1,13 +1,16 @@
 import { Search } from 'lucide-react';
-import type { ViewerSearchState } from '../../viewer/viewerTypes';
+import type { ViewerSearchOptions, ViewerSearchState } from '../../viewer/viewerTypes';
 import { SearchResultsList } from './SearchResultsList';
+import { summariseMatches } from './searchResultGroups';
 
 type SearchInspectorProps = {
   query: string;
   lastSearchCommand: string;
   searchState: ViewerSearchState;
+  searchOptions: ViewerSearchOptions;
   onQueryChange(value: string): void;
   onSearch(): void;
+  onOptionsChange(options: ViewerSearchOptions): void;
   onPrevious(): void;
   onNext(): void;
   onJumpToMatch(index: number): void;
@@ -21,8 +24,10 @@ export function SearchInspector({
   query,
   lastSearchCommand,
   searchState,
+  searchOptions,
   onQueryChange,
   onSearch,
+  onOptionsChange,
   onPrevious,
   onNext,
   onJumpToMatch,
@@ -31,6 +36,9 @@ export function SearchInspector({
   onFitPage,
   onClearSearch,
 }: SearchInspectorProps) {
+  const hasMatches = searchState.matches.length > 0;
+  const hasSearched = Boolean(searchState.keyword);
+
   return (
     <section className="panel-section">
       <div className="panel-title">
@@ -59,30 +67,65 @@ export function SearchInspector({
           搜索
         </button>
       </div>
+
+      {hasSearched ? (
+        <div className="search-current-match" aria-live="polite">
+          <span>当前匹配</span>
+          <strong>
+            {searchState.currentIndex} / {searchState.matches.length}
+          </strong>
+        </div>
+      ) : null}
+
       <div className="search-match-strip" aria-live="polite">
         <strong>{query.trim() ? query.trim() : '未输入关键词'}</strong>
         <span>
-          {searchState.keyword
-            ? searchState.matches.length > 0
-              ? `第 ${searchState.currentIndex} / ${searchState.matches.length} 处匹配`
-              : '没有找到匹配内容'
-            : lastSearchCommand || '尚未执行搜索'}
+          {hasSearched ? summariseMatches(searchState.matches) : lastSearchCommand || '尚未执行搜索'}
         </span>
       </div>
-      {searchState.matches.length > 0 ? (
+
+      <div className="control-grid two">
+        <button type="button" onClick={onPrevious} disabled={!hasMatches}>
+          上一处 (⇧↑)
+        </button>
+        <button type="button" onClick={onNext} disabled={!hasMatches}>
+          下一处 (⇧↓)
+        </button>
+      </div>
+
+      {hasMatches ? (
         <SearchResultsList
           matches={searchState.matches}
           currentIndex={searchState.currentIndex}
           onJumpToMatch={onJumpToMatch}
         />
       ) : null}
+
+      <fieldset className="search-options">
+        <legend>搜索选项</legend>
+        <label>
+          <input
+            type="checkbox"
+            checked={searchOptions.matchCase}
+            onChange={(event) =>
+              onOptionsChange({ ...searchOptions, matchCase: event.target.checked })
+            }
+          />
+          <span>区分大小写</span>
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={searchOptions.wholeWords}
+            onChange={(event) =>
+              onOptionsChange({ ...searchOptions, wholeWords: event.target.checked })
+            }
+          />
+          <span>全字匹配</span>
+        </label>
+      </fieldset>
+
       <div className="control-grid two">
-        <button type="button" onClick={onPrevious}>
-          上一处
-        </button>
-        <button type="button" onClick={onNext}>
-          下一处
-        </button>
         <button type="button" onClick={onJumpToPage}>
           定位当前页
         </button>

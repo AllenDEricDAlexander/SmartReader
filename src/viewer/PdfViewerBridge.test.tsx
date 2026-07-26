@@ -54,6 +54,14 @@ vi.mock('@react-pdf-viewer/core', async () => {
   };
 });
 
+const pdfViewerSearchMock = vi.hoisted(() => ({
+  highlight: vi.fn().mockResolvedValue([]),
+  clearHighlights: vi.fn(),
+  jumpToMatch: vi.fn(),
+  jumpToNextMatch: vi.fn(),
+  jumpToPreviousMatch: vi.fn(),
+}));
+
 vi.mock('@react-pdf-viewer/toolbar', async () => {
   const React = await import('react');
   const Button = ({ label }: { label: string }) =>
@@ -65,11 +73,7 @@ vi.mock('@react-pdf-viewer/toolbar', async () => {
 
       return {
         pageNavigationPluginInstance: { jumpToPage: vi.fn() },
-        searchPluginInstance: {
-          highlight: vi.fn(),
-          jumpToNextMatch: vi.fn(),
-          jumpToPreviousMatch: vi.fn(),
-        },
+        searchPluginInstance: pdfViewerSearchMock,
         zoomPluginInstance: { zoomTo: vi.fn() },
         Toolbar: ({ children }: { children(slots: Record<string, unknown>): React.ReactNode }) =>
           React.createElement(
@@ -117,6 +121,7 @@ vi.mock('@react-pdf-viewer/highlight', async () => {
 
 describe('PdfViewerBridge', () => {
   afterEach(() => {
+    pdfViewerSearchMock.highlight.mockClear();
     pdfViewerCoreMock.mode = 'ready';
     pdfViewerCoreMock.errorMessage = 'Mock PDF failure';
   });
@@ -381,6 +386,28 @@ describe('PdfViewerBridge', () => {
     fireEvent.click(screen.getByRole('button', { name: '解锁文档' }));
 
     expect(pdfViewerCoreMock.verifyPassword).toHaveBeenCalledWith('hunter2');
+  });
+
+  it('passes case and whole-word options through to the search plugin', async () => {
+    const controller = new ViewerController();
+
+    render(
+      <PdfViewerBridge
+        source={{ sessionId: 'session-a', url: 'blob:book' }}
+        controller={controller}
+        onProgressChange={vi.fn()}
+      />,
+    );
+
+    await act(async () => {
+      controller.search('method', { matchCase: true, wholeWords: true });
+    });
+
+    expect(pdfViewerSearchMock.highlight).toHaveBeenCalledWith({
+      keyword: 'method',
+      matchCase: true,
+      wholeWords: true,
+    });
   });
 
   it('opens the real viewer at the restored page and zoom', () => {

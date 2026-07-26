@@ -14,7 +14,8 @@ describe('SearchResultsList', () => {
       <SearchResultsList matches={matches} currentIndex={1} onJumpToMatch={vi.fn()} />,
     );
 
-    expect(screen.getByText('第 2 页 · 第 1 处')).toBeInTheDocument();
+    expect(screen.getByText('第 2 页')).toBeInTheDocument();
+    expect(screen.getByText('第 1 / 2 处')).toBeInTheDocument();
     expect(screen.getByText('…second hit in context…')).toBeInTheDocument();
   });
 

@@ -18,6 +18,7 @@ import { PdfPasswordPrompt } from './PdfPasswordPrompt';
 import { createRenderRange } from './renderRange';
 import type { ViewerController } from './viewerController';
 import {
+  defaultSearchOptions,
   emptySearchState,
   type ViewerHighlightArea,
   type ViewerHighlightSelection,
@@ -373,7 +374,7 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
       // search field rather than the plugin's popover, which keeps a separate
       // keyword and match count that would contradict the toolbar.
       openSearch: () => undefined,
-      search: (keyword) => {
+      search: (keyword, options = defaultSearchOptions) => {
         const trimmed = keyword.trim();
 
         if (!trimmed) {
@@ -382,13 +383,20 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
           return;
         }
 
-        void searchPluginInstance.highlight(trimmed).then((matches) => {
-          publishSearchState({
+        void searchPluginInstance
+          .highlight({
             keyword: trimmed,
-            matches: matches.map(toSearchMatch),
-            currentIndex: matches.length > 0 ? 1 : 0,
+            matchCase: options.matchCase,
+            wholeWords: options.wholeWords,
+          })
+          .then((matches) => {
+            publishSearchState({
+              keyword: trimmed,
+              matches: matches.map(toSearchMatch),
+              currentIndex: matches.length > 0 ? 1 : 0,
+              options,
+            });
           });
-        });
       },
       searchNext: () => focusMatch(searchStateRef.current.currentIndex + 1),
       searchPrevious: () => focusMatch(searchStateRef.current.currentIndex - 1),

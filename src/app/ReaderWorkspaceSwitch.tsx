@@ -29,7 +29,7 @@ import { SettingsWorkspace, type SettingsSection } from '../settings/SettingsWor
 import type { Tag } from '../tags/tagModels';
 import { TagManager } from '../tags/TagManager';
 import type { ViewerActions } from '../viewer/viewerController';
-import type { ViewerSearchState } from '../viewer/viewerTypes';
+import type { ViewerSearchOptions, ViewerSearchState } from '../viewer/viewerTypes';
 import { AnnotationManagerWorkspace } from '../workspaces/AnnotationManagerWorkspace';
 import { BookmarkManagerWorkspace } from '../workspaces/BookmarkManagerWorkspace';
 import { CompareWorkspace } from '../workspaces/CompareWorkspace';
@@ -67,6 +67,7 @@ type ReaderWorkspaceSwitchProps = {
   readerPreferences: ReaderPreferences;
   recentDocuments: PersistedDocument[];
   searchState: ViewerSearchState;
+  searchOptions: ViewerSearchOptions;
   searchInputRef: RefObject<HTMLInputElement>;
   searchText: string;
   selectedAnnotation: ReaderAnnotation | null;
@@ -103,6 +104,7 @@ type ReaderWorkspaceSwitchProps = {
   jumpToActiveDocumentPage(page: number): void;
   jumpToPage(page: number): void;
   jumpToSearchMatch(index: number): void;
+  setSearchOptions(options: ViewerSearchOptions): void;
   onTagsChange(update: SetStateAction<Tag[]>): void;
   openCompareDocument(document: PersistedDocument): void | Promise<void>;
   openFavoriteDocument(document: FavoriteDocument): void | Promise<void | boolean>;
@@ -162,6 +164,7 @@ export function ReaderWorkspaceSwitch({
   readerPreferences,
   recentDocuments,
   searchState,
+  searchOptions,
   searchInputRef,
   searchText,
   selectedAnnotation,
@@ -196,6 +199,7 @@ export function ReaderWorkspaceSwitch({
   jumpToActiveDocumentPage,
   jumpToPage,
   jumpToSearchMatch,
+  setSearchOptions,
   onTagsChange,
   openCompareDocument,
   openFavoriteDocument,
@@ -317,6 +321,7 @@ export function ReaderWorkspaceSwitch({
           lastSearchCommand={lastSearchCommand}
           pageInput={pageInput}
           searchState={searchState}
+          searchOptions={searchOptions}
           searchInputRef={searchInputRef}
           searchText={searchText}
           selectedAnnotation={selectedAnnotation}
@@ -337,6 +342,7 @@ export function ReaderWorkspaceSwitch({
           jumpToActiveDocumentPage={jumpToActiveDocumentPage}
           jumpToPage={jumpToPage}
           jumpToSearchMatch={jumpToSearchMatch}
+          setSearchOptions={setSearchOptions}
           openPdfAndIgnoreResult={openPdfAndIgnoreResult}
           openSettingsWorkspace={openSettingsWorkspace}
           renameBookmark={renameBookmark}

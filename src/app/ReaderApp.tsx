@@ -46,10 +46,12 @@ import { GlobalSearchPanel } from '../search/GlobalSearchPanel';
 import type { GlobalSearchResult } from '../search/globalSearch';
 import { ViewerController } from '../viewer/viewerController';
 import {
+  defaultSearchOptions,
   emptySearchState,
   type ViewerHighlightSelection,
   type ViewerLoadError,
   type ViewerProgress,
+  type ViewerSearchOptions,
   type ViewerSearchState,
   type ViewerSource,
 } from '../viewer/viewerTypes';
@@ -94,6 +96,8 @@ export function ReaderApp({
   const [searchText, setSearchText] = useState('');
   const [lastSearchCommand, setLastSearchCommand] = useState('');
   const [searchState, setSearchState] = useState<ViewerSearchState>(emptySearchState);
+  const [searchOptions, setSearchOptionsState] =
+    useState<ViewerSearchOptions>(defaultSearchOptions);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const focusSearchInput = useCallback(() => {
     searchInputRef.current?.focus();
@@ -708,15 +712,27 @@ export function ReaderApp({
     [activeSession, updateAnnotationForDocument],
   );
   const runSearch = useCallback(
-    (keyword: string) => {
-      activeViewerController.search(keyword);
+    (keyword: string, options: ViewerSearchOptions = searchOptions) => {
+      activeViewerController.search(keyword, options);
       setLastSearchCommand(keyword.trim() ? `已搜索“${keyword.trim()}”` : '已清除搜索');
 
       if (!keyword.trim()) {
         setSearchState(emptySearchState);
       }
     },
-    [activeViewerController],
+    [activeViewerController, searchOptions],
+  );
+  // Changing an option re-runs the current query so results never disagree with
+  // the checkboxes that produced them.
+  const setSearchOptions = useCallback(
+    (options: ViewerSearchOptions) => {
+      setSearchOptionsState(options);
+
+      if (searchText.trim()) {
+        runSearch(searchText, options);
+      }
+    },
+    [runSearch, searchText],
   );
   const jumpToSearchMatch = useCallback(
     (index: number) => {
@@ -1058,6 +1074,7 @@ export function ReaderApp({
         readerPreferences={readerPreferences}
         recentDocuments={recentDocuments}
         searchState={searchState}
+        searchOptions={searchOptions}
         searchInputRef={searchInputRef}
         searchText={searchText}
         selectedAnnotation={selectedAnnotation}
@@ -1092,6 +1109,7 @@ export function ReaderApp({
         jumpToActiveDocumentPage={jumpToActiveDocumentPage}
         jumpToPage={jumpToPage}
         jumpToSearchMatch={jumpToSearchMatch}
+        setSearchOptions={setSearchOptions}
         onTagsChange={(update) => {
           tagsMutatedRef.current = true;
           setAvailableTags(update);

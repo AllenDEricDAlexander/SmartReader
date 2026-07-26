@@ -1370,7 +1370,7 @@ describe('App', () => {
     fireEvent.change(screen.getByLabelText('Page number'), { target: { value: '8' } });
     fireEvent.click(screen.getByRole('button', { name: 'Go to page' }));
 
-    expect(viewerController.search).toHaveBeenCalledWith('method');
+    expect(viewerController.search).toHaveBeenCalledWith('method', expect.any(Object));
     expect(viewerController.jumpToPage).toHaveBeenCalledWith(8);
   });
 
@@ -1409,8 +1409,8 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Search PDF' }));
     fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
 
-    expect(viewerController.search).toHaveBeenNthCalledWith(1, 'method');
-    expect(viewerController.search).toHaveBeenNthCalledWith(2, '');
+    expect(viewerController.search).toHaveBeenNthCalledWith(1, 'method', expect.any(Object));
+    expect(viewerController.search).toHaveBeenNthCalledWith(2, '', expect.any(Object));
     expect(screen.getByLabelText('Search text')).toHaveValue('');
     expect(screen.queryByText('1 / 1')).not.toBeInTheDocument();
   });

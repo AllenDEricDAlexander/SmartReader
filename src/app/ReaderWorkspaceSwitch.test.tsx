@@ -6,7 +6,7 @@ import { defaultReaderPreferences } from '../preferences/preferencesStore';
 import { CommandRegistry } from '../commands/commandRegistry';
 import { ViewerController } from '../viewer/viewerController';
 import { ReaderWorkspaceSwitch } from './ReaderWorkspaceSwitch';
-import { emptySearchState } from '../viewer/viewerTypes';
+import { defaultSearchOptions, emptySearchState } from '../viewer/viewerTypes';
 
 const emptyTagDashboard = {
   overview: { totalTags: 0, activeTags: 0, totalUsage: 0, orphanTags: 0 },
@@ -57,6 +57,7 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     readerPreferences: preferences,
     recentDocuments: [],
     searchState: emptySearchState,
+    searchOptions: defaultSearchOptions,
     searchInputRef: { current: null },
     searchText: '',
     selectedAnnotation: null,
@@ -71,6 +72,7 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     canOpenRecordPage: () => true,
     clearSearch: vi.fn(),
     jumpToSearchMatch: vi.fn(),
+    setSearchOptions: vi.fn(),
     closeActiveTab: vi.fn(),
     closeToolWorkspace: vi.fn(),
     deleteBookmark: vi.fn(),

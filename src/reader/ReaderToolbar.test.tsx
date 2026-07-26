@@ -1,7 +1,11 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { DocumentSession } from '../documents/documentModels';
-import { emptySearchState, type ViewerSearchState } from '../viewer/viewerTypes';
+import {
+  defaultSearchOptions,
+  emptySearchState,
+  type ViewerSearchState,
+} from '../viewer/viewerTypes';
 import { ReaderToolbar } from './ReaderToolbar';
 
 function createSession(): DocumentSession {
@@ -67,6 +71,7 @@ describe('ReaderToolbar search state', () => {
         { index: 3, page: 9, excerpt: 'c' },
       ],
       currentIndex: 2,
+      options: defaultSearchOptions,
     });
 
     expect(screen.getByText('2 / 3')).toBeInTheDocument();
@@ -74,7 +79,12 @@ describe('ReaderToolbar search state', () => {
   });
 
   it('says so when a search returned nothing instead of showing a count', () => {
-    renderToolbar({ keyword: 'method', matches: [], currentIndex: 0 });
+    renderToolbar({
+      keyword: 'method',
+      matches: [],
+      currentIndex: 0,
+      options: defaultSearchOptions,
+    });
 
     expect(screen.getByText('无匹配')).toBeInTheDocument();
     expect(screen.getByLabelText('Next match')).toBeDisabled();

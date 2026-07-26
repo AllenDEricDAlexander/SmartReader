@@ -38,7 +38,7 @@ describe('ViewerController', () => {
     expect(controller.fitPage()).toBe(true);
     expect(actions.jumpToPage).toHaveBeenCalledWith(5);
     expect(actions.openSearch).toHaveBeenCalledTimes(1);
-    expect(actions.search).toHaveBeenCalledWith('method');
+    expect(actions.search).toHaveBeenCalledWith('method', undefined);
   });
 
   it('clears viewer actions when a document unmounts', () => {

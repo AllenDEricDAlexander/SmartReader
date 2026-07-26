@@ -4,7 +4,7 @@ import type { ReaderAnnotation } from '../annotations/annotationModels';
 import type { DocumentSession, DocumentState } from '../documents/documentModels';
 import type { PersistedDocument } from '../persistence/persistenceApi';
 import { ViewerController } from '../viewer/viewerController';
-import { emptySearchState } from '../viewer/viewerTypes';
+import { defaultSearchOptions, emptySearchState } from '../viewer/viewerTypes';
 import { ReaderWorkspaceView } from './ReaderWorkspaceView';
 
 function createSession(): DocumentSession {
@@ -47,6 +47,7 @@ describe('ReaderWorkspaceView', () => {
         lastSearchCommand=""
         pageInput="2"
         searchState={emptySearchState}
+        searchOptions={defaultSearchOptions}
         searchInputRef={{ current: null }}
         searchText=""
         selectedAnnotation={null}
@@ -67,6 +68,7 @@ describe('ReaderWorkspaceView', () => {
         jumpToActiveDocumentPage={vi.fn()}
         jumpToPage={vi.fn()}
         jumpToSearchMatch={vi.fn()}
+        setSearchOptions={vi.fn()}
         openPdfAndIgnoreResult={vi.fn()}
         openSettingsWorkspace={vi.fn()}
         renameBookmark={vi.fn()}

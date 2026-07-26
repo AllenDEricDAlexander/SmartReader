@@ -1,7 +1,9 @@
+import type { ViewerSearchOptions } from './viewerTypes';
+
 export type ViewerActions = {
   jumpToPage(page: number): void;
   openSearch(): void;
-  search(keyword: string): void;
+  search(keyword: string, options?: ViewerSearchOptions): void;
   searchNext(): void;
   searchPrevious(): void;
   jumpToMatch(index: number): void;
@@ -30,8 +32,8 @@ export class ViewerController {
     return this.run((actions) => actions.openSearch());
   }
 
-  search(keyword: string): boolean {
-    return this.run((actions) => actions.search(keyword));
+  search(keyword: string, options?: ViewerSearchOptions): boolean {
+    return this.run((actions) => actions.search(keyword, options));
   }
 
   searchNext(): boolean {

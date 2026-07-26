@@ -64,15 +64,27 @@ export type ViewerSearchMatch = {
   excerpt: string;
 };
 
+export type ViewerSearchOptions = {
+  matchCase: boolean;
+  wholeWords: boolean;
+};
+
+export const defaultSearchOptions: ViewerSearchOptions = {
+  matchCase: false,
+  wholeWords: false,
+};
+
 export type ViewerSearchState = {
   keyword: string;
   matches: ViewerSearchMatch[];
   /** 1-based index of the focused match, or 0 when nothing is focused. */
   currentIndex: number;
+  options: ViewerSearchOptions;
 };
 
 export const emptySearchState: ViewerSearchState = {
   keyword: '',
   matches: [],
   currentIndex: 0,
+  options: defaultSearchOptions,
 };
