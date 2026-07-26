@@ -88,6 +88,11 @@ export function ReaderApp({
   const [searchText, setSearchText] = useState('');
   const [lastSearchCommand, setLastSearchCommand] = useState('');
   const [searchState, setSearchState] = useState<ViewerSearchState>(emptySearchState);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const focusSearchInput = useCallback(() => {
+    searchInputRef.current?.focus();
+    searchInputRef.current?.select();
+  }, []);
   const [pageInput, setPageInput] = useState('');
   const [workspaceOverride, setWorkspaceOverride] = useState<AppWorkspace | null>(null);
   const [homeSidebarPage, setHomeSidebarPage] = useState<HomeSidebarPage>('home');
@@ -506,6 +511,7 @@ export function ReaderApp({
     addBookmarkForActivePage,
     addPageNote,
     closeActiveTab,
+    focusSearchInput,
     openGlobalSearch,
     openPdf: openPdfAndIgnoreResult,
     selectNextSession: selectNextReaderSession,
@@ -1008,6 +1014,7 @@ export function ReaderApp({
         readerPreferences={readerPreferences}
         recentDocuments={recentDocuments}
         searchState={searchState}
+        searchInputRef={searchInputRef}
         searchText={searchText}
         selectedAnnotation={selectedAnnotation}
         sessionRestoreCount={sessionRestoreCount}

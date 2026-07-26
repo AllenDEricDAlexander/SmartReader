@@ -7,7 +7,6 @@ type SearchInspectorProps = {
   lastSearchCommand: string;
   searchState: ViewerSearchState;
   onQueryChange(value: string): void;
-  onOpenSearch(): void;
   onSearch(): void;
   onPrevious(): void;
   onNext(): void;
@@ -23,7 +22,6 @@ export function SearchInspector({
   lastSearchCommand,
   searchState,
   onQueryChange,
-  onOpenSearch,
   onSearch,
   onPrevious,
   onNext,
@@ -46,7 +44,6 @@ export function SearchInspector({
           value={query}
           placeholder="输入关键词…"
           onChange={(event) => onQueryChange(event.target.value)}
-          onFocus={onOpenSearch}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault();

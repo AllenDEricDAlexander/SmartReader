@@ -47,6 +47,7 @@ describe('ReaderWorkspaceView', () => {
         lastSearchCommand=""
         pageInput="2"
         searchState={emptySearchState}
+        searchInputRef={{ current: null }}
         searchText=""
         selectedAnnotation={null}
         sidebarOpen={true}

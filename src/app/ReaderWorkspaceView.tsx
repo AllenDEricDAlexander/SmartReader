@@ -1,4 +1,4 @@
-import type { Dispatch, ReactNode, SetStateAction, WheelEvent } from 'react';
+import type { Dispatch, ReactNode, RefObject, SetStateAction, WheelEvent } from 'react';
 import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
 import type { DocumentSession, DocumentState } from '../documents/documentModels';
 import type { PersistedBookmark } from '../persistence/persistenceApi';
@@ -24,6 +24,7 @@ type ReaderWorkspaceViewProps = {
   lastSearchCommand: string;
   pageInput: string;
   searchState: ViewerSearchState;
+  searchInputRef: RefObject<HTMLInputElement>;
   searchText: string;
   selectedAnnotation: ReaderAnnotation | null;
   sidebarOpen: boolean;
@@ -67,6 +68,7 @@ export function ReaderWorkspaceView({
   lastSearchCommand,
   pageInput,
   searchState,
+  searchInputRef,
   searchText,
   selectedAnnotation,
   sidebarOpen,
@@ -120,13 +122,13 @@ export function ReaderWorkspaceView({
           activeSession={activeSession}
           searchText={searchText}
           searchState={searchState}
+          searchInputRef={searchInputRef}
           pageInput={pageInput}
           sidebarOpen={sidebarOpen}
           onOpenPdf={openPdfAndIgnoreResult}
           onBrowserFileChange={handleBrowserFileChange}
           onSearchTextChange={setSearchText}
           onPageInputChange={setPageInput}
-          onOpenSearch={() => activeViewerController.openSearch()}
           onSearch={() => runSearch(searchText)}
           onSearchNext={() => activeViewerController.searchNext()}
           onSearchPrevious={() => activeViewerController.searchPrevious()}
@@ -181,7 +183,6 @@ export function ReaderWorkspaceView({
           lastSearchCommand={lastSearchCommand}
           isFavorite={activeSessionIsFavorite}
           onSearchTextChange={setSearchText}
-          onOpenSearch={() => activeViewerController.openSearch()}
           onSearch={() => runSearch(searchText)}
           onClearSearch={clearSearch}
           onSearchNext={() => activeViewerController.searchNext()}

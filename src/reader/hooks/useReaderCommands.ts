@@ -13,6 +13,7 @@ type UseReaderCommandsInput = {
   addBookmarkForActivePage(): void | Promise<void>;
   addPageNote(): void | Promise<void>;
   closeActiveTab(): void;
+  focusSearchInput(): void;
   openGlobalSearch(): void;
   openPdf(): void | Promise<void>;
   selectNextSession(): void;
@@ -31,6 +32,7 @@ export function useReaderCommands({
   addBookmarkForActivePage,
   addPageNote,
   closeActiveTab,
+  focusSearchInput,
   openGlobalSearch,
   openPdf,
   selectNextSession,
@@ -60,7 +62,10 @@ export function useReaderCommands({
       id: 'find.open',
       label: 'Find',
       shortcut: shortcuts['find.open'],
-      run: () => activeViewerController.openSearch(),
+      run: () => {
+        activeViewerController.openSearch();
+        focusSearchInput();
+      },
     });
     registry.register({
       id: 'find.next',

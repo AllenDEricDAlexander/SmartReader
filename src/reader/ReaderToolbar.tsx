@@ -14,7 +14,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import type { ChangeEventHandler } from 'react';
+import type { ChangeEventHandler, RefObject } from 'react';
 import type { DocumentSession } from '../documents/documentModels';
 import type { ViewerSearchState } from '../viewer/viewerTypes';
 
@@ -22,13 +22,13 @@ type ReaderToolbarProps = {
   activeSession: DocumentSession | null;
   searchText: string;
   searchState: ViewerSearchState;
+  searchInputRef?: RefObject<HTMLInputElement>;
   pageInput: string;
   sidebarOpen: boolean;
   onOpenPdf(): void | Promise<void>;
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
   onSearchTextChange(value: string): void;
   onPageInputChange(value: string): void;
-  onOpenSearch(): void;
   onSearch(): void;
   onSearchNext(): void;
   onSearchPrevious(): void;
@@ -54,13 +54,13 @@ export function ReaderToolbar({
   activeSession,
   searchText,
   searchState,
+  searchInputRef,
   pageInput,
   sidebarOpen,
   onOpenPdf,
   onBrowserFileChange,
   onSearchTextChange,
   onPageInputChange,
-  onOpenSearch,
   onSearch,
   onSearchNext,
   onSearchPrevious,
@@ -125,11 +125,11 @@ export function ReaderToolbar({
         <Search size={15} className="toolbar-search-icon" aria-hidden="true" />
         <input
           aria-label="Search text"
+          ref={searchInputRef}
           className="toolbar-input toolbar-search-input"
           value={searchText}
           placeholder="在文档中查找…"
           onChange={(event) => onSearchTextChange(event.target.value)}
-          onFocus={onOpenSearch}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault();

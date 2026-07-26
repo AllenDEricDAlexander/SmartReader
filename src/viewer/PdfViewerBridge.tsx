@@ -248,22 +248,21 @@ function ReactPdfViewer({
   useEffect(() => {
     onSearchStateChangeRef.current = onSearchStateChange;
   }, [onSearchStateChange]);
-  const searchButtonRef = useRef<HTMLButtonElement | null>(null);
+  // The toolbar plugin is mounted only to compose the page/search/zoom plugins
+  // the controller drives; SmartReader renders its own reader toolbar instead.
   const toolbarPluginInstance = toolbarPlugin({
     pageNavigationPlugin: { enableShortcuts: false },
     searchPlugin: { enableShortcuts: false },
     zoomPlugin: { enableShortcuts: false },
   });
-  const {
-    pageNavigationPluginInstance,
-    searchPluginInstance,
-    zoomPluginInstance,
-    Toolbar,
-  } = toolbarPluginInstance;
+  const { pageNavigationPluginInstance, searchPluginInstance, zoomPluginInstance } =
+    toolbarPluginInstance;
   const highlightPluginInstance = highlightPlugin({
     trigger: Trigger.TextSelection,
     renderHighlightTarget: (props) => (
       <SelectionMarkupMenu
+        left={props.selectionRegion.left}
+        top={props.selectionRegion.top + props.selectionRegion.height}
         onApply={(kind, color) => {
           onHighlightSelection?.({
             selectedText: props.selectedText,
@@ -332,9 +331,10 @@ function ReactPdfViewer({
 
     controller.bind({
       jumpToPage: (page) => pageNavigationPluginInstance.jumpToPage(Math.max(0, page - 1)),
-      openSearch: () => {
-        searchButtonRef.current?.click();
-      },
+      // SmartReader owns the find UI, so opening search focuses the reader's own
+      // search field rather than the plugin's popover, which keeps a separate
+      // keyword and match count that would contradict the toolbar.
+      openSearch: () => undefined,
       search: (keyword) => {
         const trimmed = keyword.trim();
 
@@ -370,48 +370,6 @@ function ReactPdfViewer({
 
   return (
     <div className="pdf-viewer-bridge">
-      <div className="viewer-plugin-toolbar">
-        <Toolbar>
-          {(slots) => {
-            const CurrentPageInput = slots.CurrentPageInput;
-            const GoToNextPage = slots.GoToNextPage;
-            const GoToPreviousPage = slots.GoToPreviousPage;
-            const NumberOfPages = slots.NumberOfPages;
-            const ShowSearchPopover = slots.ShowSearchPopover;
-            const Zoom = slots.Zoom;
-            const ZoomIn = slots.ZoomIn;
-            const ZoomOut = slots.ZoomOut;
-
-            return (
-              <div className="viewer-plugin-toolbar-inner">
-                <GoToPreviousPage />
-                <CurrentPageInput />
-                <NumberOfPages>
-                  {({ numberOfPages }) => (
-                    <span className="viewer-page-count">/ {numberOfPages}</span>
-                  )}
-                </NumberOfPages>
-                <GoToNextPage />
-                <ShowSearchPopover>
-                  {(props) => (
-                    <button
-                      ref={searchButtonRef}
-                      type="button"
-                      aria-label="Search in PDF"
-                      onClick={props.onClick}
-                    >
-                      Search
-                    </button>
-                  )}
-                </ShowSearchPopover>
-                <ZoomOut />
-                <Zoom />
-                <ZoomIn />
-              </div>
-            );
-          }}
-        </Toolbar>
-      </div>
       <Worker workerUrl="/pdf.worker.min.js">
         <Viewer
           fileUrl={fileUrl}
@@ -469,16 +427,26 @@ const selectionActions: { kind: ViewerSelectionKind; label: string }[] = [
  * selected text, instead of always producing the same yellow highlight.
  */
 function SelectionMarkupMenu({
+  left,
+  top,
   onApply,
   onDismiss,
 }: {
+  /** Position of the selection within the page, in percent. */
+  left: number;
+  top: number;
   onApply(kind: ViewerSelectionKind, color: string): void;
   onDismiss(): void;
 }) {
   const [color, setColor] = useState(defaultAnnotationColor);
 
   return (
-    <div className="selection-markup-menu" role="group" aria-label="标注所选文本">
+    <div
+      className="selection-markup-menu"
+      role="group"
+      aria-label="标注所选文本"
+      style={{ left: `${left}%`, top: `${top}%` }}
+    >
       <div className="selection-markup-colors">
         {annotationColors.map((option) => (
           <button

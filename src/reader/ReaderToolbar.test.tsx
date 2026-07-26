@@ -34,7 +34,6 @@ function renderToolbar(searchState: ViewerSearchState) {
       onBrowserFileChange={vi.fn()}
       onSearchTextChange={vi.fn()}
       onPageInputChange={vi.fn()}
-      onOpenSearch={vi.fn()}
       onSearch={vi.fn()}
       onSearchNext={vi.fn()}
       onSearchPrevious={vi.fn()}

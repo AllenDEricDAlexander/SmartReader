@@ -57,6 +57,7 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     readerPreferences: preferences,
     recentDocuments: [],
     searchState: emptySearchState,
+    searchInputRef: { current: null },
     searchText: '',
     selectedAnnotation: null,
     sessionRestoreCount: 0,

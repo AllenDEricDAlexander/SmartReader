@@ -2176,6 +2176,9 @@ select {
 }
 
 .selection-markup-menu {
+  position: absolute;
+  z-index: 3;
+  transform: translate(0, 8px);
   display: grid;
   gap: 8px;
   padding: 8px;
@@ -2459,32 +2462,31 @@ select {
   width: 100%;
   height: 100%;
   display: grid;
+  /* An explicit track is required: the PDF surface sizes itself with height
+     100%, so a content-sized implicit row would collapse to zero and pdf.js
+     would render nothing. */
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 
+/* The reader toolbar lives above this element, so the bridge holds only the PDF
+   surface. The viewer is targeted directly rather than by child position: the
+   Worker wrapper renders no element of its own, and pdf.js needs a definite
+   height or it renders nothing and the load silently times out. */
 .pdf-viewer-bridge {
   min-width: 0;
   min-height: 0;
   height: 100%;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   background: var(--sr-surface);
   overflow: hidden;
 }
 
-.viewer-plugin-toolbar {
-  min-width: 0;
-  border-bottom: 1px solid var(--sr-border);
-  background: var(--sr-surface);
-  overflow-x: auto;
-}
-
-.viewer-plugin-toolbar-inner {
-  min-height: 40px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+.pdf-viewer-bridge .rpv-core__viewer {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
 }
 
 .viewer-loading,

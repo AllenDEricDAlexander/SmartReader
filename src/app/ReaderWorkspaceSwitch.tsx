@@ -1,4 +1,12 @@
-import type { ChangeEvent, Dispatch, DragEvent, ReactNode, SetStateAction, WheelEvent } from 'react';
+import type {
+  ChangeEvent,
+  Dispatch,
+  DragEvent,
+  ReactNode,
+  RefObject,
+  SetStateAction,
+  WheelEvent,
+} from 'react';
 import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
 import type { DocumentSession, DocumentState } from '../documents/documentModels';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
@@ -59,6 +67,7 @@ type ReaderWorkspaceSwitchProps = {
   readerPreferences: ReaderPreferences;
   recentDocuments: PersistedDocument[];
   searchState: ViewerSearchState;
+  searchInputRef: RefObject<HTMLInputElement>;
   searchText: string;
   selectedAnnotation: ReaderAnnotation | null;
   sessionRestoreCount: number;
@@ -153,6 +162,7 @@ export function ReaderWorkspaceSwitch({
   readerPreferences,
   recentDocuments,
   searchState,
+  searchInputRef,
   searchText,
   selectedAnnotation,
   sessionRestoreCount,
@@ -307,6 +317,7 @@ export function ReaderWorkspaceSwitch({
           lastSearchCommand={lastSearchCommand}
           pageInput={pageInput}
           searchState={searchState}
+          searchInputRef={searchInputRef}
           searchText={searchText}
           selectedAnnotation={selectedAnnotation}
           sidebarOpen={sidebarOpen}

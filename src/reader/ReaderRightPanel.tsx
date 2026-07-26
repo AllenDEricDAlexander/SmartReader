@@ -15,7 +15,6 @@ type ReaderRightPanelProps = {
   lastSearchCommand: string;
   isFavorite: boolean;
   onSearchTextChange(value: string): void;
-  onOpenSearch(): void;
   onSearch(): void;
   onClearSearch(): void;
   onSearchNext(): void;
@@ -47,7 +46,6 @@ export function ReaderRightPanel({
   lastSearchCommand,
   isFavorite,
   onSearchTextChange,
-  onOpenSearch,
   onSearch,
   onClearSearch,
   onSearchNext,
@@ -114,7 +112,6 @@ export function ReaderRightPanel({
         lastSearchCommand={lastSearchCommand}
         searchState={searchState}
         onQueryChange={onSearchTextChange}
-        onOpenSearch={onOpenSearch}
         onSearch={onSearch}
         onPrevious={onSearchPrevious}
         onNext={onSearchNext}
