@@ -15,6 +15,27 @@ export function getDirectoryPath(path: string | null): string {
   return `${normalized.slice(0, index)}/`;
 }
 
+const sizeUnits = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
+
+/** Formats a byte count for display, e.g. `18.7 MB`. */
+export function formatFileSize(bytes: number | null): string {
+  if (bytes === null || !Number.isFinite(bytes) || bytes < 0) {
+    return '大小未知';
+  }
+
+  let value = bytes;
+  let unit = 0;
+
+  while (value >= 1024 && unit < sizeUnits.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+
+  // Whole bytes never need a decimal point.
+  const rounded = unit === 0 ? String(Math.round(value)) : value.toFixed(1);
+  return `${rounded} ${sizeUnits[unit]}`;
+}
+
 export function formatDateTime(value: string | null): string {
   if (!value) {
     return '时间未知';

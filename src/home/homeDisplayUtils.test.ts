@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatDateTime,
+  formatFileSize,
   formatPageProgress,
   formatProgressPercent,
   formatShortDate,
@@ -66,3 +67,22 @@ function expectedLocalShortDate(value: string) {
 function padDatePart(value: number) {
   return String(value).padStart(2, '0');
 }
+
+describe('formatFileSize', () => {
+  it('keeps small sizes in whole bytes', () => {
+    expect(formatFileSize(0)).toBe('0 B');
+    expect(formatFileSize(512)).toBe('512 B');
+  });
+
+  it('steps up through units with one decimal', () => {
+    expect(formatFileSize(1024)).toBe('1.0 KB');
+    expect(formatFileSize(19_608_961)).toBe('18.7 MB');
+    expect(formatFileSize(3 * 1024 ** 3)).toBe('3.0 GB');
+  });
+
+  it('reports unknown for missing or invalid sizes', () => {
+    expect(formatFileSize(null)).toBe('大小未知');
+    expect(formatFileSize(-1)).toBe('大小未知');
+    expect(formatFileSize(Number.NaN)).toBe('大小未知');
+  });
+});

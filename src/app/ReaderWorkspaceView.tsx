@@ -1,7 +1,7 @@
 import type { Dispatch, ReactNode, RefObject, SetStateAction, WheelEvent } from 'react';
 import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
 import type { DocumentSession, DocumentState } from '../documents/documentModels';
-import type { PersistedBookmark } from '../persistence/persistenceApi';
+import type { PersistedBookmark, PersistedDocument } from '../persistence/persistenceApi';
 import type { Tag } from '../tags/tagModels';
 import { ReaderLeftPanel } from '../reader/ReaderLeftPanel';
 import { ReaderRightPanel } from '../reader/ReaderRightPanel';
@@ -10,7 +10,11 @@ import { ReaderTabs } from '../reader/ReaderTabs';
 import { ReaderToolbar } from '../reader/ReaderToolbar';
 import { ReaderWorkspace } from '../reader/ReaderWorkspace';
 import type { ViewerActions } from '../viewer/viewerController';
-import type { ViewerSearchOptions, ViewerSearchState } from '../viewer/viewerTypes';
+import type {
+  ViewerDocumentInfo,
+  ViewerSearchOptions,
+  ViewerSearchState,
+} from '../viewer/viewerTypes';
 import type { SettingsSection } from '../settings/SettingsWorkspace';
 
 type ReaderWorkspaceViewProps = {
@@ -25,6 +29,8 @@ type ReaderWorkspaceViewProps = {
   pageInput: string;
   searchState: ViewerSearchState;
   searchOptions: ViewerSearchOptions;
+  documentInfo: ViewerDocumentInfo | null;
+  documentRecord: PersistedDocument | null;
   searchInputRef: RefObject<HTMLInputElement>;
   searchText: string;
   selectedAnnotation: ReaderAnnotation | null;
@@ -71,6 +77,8 @@ export function ReaderWorkspaceView({
   pageInput,
   searchState,
   searchOptions,
+  documentInfo,
+  documentRecord,
   searchInputRef,
   searchText,
   selectedAnnotation,
@@ -185,6 +193,8 @@ export function ReaderWorkspaceView({
           searchText={searchText}
           searchState={searchState}
           searchOptions={searchOptions}
+          documentInfo={documentInfo}
+          documentRecord={documentRecord}
           lastSearchCommand={lastSearchCommand}
           isFavorite={activeSessionIsFavorite}
           onSearchTextChange={setSearchText}

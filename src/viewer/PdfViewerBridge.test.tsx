@@ -388,6 +388,71 @@ describe('PdfViewerBridge', () => {
     expect(pdfViewerCoreMock.verifyPassword).toHaveBeenCalledWith('hunter2');
   });
 
+  it('reports embedded document metadata after load', async () => {
+    const onDocumentInfo = vi.fn();
+
+    render(
+      <PdfViewerBridge
+        source={{ sessionId: 'session-a', url: 'blob:book' }}
+        onProgressChange={vi.fn()}
+        onDocumentInfo={onDocumentInfo}
+      />,
+    );
+
+    const onDocumentLoad = pdfViewerCoreMock.lastViewerProps?.onDocumentLoad as (event: {
+      doc: unknown;
+    }) => void;
+
+    await act(async () => {
+      onDocumentLoad({
+        doc: {
+          numPages: 86,
+          getMetadata: () =>
+            Promise.resolve({
+              info: { PDFFormatVersion: '1.7', Author: '张明', Keywords: 'AI, ML' },
+            }),
+        },
+      });
+    });
+
+    expect(onDocumentInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-a',
+        pageCount: 86,
+        pdfVersion: '1.7',
+        author: '张明',
+        keywords: 'AI, ML',
+        subject: null,
+      }),
+    );
+  });
+
+  it('still opens a document whose metadata cannot be read', async () => {
+    const onDocumentInfo = vi.fn();
+
+    render(
+      <PdfViewerBridge
+        source={{ sessionId: 'session-a', url: 'blob:book' }}
+        onProgressChange={vi.fn()}
+        onDocumentInfo={onDocumentInfo}
+      />,
+    );
+
+    const onDocumentLoad = pdfViewerCoreMock.lastViewerProps?.onDocumentLoad as (event: {
+      doc: unknown;
+    }) => void;
+
+    await act(async () => {
+      onDocumentLoad({
+        doc: { numPages: 3, getMetadata: () => Promise.reject(new Error('no metadata')) },
+      });
+    });
+
+    expect(onDocumentInfo).toHaveBeenCalledWith(
+      expect.objectContaining({ pageCount: 3, pdfVersion: null, author: null }),
+    );
+  });
+
   it('passes case and whole-word options through to the search plugin', async () => {
     const controller = new ViewerController();
 

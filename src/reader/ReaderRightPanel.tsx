@@ -1,6 +1,12 @@
 import { FileText, Star } from 'lucide-react';
 import type { ReaderAnnotation } from '../annotations/annotationModels';
-import type { ViewerSearchOptions, ViewerSearchState } from '../viewer/viewerTypes';
+import type {
+  ViewerDocumentInfo,
+  ViewerSearchOptions,
+  ViewerSearchState,
+} from '../viewer/viewerTypes';
+import type { PersistedDocument } from '../persistence/persistenceApi';
+import { formatDateTime, formatFileSize } from '../home/homeDisplayUtils';
 import type { DocumentSession } from '../documents/documentModels';
 import type { Tag } from '../tags/tagModels';
 import { AnnotationDetail } from './annotations/AnnotationDetail';
@@ -13,6 +19,8 @@ type ReaderRightPanelProps = {
   searchText: string;
   searchState: ViewerSearchState;
   searchOptions: ViewerSearchOptions;
+  documentInfo: ViewerDocumentInfo | null;
+  documentRecord: PersistedDocument | null;
   lastSearchCommand: string;
   isFavorite: boolean;
   onSearchTextChange(value: string): void;
@@ -46,6 +54,8 @@ export function ReaderRightPanel({
   searchText,
   searchState,
   searchOptions,
+  documentInfo,
+  documentRecord,
   lastSearchCommand,
   isFavorite,
   onSearchTextChange,
@@ -63,6 +73,8 @@ export function ReaderRightPanel({
   onSaveAnnotationNote,
   onToggleAnnotationTag,
 }: ReaderRightPanelProps) {
+  const filePath = activeSession?.source.kind === 'desktop-path' ? activeSession.source.path : null;
+
   return (
     <aside className="reader-right-panel" aria-label="阅读检查器">
       <section className="panel-section">
@@ -77,16 +89,48 @@ export function ReaderRightPanel({
               <dd title={activeSession.title}>{activeSession.title}</dd>
             </div>
             <div>
-              <dt>来源</dt>
-              <dd>{sourceLabel(activeSession)}</dd>
+              <dt>文件大小</dt>
+              <dd>{formatFileSize(documentRecord?.fileSize ?? null)}</dd>
             </div>
             <div>
-              <dt>页码</dt>
+              <dt>文件路径</dt>
+              <dd title={filePath ?? undefined}>{filePath ?? sourceLabel(activeSession)}</dd>
+            </div>
+            <div>
+              <dt>修改时间</dt>
+              <dd>{formatDateTime(documentRecord?.modifiedAt ?? null)}</dd>
+            </div>
+            <div>
+              <dt>PDF 版本</dt>
+              <dd>{documentInfo?.pdfVersion ?? '未知'}</dd>
+            </div>
+            <div>
+              <dt>页数</dt>
               <dd>
                 {activeSession.page}
                 {activeSession.totalPages ? ` / ${activeSession.totalPages}` : ''}
               </dd>
             </div>
+            {/* Embedded metadata is optional, so each entry only appears when the
+                document actually carries it rather than showing empty rows. */}
+            {documentInfo?.author ? (
+              <div>
+                <dt>作者</dt>
+                <dd title={documentInfo.author}>{documentInfo.author}</dd>
+              </div>
+            ) : null}
+            {documentInfo?.subject ? (
+              <div>
+                <dt>主题</dt>
+                <dd title={documentInfo.subject}>{documentInfo.subject}</dd>
+              </div>
+            ) : null}
+            {documentInfo?.keywords ? (
+              <div>
+                <dt>关键词</dt>
+                <dd title={documentInfo.keywords}>{documentInfo.keywords}</dd>
+              </div>
+            ) : null}
             <div>
               <dt>缩放</dt>
               <dd>{Math.round(activeSession.zoom * 100)}%</dd>

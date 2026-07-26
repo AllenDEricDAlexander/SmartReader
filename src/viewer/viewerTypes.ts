@@ -64,6 +64,22 @@ export type ViewerSearchMatch = {
   excerpt: string;
 };
 
+/**
+ * Metadata embedded in the PDF itself, as opposed to the file on disk.
+ * Every field is optional: plenty of real documents carry none of it.
+ */
+export type ViewerDocumentInfo = {
+  sessionId: string;
+  pageCount: number;
+  pdfVersion: string | null;
+  title: string | null;
+  author: string | null;
+  subject: string | null;
+  keywords: string | null;
+  creator: string | null;
+  producer: string | null;
+};
+
 export type ViewerSearchOptions = {
   matchCase: boolean;
   wholeWords: boolean;

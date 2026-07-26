@@ -51,6 +51,7 @@ import {
   type ViewerHighlightSelection,
   type ViewerLoadError,
   type ViewerProgress,
+  type ViewerDocumentInfo,
   type ViewerSearchOptions,
   type ViewerSearchState,
   type ViewerSource,
@@ -98,6 +99,7 @@ export function ReaderApp({
   const [searchState, setSearchState] = useState<ViewerSearchState>(emptySearchState);
   const [searchOptions, setSearchOptionsState] =
     useState<ViewerSearchOptions>(defaultSearchOptions);
+  const [documentInfo, setDocumentInfo] = useState<ViewerDocumentInfo | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const focusSearchInput = useCallback(() => {
     searchInputRef.current?.focus();
@@ -1009,6 +1011,10 @@ export function ReaderApp({
     setSearchState(state);
   });
 
+  const handleDocumentInfo = useStableCallback((info: ViewerDocumentInfo) => {
+    setDocumentInfo(info);
+  });
+
   // Memoised so viewer props only change when the document, its annotations or
   // the controller actually change — not on every progress update.
   const viewerContent = useMemo(
@@ -1023,6 +1029,7 @@ export function ReaderApp({
         onRetry={reopenDesktopSession}
         onHighlightSelection={handleHighlightSelection}
         onSearchStateChange={handleSearchStateChange}
+        onDocumentInfo={handleDocumentInfo}
         onProgressChange={handleViewerProgress}
         onLoadError={handleViewerLoadError}
       />
@@ -1037,6 +1044,7 @@ export function ReaderApp({
       reopenDesktopSession,
       handleHighlightSelection,
       handleSearchStateChange,
+      handleDocumentInfo,
       handleViewerProgress,
       handleViewerLoadError,
     ],
@@ -1075,6 +1083,7 @@ export function ReaderApp({
         recentDocuments={recentDocuments}
         searchState={searchState}
         searchOptions={searchOptions}
+        documentInfo={documentInfo}
         searchInputRef={searchInputRef}
         searchText={searchText}
         selectedAnnotation={selectedAnnotation}

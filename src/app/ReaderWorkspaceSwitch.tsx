@@ -29,7 +29,11 @@ import { SettingsWorkspace, type SettingsSection } from '../settings/SettingsWor
 import type { Tag } from '../tags/tagModels';
 import { TagManager } from '../tags/TagManager';
 import type { ViewerActions } from '../viewer/viewerController';
-import type { ViewerSearchOptions, ViewerSearchState } from '../viewer/viewerTypes';
+import type {
+  ViewerDocumentInfo,
+  ViewerSearchOptions,
+  ViewerSearchState,
+} from '../viewer/viewerTypes';
 import { AnnotationManagerWorkspace } from '../workspaces/AnnotationManagerWorkspace';
 import { BookmarkManagerWorkspace } from '../workspaces/BookmarkManagerWorkspace';
 import { CompareWorkspace } from '../workspaces/CompareWorkspace';
@@ -68,6 +72,7 @@ type ReaderWorkspaceSwitchProps = {
   recentDocuments: PersistedDocument[];
   searchState: ViewerSearchState;
   searchOptions: ViewerSearchOptions;
+  documentInfo: ViewerDocumentInfo | null;
   searchInputRef: RefObject<HTMLInputElement>;
   searchText: string;
   selectedAnnotation: ReaderAnnotation | null;
@@ -165,6 +170,7 @@ export function ReaderWorkspaceSwitch({
   recentDocuments,
   searchState,
   searchOptions,
+  documentInfo,
   searchInputRef,
   searchText,
   selectedAnnotation,
@@ -322,6 +328,12 @@ export function ReaderWorkspaceSwitch({
           pageInput={pageInput}
           searchState={searchState}
           searchOptions={searchOptions}
+          documentInfo={documentInfo}
+          documentRecord={
+            recentDocuments.find(
+              (document) => document.documentKey === activeSession.documentKey,
+            ) ?? null
+          }
           searchInputRef={searchInputRef}
           searchText={searchText}
           selectedAnnotation={selectedAnnotation}

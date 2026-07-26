@@ -18,6 +18,7 @@ type ReaderViewerContentProps = {
   onProgressChange: Parameters<typeof PdfViewerBridge>[0]['onProgressChange'];
   onRetry(sessionId: string): void;
   onSearchStateChange: Parameters<typeof PdfViewerBridge>[0]['onSearchStateChange'];
+  onDocumentInfo: Parameters<typeof PdfViewerBridge>[0]['onDocumentInfo'];
 };
 
 export function ReaderViewerContent({
@@ -32,6 +33,7 @@ export function ReaderViewerContent({
   onProgressChange,
   onRetry,
   onSearchStateChange,
+  onDocumentInfo,
 }: ReaderViewerContentProps) {
   if (!activeSession) {
     return <ReaderEmptyState onOpenPdf={onOpenPdf} />;
@@ -58,6 +60,7 @@ export function ReaderViewerContent({
       onProgressChange={onProgressChange}
       onLoadError={onLoadError}
       onSearchStateChange={onSearchStateChange}
+      onDocumentInfo={onDocumentInfo}
     />
   );
 }

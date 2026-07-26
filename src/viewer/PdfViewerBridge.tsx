@@ -20,6 +20,7 @@ import type { ViewerController } from './viewerController';
 import {
   defaultSearchOptions,
   emptySearchState,
+  type ViewerDocumentInfo,
   type ViewerHighlightArea,
   type ViewerHighlightSelection,
   type ViewerLoadError,
@@ -30,6 +31,22 @@ import {
   type ViewerSelectionKind,
   type ViewerSource,
 } from './viewerTypes';
+
+/** The slice of the pdf.js document proxy this bridge relies on. */
+type PdfDocumentMetadataInfo = {
+  PDFFormatVersion?: string;
+  Title?: string;
+  Author?: string;
+  Subject?: string;
+  Keywords?: string;
+  Creator?: string;
+  Producer?: string;
+};
+
+type PdfDocumentProxy = {
+  numPages: number;
+  getMetadata(): Promise<{ info?: PdfDocumentMetadataInfo } | undefined>;
+};
 
 export type PdfRendererProps = {
   fileUrl: string;
@@ -51,6 +68,7 @@ export type PdfViewerBridgeProps = {
   loadingTimeoutMs?: number;
   onLoadError?(error: ViewerLoadError): void;
   onSearchStateChange?(state: ViewerSearchState): void;
+  onDocumentInfo?(info: ViewerDocumentInfo): void;
   controller?: ViewerController;
   renderer?: PdfRenderer;
 };
@@ -63,6 +81,7 @@ export function PdfViewerBridge({
   loadingTimeoutMs = 15000,
   onLoadError,
   onSearchStateChange,
+  onDocumentInfo,
   controller,
   renderer,
 }: PdfViewerBridgeProps) {
@@ -81,6 +100,7 @@ export function PdfViewerBridge({
       loadingTimeoutMs={loadingTimeoutMs}
       onLoadError={onLoadError}
       onSearchStateChange={onSearchStateChange}
+      onDocumentInfo={onDocumentInfo}
     />
   );
 }
@@ -93,6 +113,7 @@ function ActivePdfViewerBridge({
   loadingTimeoutMs,
   onLoadError,
   onSearchStateChange,
+  onDocumentInfo,
   controller,
   renderer,
 }: {
@@ -103,6 +124,7 @@ function ActivePdfViewerBridge({
   loadingTimeoutMs: number;
   onLoadError?(error: ViewerLoadError): void;
   onSearchStateChange?(state: ViewerSearchState): void;
+  onDocumentInfo?(info: ViewerDocumentInfo): void;
   controller?: ViewerController;
   renderer?: PdfRenderer;
 }) {
@@ -246,6 +268,8 @@ function ActivePdfViewerBridge({
       onZoomChange={reportZoom}
       onLoadError={handleLoadError}
       onPasswordRequired={handlePasswordRequired}
+      onDocumentInfo={onDocumentInfo}
+      sessionId={source.sessionId}
       onSearchStateChange={onSearchStateChange}
     />
   );
@@ -261,17 +285,52 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
   onZoomChange,
   onLoadError,
   onPasswordRequired,
+  onDocumentInfo,
+  sessionId,
   onSearchStateChange,
 }: PdfRendererProps & {
   restore?: ViewerRestoreState;
   controller?: ViewerController;
   onLoadError?(error: ViewerLoadError): void;
   onPasswordRequired?(): void;
+  onDocumentInfo?(info: ViewerDocumentInfo): void;
+  sessionId: string;
 }) {
   // The viewer opens directly at the restored position. Rendering page 1 and
   // jumping afterwards costs a wasted render and shows the wrong page first.
   const initialPage = Math.max(0, (restore?.page ?? 1) - 1);
   const renderRange = useMemo(() => createRenderRange(), []);
+
+  // Embedded metadata is read once per document. It is descriptive only, so a
+  // document that carries none of it, or refuses to report it, still opens.
+  const reportDocumentInfo = useCallback(
+    async (doc: PdfDocumentProxy) => {
+      if (!onDocumentInfo) {
+        return;
+      }
+
+      let info: PdfDocumentMetadataInfo = {};
+
+      try {
+        info = (await doc.getMetadata())?.info ?? {};
+      } catch {
+        info = {};
+      }
+
+      onDocumentInfo({
+        sessionId,
+        pageCount: doc.numPages,
+        pdfVersion: info.PDFFormatVersion ?? null,
+        title: info.Title ?? null,
+        author: info.Author ?? null,
+        subject: info.Subject ?? null,
+        keywords: info.Keywords ?? null,
+        creator: info.Creator ?? null,
+        producer: info.Producer ?? null,
+      });
+    },
+    [onDocumentInfo, sessionId],
+  );
   const scaleRef = useRef(1);
   const searchStateRef = useRef<ViewerSearchState>(emptySearchState);
   const onSearchStateChangeRef = useRef(onSearchStateChange);
@@ -440,11 +499,12 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
               onSubmit={verifyPassword}
             />
           )}
-          onDocumentLoad={(event) =>
+          onDocumentLoad={(event) => {
             // Report the page actually opened. Reporting a hard-coded 1 here
             // overwrote the restored reading position on every open.
-            onPageChange(Math.min(initialPage + 1, event.doc.numPages), event.doc.numPages)
-          }
+            onPageChange(Math.min(initialPage + 1, event.doc.numPages), event.doc.numPages);
+            void reportDocumentInfo(event.doc);
+          }}
           onPageChange={(event) => onPageChange(event.currentPage + 1, event.doc.numPages)}
           onZoom={(event) => {
             scaleRef.current = event.scale;
