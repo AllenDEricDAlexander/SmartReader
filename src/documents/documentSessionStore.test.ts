@@ -69,6 +69,37 @@ describe('documentSessionStore', () => {
     expect(next.activeSessionId).toBe(next.sessions[0].id);
   });
 
+  it('closes a background session without changing the active session or sidebar state', () => {
+    const first = addDocumentSession(createEmptyDocumentState(), desktopPdfSource('/tmp/a.pdf'));
+    const state = addDocumentSession(first, desktopPdfSource('/tmp/b.pdf'));
+    const backgroundSessionId = state.sessions[0].id;
+
+    const next = closeDocumentSession(state, backgroundSessionId);
+
+    expect(next.sessions).toHaveLength(1);
+    expect(next.sessions[0].title).toBe('b.pdf');
+    expect(next.activeSessionId).toBe(state.activeSessionId);
+    expect(next.sidebarOpen).toBe(state.sidebarOpen);
+  });
+
+  it('closes the final session while preserving the sidebar state', () => {
+    const state = addDocumentSession(createEmptyDocumentState(), desktopPdfSource('/tmp/a.pdf'));
+
+    const next = closeDocumentSession(state, state.activeSessionId!);
+
+    expect(next.sessions).toEqual([]);
+    expect(next.activeSessionId).toBeNull();
+    expect(next.sidebarOpen).toBe(state.sidebarOpen);
+  });
+
+  it('ignores an unknown session id', () => {
+    const state = addDocumentSession(createEmptyDocumentState(), desktopPdfSource('/tmp/a.pdf'));
+
+    const next = closeDocumentSession(state, 'missing-session');
+
+    expect(next).toEqual(state);
+  });
+
   it('moves active tab forward and backward', () => {
     const first = addDocumentSession(createEmptyDocumentState(), {
       kind: 'desktop-path',

@@ -52,18 +52,30 @@ export function useReaderNavigation({
     [setDocuments, syncViewerSource],
   );
 
+  const closeReaderSession = useCallback(
+    (sessionId: string) => {
+      blobUrlCache.revokeForSession(sessionId);
+      setDocuments((current) => {
+        const previousActiveSessionId = current.activeSessionId;
+        const next = closeDocumentSession(current, sessionId);
+
+        if (next.activeSessionId !== previousActiveSessionId) {
+          syncViewerSource(next.activeSessionId);
+        }
+
+        return next;
+      });
+    },
+    [blobUrlCache, setDocuments, syncViewerSource],
+  );
+
   const closeActiveTab = useCallback(() => {
     if (!activeSession) {
       return;
     }
 
-    blobUrlCache.revokeForSession(activeSession.id);
-    setDocuments((current) => {
-      const next = closeDocumentSession(current, activeSession.id);
-      syncViewerSource(next.activeSessionId);
-      return next;
-    });
-  }, [activeSession, blobUrlCache, setDocuments, syncViewerSource]);
+    closeReaderSession(activeSession.id);
+  }, [activeSession, closeReaderSession]);
 
   const selectNextReaderSession = useCallback(() => {
     setDocuments((current) => {
@@ -144,6 +156,7 @@ export function useReaderNavigation({
 
   return {
     closeActiveTab,
+    closeReaderSession,
     handleViewerWheel,
     jumpToActiveDocumentPage,
     jumpToPage,
