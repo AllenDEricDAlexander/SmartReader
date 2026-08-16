@@ -798,7 +798,11 @@ describe('App', () => {
       expect(screen.getByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close active tab' }));
+    fireEvent.click(
+      within(screen.getByLabelText('文档导航栏')).getByRole('button', {
+        name: '关闭文档 book.pdf',
+      }),
+    );
 
     fireEvent.click(screen.getByRole('button', { name: '最近文件 1' }));
 
@@ -832,7 +836,11 @@ describe('App', () => {
       expect(screen.getByRole('tab', { name: 'progress.pdf' })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close active tab' }));
+    fireEvent.click(
+      within(screen.getByLabelText('文档导航栏')).getByRole('button', {
+        name: '关闭文档 progress.pdf',
+      }),
+    );
     fireEvent.click(screen.getByRole('button', { name: '最近文件 1' }));
 
     expect(await screen.findByText('progress.pdf')).toBeInTheDocument();
@@ -1372,7 +1380,11 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
     expect(await screen.findByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close active tab' }));
+    fireEvent.click(
+      within(screen.getByLabelText('文档导航栏')).getByRole('button', {
+        name: '关闭文档 book.pdf',
+      }),
+    );
 
     await waitFor(
       () => {
@@ -1452,7 +1464,11 @@ describe('App', () => {
       );
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close active tab' }));
+    fireEvent.click(
+      within(screen.getByLabelText('文档导航栏')).getByRole('button', {
+        name: '关闭文档 book.pdf',
+      }),
+    );
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '会话恢复 0' })).toBeInTheDocument();
@@ -1480,12 +1496,19 @@ describe('App', () => {
     });
     expect(await screen.findByText('PDF blob:tab-1')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
-      target: { files: [new File(['%PDF-1.7'], 'two.pdf', { type: 'application/pdf' })] },
-    });
+    fireEvent.change(
+      within(screen.getByLabelText('文档导航栏')).getByLabelText('从文档导航栏选择 PDF 文件'),
+      {
+        target: { files: [new File(['%PDF-1.7'], 'two.pdf', { type: 'application/pdf' })] },
+      },
+    );
     expect(await screen.findByText('PDF blob:tab-2')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close active tab' }));
+    fireEvent.click(
+      within(screen.getByLabelText('文档导航栏')).getByRole('button', {
+        name: '关闭文档 two.pdf',
+      }),
+    );
 
     await waitFor(() => {
       expect(screen.getByText('PDF blob:tab-1')).toBeInTheDocument();
@@ -1514,9 +1537,12 @@ describe('App', () => {
     });
     expect(await screen.findByText('PDF blob:tab-1')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
-      target: { files: [new File(['%PDF-1.7'], 'two.pdf', { type: 'application/pdf' })] },
-    });
+    fireEvent.change(
+      within(screen.getByLabelText('文档导航栏')).getByLabelText('从文档导航栏选择 PDF 文件'),
+      {
+        target: { files: [new File(['%PDF-1.7'], 'two.pdf', { type: 'application/pdf' })] },
+      },
+    );
     expect(await screen.findByText('PDF blob:tab-2')).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true });
@@ -1524,6 +1550,68 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText('PDF blob:tab-1')).toBeInTheDocument();
     });
+  });
+
+  it('keeps file and tab shortcuts on the shared navigation', async () => {
+    let blobIndex = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      blobIndex += 1;
+      return `blob:shortcut-${blobIndex}`;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const openNativePdf = vi
+      .fn()
+      .mockResolvedValueOnce({
+        source: { kind: 'desktop-path', path: '/tmp/shortcut-a.pdf', name: 'shortcut-a.pdf' },
+        bytes: new Uint8Array([37, 80, 68, 70, 45]),
+        fileSize: 5,
+        modifiedAt: '2026-06-15T00:00:00Z',
+      })
+      .mockResolvedValueOnce({
+        source: { kind: 'desktop-path', path: '/tmp/shortcut-b.pdf', name: 'shortcut-b.pdf' },
+        bytes: new Uint8Array([37, 80, 68, 70, 45]),
+        fileSize: 5,
+        modifiedAt: '2026-06-15T00:00:00Z',
+      });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: 'o', metaKey: true });
+    expect(await screen.findByRole('tab', { name: 'shortcut-a.pdf' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'o', metaKey: true });
+    expect(await screen.findByRole('tab', { name: 'shortcut-b.pdf' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'shortcut-b.pdf' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true });
+    expect(screen.getByRole('tab', { name: 'shortcut-a.pdf' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    fireEvent.keyDown(window, { key: 'w', metaKey: true });
+    expect(screen.queryByRole('tab', { name: 'shortcut-a.pdf' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'shortcut-b.pdf' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    fireEvent.keyDown(window, { key: 'w', metaKey: true });
+    expect(await screen.findByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'shortcut-b.pdf' })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'w', metaKey: true });
+    expect(screen.getByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+    expect(openNativePdf).toHaveBeenCalledTimes(2);
   });
 
   it('marks the active session as failed when the viewer reports a load error', async () => {
@@ -2821,7 +2909,11 @@ describe('App', () => {
       expect(viewerController.jumpToPage).toHaveBeenCalledWith(7);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close active tab' }));
+    fireEvent.click(
+      within(screen.getByLabelText('文档导航栏')).getByRole('button', {
+        name: '关闭文档 records.pdf',
+      }),
+    );
     await waitFor(() => {
       expect(screen.queryByRole('tab', { name: 'records.pdf' })).not.toBeInTheDocument();
     });

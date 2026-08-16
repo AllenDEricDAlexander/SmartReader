@@ -2,19 +2,16 @@ import {
   BookmarkPlus,
   ChevronLeft,
   ChevronRight,
-  FileDown,
-  FolderOpen,
   Maximize2,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
   Star,
   StickyNote,
-  X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import type { ChangeEventHandler, RefObject } from 'react';
+import type { RefObject } from 'react';
 import type { DocumentSession } from '../documents/documentModels';
 import type { ViewerSearchState } from '../viewer/viewerTypes';
 
@@ -25,8 +22,6 @@ type ReaderToolbarProps = {
   searchInputRef?: RefObject<HTMLInputElement>;
   pageInput: string;
   sidebarOpen: boolean;
-  onOpenPdf(): void | Promise<void>;
-  onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
   onSearchTextChange(value: string): void;
   onPageInputChange(value: string): void;
   onSearch(): void;
@@ -40,7 +35,6 @@ type ReaderToolbarProps = {
   onZoomIn(): void;
   onZoomOut(): void;
   onToggleSidebar(): void;
-  onCloseActiveTab(): void;
   onHistoryBack(): void;
   onHistoryForward(): void;
   onAddBookmark(): void | Promise<void>;
@@ -57,8 +51,6 @@ export function ReaderToolbar({
   searchInputRef,
   pageInput,
   sidebarOpen,
-  onOpenPdf,
-  onBrowserFileChange,
   onSearchTextChange,
   onPageInputChange,
   onSearch,
@@ -72,7 +64,6 @@ export function ReaderToolbar({
   onZoomIn,
   onZoomOut,
   onToggleSidebar,
-  onCloseActiveTab,
   onHistoryBack,
   onHistoryForward,
   onAddBookmark,
@@ -104,19 +95,6 @@ export function ReaderToolbar({
         >
           {sidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
         </button>
-        <button type="button" className="toolbar-text-button" onClick={onOpenPdf}>
-          <FolderOpen size={16} />
-          <span>打开</span>
-        </button>
-        <label className="toolbar-icon-button toolbar-file-button" title="从浏览器选择 PDF 文件">
-          <FileDown size={16} />
-          <input
-            aria-label="选择 PDF 文件"
-            type="file"
-            accept="application/pdf,.pdf"
-            onChange={onBrowserFileChange}
-          />
-        </label>
       </div>
 
       <div className="toolbar-divider" aria-hidden="true" />
@@ -296,16 +274,6 @@ export function ReaderToolbar({
           title="设置"
         >
           设置
-        </button>
-        <button
-          type="button"
-          className="toolbar-icon-button toolbar-danger"
-          onClick={onCloseActiveTab}
-          disabled={!activeSession}
-          aria-label="Close active tab"
-          title="关闭标签"
-        >
-          <X size={16} />
         </button>
       </div>
     </section>

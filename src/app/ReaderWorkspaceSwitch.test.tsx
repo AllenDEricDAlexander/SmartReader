@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import type { ComponentType } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { createEmptyDocumentState } from '../documents/documentSessionStore';
 import type { ReaderPreferences } from '../preferences/preferencesModels';
@@ -7,6 +8,14 @@ import { CommandRegistry } from '../commands/commandRegistry';
 import { ViewerController } from '../viewer/viewerController';
 import { ReaderWorkspaceSwitch } from './ReaderWorkspaceSwitch';
 import { defaultSearchOptions, emptySearchState } from '../viewer/viewerTypes';
+
+type ReaderWorkspaceSwitchTestProps = Omit<
+  Parameters<typeof ReaderWorkspaceSwitch>[0],
+  'closeActiveTab' | 'openPdfAndIgnoreResult'
+>;
+
+const ReaderWorkspaceSwitchUnderTest =
+  ReaderWorkspaceSwitch as unknown as ComponentType<ReaderWorkspaceSwitchTestProps>;
 
 const emptyTagDashboard = {
   overview: { totalTags: 0, activeTags: 0, totalUsage: 0, orphanTags: 0 },
@@ -30,9 +39,9 @@ function createTagPersistence() {
   } as unknown as Parameters<typeof ReaderWorkspaceSwitch>[0]['persistence'];
 }
 
-function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch>[0]> = {}) {
+function renderSwitch(overrides: Partial<ReaderWorkspaceSwitchTestProps> = {}) {
   const preferences: ReaderPreferences = defaultReaderPreferences;
-  const props: Parameters<typeof ReaderWorkspaceSwitch>[0] = {
+  const props: ReaderWorkspaceSwitchTestProps = {
     activeAnnotations: [],
     activeBookmarks: [],
     activeSession: null,
@@ -74,7 +83,6 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     clearSearch: vi.fn(),
     jumpToSearchMatch: vi.fn(),
     setSearchOptions: vi.fn(),
-    closeActiveTab: vi.fn(),
     closeToolWorkspace: vi.fn(),
     deleteBookmark: vi.fn(),
     deleteManagedBookmarks: vi.fn().mockResolvedValue({
@@ -104,7 +112,6 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     openHomeSidebarPage: vi.fn(),
     openImportPdf: vi.fn(),
     openPdf: vi.fn(),
-    openPdfAndIgnoreResult: vi.fn(),
     openRecordPage: vi.fn(),
     openSettingsWorkspace: vi.fn(),
     openShortcutWorkspace: vi.fn(),
@@ -122,7 +129,7 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     ...overrides,
   };
 
-  return render(<ReaderWorkspaceSwitch {...props} />);
+  return render(<ReaderWorkspaceSwitchUnderTest {...props} />);
 }
 
 describe('ReaderWorkspaceSwitch', () => {

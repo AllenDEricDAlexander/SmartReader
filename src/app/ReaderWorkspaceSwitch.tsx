@@ -86,7 +86,6 @@ type ReaderWorkspaceSwitchProps = {
   canOpenNativePdf(): boolean;
   canOpenRecordPage(documentKey: string, documentPath: string | null, documentMissing: boolean): boolean;
   clearSearch(): void;
-  closeActiveTab(): void;
   closeToolWorkspace(): void;
   deleteBookmark(bookmark: Bookmark): void | Promise<void>;
   deleteManagedBookmarks(
@@ -117,7 +116,6 @@ type ReaderWorkspaceSwitchProps = {
   openHomeSidebarPage(page: HomeSidebarPage): void;
   openImportPdf(): Promise<void>;
   openPdf(): Promise<boolean>;
-  openPdfAndIgnoreResult(): void;
   openRecordPage(
     documentKey: string,
     documentPath: string | null,
@@ -182,7 +180,6 @@ export function ReaderWorkspaceSwitch({
   canOpenNativePdf,
   canOpenRecordPage,
   clearSearch,
-  closeActiveTab,
   closeToolWorkspace,
   deleteBookmark,
   deleteManagedBookmarks,
@@ -211,7 +208,6 @@ export function ReaderWorkspaceSwitch({
   openHomeSidebarPage,
   openImportPdf,
   openPdf,
-  openPdfAndIgnoreResult,
   openRecordPage,
   openSettingsWorkspace,
   openShortcutWorkspace,
@@ -337,10 +333,8 @@ export function ReaderWorkspaceSwitch({
           addBookmarkForActivePage={addBookmarkForActivePage}
           addPageNote={addPageNote}
           clearSearch={clearSearch}
-          closeActiveTab={closeActiveTab}
           deleteBookmark={deleteBookmark}
           deleteAnnotationForDocument={deleteAnnotationForDocument}
-          handleBrowserFileChange={handleBrowserFileChange}
           handleSaveAnnotationNote={handleSaveAnnotationNote}
           handleToggleActiveFavorite={handleToggleActiveFavorite}
           handleToggleAnnotationTag={handleToggleAnnotationTag}
@@ -350,7 +344,6 @@ export function ReaderWorkspaceSwitch({
           jumpToPage={jumpToPage}
           jumpToSearchMatch={jumpToSearchMatch}
           setSearchOptions={setSearchOptions}
-          openPdfAndIgnoreResult={openPdfAndIgnoreResult}
           openSettingsWorkspace={openSettingsWorkspace}
           renameBookmark={renameBookmark}
           runSearch={runSearch}

@@ -37,10 +37,8 @@ type ReaderWorkspaceViewProps = {
   addBookmarkForActivePage(): void;
   addPageNote(): void;
   clearSearch(): void;
-  closeActiveTab(): void;
   deleteBookmark(bookmark: Bookmark): void | Promise<void>;
   deleteAnnotationForDocument(documentKey: string, annotationId: number): void;
-  handleBrowserFileChange(event: React.ChangeEvent<HTMLInputElement>): void;
   handleSaveAnnotationNote(annotation: ReaderAnnotation, text: string): void | Promise<void>;
   handleToggleActiveFavorite(): void;
   handleToggleAnnotationTag(annotation: ReaderAnnotation, tag: Tag, selected: boolean): void | Promise<void>;
@@ -50,7 +48,6 @@ type ReaderWorkspaceViewProps = {
   jumpToPage(page: number): void;
   jumpToSearchMatch(index: number): void;
   setSearchOptions(options: ViewerSearchOptions): void;
-  openPdfAndIgnoreResult(): void;
   openSettingsWorkspace(initialSection?: SettingsSection): void;
   renameBookmark(bookmark: Bookmark, title: string): void | Promise<void>;
   runSearch(keyword: string): void;
@@ -83,10 +80,8 @@ export function ReaderWorkspaceView({
   addBookmarkForActivePage,
   addPageNote,
   clearSearch,
-  closeActiveTab,
   deleteBookmark,
   deleteAnnotationForDocument,
-  handleBrowserFileChange,
   handleSaveAnnotationNote,
   handleToggleActiveFavorite,
   handleToggleAnnotationTag,
@@ -96,7 +91,6 @@ export function ReaderWorkspaceView({
   jumpToPage,
   jumpToSearchMatch,
   setSearchOptions,
-  openPdfAndIgnoreResult,
   openSettingsWorkspace,
   renameBookmark,
   runSearch,
@@ -125,8 +119,6 @@ export function ReaderWorkspaceView({
           searchInputRef={searchInputRef}
           pageInput={pageInput}
           sidebarOpen={sidebarOpen}
-          onOpenPdf={openPdfAndIgnoreResult}
-          onBrowserFileChange={handleBrowserFileChange}
           onSearchTextChange={setSearchText}
           onPageInputChange={setPageInput}
           onSearch={() => runSearch(searchText)}
@@ -140,7 +132,6 @@ export function ReaderWorkspaceView({
           onZoomIn={() => activeViewerController.zoomIn()}
           onZoomOut={() => activeViewerController.zoomOut()}
           onToggleSidebar={() => setSidebarOpen((open) => !open)}
-          onCloseActiveTab={closeActiveTab}
           onHistoryBack={stepHistoryBack}
           onHistoryForward={stepHistoryForward}
           onAddBookmark={addBookmarkForActivePage}

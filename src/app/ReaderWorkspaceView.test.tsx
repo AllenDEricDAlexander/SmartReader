@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import type { ComponentType } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReaderAnnotation } from '../annotations/annotationModels';
 import type { DocumentSession } from '../documents/documentModels';
@@ -6,6 +7,14 @@ import type { PersistedDocument } from '../persistence/persistenceApi';
 import { ViewerController } from '../viewer/viewerController';
 import { defaultSearchOptions, emptySearchState } from '../viewer/viewerTypes';
 import { ReaderWorkspaceView } from './ReaderWorkspaceView';
+
+type ReaderWorkspaceViewTestProps = Omit<
+  Parameters<typeof ReaderWorkspaceView>[0],
+  'closeActiveTab' | 'handleBrowserFileChange' | 'openPdfAndIgnoreResult'
+>;
+
+const ReaderWorkspaceViewUnderTest =
+  ReaderWorkspaceView as unknown as ComponentType<ReaderWorkspaceViewTestProps>;
 
 function createSession(): DocumentSession {
   return {
@@ -31,7 +40,7 @@ describe('ReaderWorkspaceView', () => {
     const annotations: ReaderAnnotation[] = [];
 
     render(
-      <ReaderWorkspaceView
+      <ReaderWorkspaceViewUnderTest
         activeAnnotations={annotations}
         activeBookmarks={[]}
         activeSession={activeSession}
@@ -52,10 +61,8 @@ describe('ReaderWorkspaceView', () => {
         addBookmarkForActivePage={vi.fn()}
         addPageNote={vi.fn()}
         clearSearch={vi.fn()}
-        closeActiveTab={vi.fn()}
         deleteBookmark={vi.fn()}
         deleteAnnotationForDocument={vi.fn()}
-        handleBrowserFileChange={vi.fn()}
         handleSaveAnnotationNote={vi.fn()}
         handleToggleActiveFavorite={vi.fn()}
         handleToggleAnnotationTag={vi.fn()}
@@ -65,7 +72,6 @@ describe('ReaderWorkspaceView', () => {
         jumpToPage={vi.fn()}
         jumpToSearchMatch={vi.fn()}
         setSearchOptions={vi.fn()}
-        openPdfAndIgnoreResult={vi.fn()}
         openSettingsWorkspace={vi.fn()}
         renameBookmark={vi.fn()}
         runSearch={vi.fn()}
@@ -81,5 +87,10 @@ describe('ReaderWorkspaceView', () => {
     expect(screen.getByText('Viewer content')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: '阅读工具栏' })).toBeInTheDocument();
     expect(screen.queryByRole('tablist', { name: '已打开文档' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('选择 PDF 文件')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Close active tab' })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('在文档中查找…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More options' })).toBeInTheDocument();
   });
 });

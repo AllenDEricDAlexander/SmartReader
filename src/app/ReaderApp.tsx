@@ -1149,7 +1149,6 @@ export function ReaderApp({
         canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
         canOpenRecordPage={canOpenRecordPage}
         clearSearch={clearSearch}
-        closeActiveTab={closeActiveTab}
         closeToolWorkspace={closeToolWorkspace}
         deleteBookmark={handleDeleteBookmark}
         deleteManagedBookmarks={deleteManagedBookmarks}
@@ -1181,7 +1180,6 @@ export function ReaderApp({
         openHomeSidebarPage={openHomeSidebarPage}
         openImportPdf={openImportPdf}
         openPdf={openPdf}
-        openPdfAndIgnoreResult={openPdfAndIgnoreResult}
         openRecordPage={openRecordPage}
         openSettingsWorkspace={openSettingsWorkspace}
         openShortcutWorkspace={openShortcutWorkspace}

@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import type { ComponentType } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { DocumentSession } from '../documents/documentModels';
 import {
@@ -7,6 +8,13 @@ import {
   type ViewerSearchState,
 } from '../viewer/viewerTypes';
 import { ReaderToolbar } from './ReaderToolbar';
+
+type ReaderToolbarTestProps = Omit<
+  Parameters<typeof ReaderToolbar>[0],
+  'onOpenPdf' | 'onBrowserFileChange' | 'onCloseActiveTab'
+>;
+
+const ReaderToolbarUnderTest = ReaderToolbar as unknown as ComponentType<ReaderToolbarTestProps>;
 
 function createSession(): DocumentSession {
   return {
@@ -28,14 +36,12 @@ function createSession(): DocumentSession {
 
 function renderToolbar(searchState: ViewerSearchState) {
   return render(
-    <ReaderToolbar
+    <ReaderToolbarUnderTest
       activeSession={createSession()}
       searchText="method"
       searchState={searchState}
       pageInput="3"
       sidebarOpen={true}
-      onOpenPdf={vi.fn()}
-      onBrowserFileChange={vi.fn()}
       onSearchTextChange={vi.fn()}
       onPageInputChange={vi.fn()}
       onSearch={vi.fn()}
@@ -49,7 +55,6 @@ function renderToolbar(searchState: ViewerSearchState) {
       onZoomIn={vi.fn()}
       onZoomOut={vi.fn()}
       onToggleSidebar={vi.fn()}
-      onCloseActiveTab={vi.fn()}
       onHistoryBack={vi.fn()}
       onHistoryForward={vi.fn()}
       onAddBookmark={vi.fn()}
@@ -62,6 +67,23 @@ function renderToolbar(searchState: ViewerSearchState) {
 }
 
 describe('ReaderToolbar search state', () => {
+  it('keeps reading actions without document lifecycle controls', () => {
+    renderToolbar(emptySearchState);
+
+    expect(screen.queryByRole('button', { name: '打开' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('选择 PDF 文件')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Close active tab' })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('在文档中查找…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Previous page' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Zoom in' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Zoom out' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add bookmark' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '新建批注' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '收藏当前文档' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More options' })).toBeInTheDocument();
+  });
+
   it('reports the focused match and the total match count', () => {
     renderToolbar({
       keyword: 'method',
