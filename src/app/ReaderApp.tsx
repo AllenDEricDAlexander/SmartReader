@@ -108,6 +108,9 @@ export function ReaderApp({
   }, []);
   const [pageInput, setPageInput] = useState('');
   const [workspaceOverride, setWorkspaceOverride] = useState<AppWorkspace | null>(null);
+  const [workspaceReturnTarget, setWorkspaceReturnTarget] = useState<'home' | 'reader' | null>(
+    null,
+  );
   const [homeSidebarPage, setHomeSidebarPage] = useState<HomeSidebarPage>('home');
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<SettingsSection>('shortcuts');
@@ -158,6 +161,8 @@ export function ReaderApp({
 
   const activeSession =
     documents.sessions.find((session) => session.id === documents.activeSessionId) ?? null;
+  const activeWorkspace: AppWorkspace =
+    workspaceOverride ?? (activeSession ? 'reader' : 'home');
 
   const {
     annotationsByDocument,
@@ -340,6 +345,7 @@ export function ReaderApp({
 
   const handleDocumentSessionActivated = useCallback((_documentKey: string) => {
     setWorkspaceOverride(null);
+    setWorkspaceReturnTarget(null);
   }, []);
 
   const {
@@ -506,19 +512,28 @@ export function ReaderApp({
     refreshGlobalSearchCollections();
   }, [refreshGlobalSearchCollections]);
 
+  const recordToolReturnTarget = useCallback(() => {
+    if (activeWorkspace === 'home' || activeWorkspace === 'reader') {
+      setWorkspaceReturnTarget(activeWorkspace);
+    }
+  }, [activeWorkspace]);
+
   const openSettingsWorkspace = useCallback((initialSection: SettingsSection = 'shortcuts') => {
+    recordToolReturnTarget();
     setSettingsInitialSection(initialSection);
     setWorkspaceOverride('settings');
-  }, []);
+  }, [recordToolReturnTarget]);
 
   const openHomeWorkspace = useCallback(() => {
     setWorkspaceOverride('home');
     setHomeSidebarPage('home');
+    setWorkspaceReturnTarget(null);
   }, []);
 
   const closeToolWorkspace = useCallback(() => {
-    setWorkspaceOverride(null);
-  }, []);
+    setWorkspaceOverride(workspaceReturnTarget === 'home' ? 'home' : null);
+    setWorkspaceReturnTarget(null);
+  }, [workspaceReturnTarget]);
 
   const openShortcutWorkspace = useCallback(
     (workspace: Extract<AppWorkspace, 'import' | 'compare' | 'annotations' | 'bookmarks'>) => {
@@ -528,9 +543,10 @@ export function ReaderApp({
       if (workspace === 'bookmarks') {
         void refreshBookmarkDashboard();
       }
+      recordToolReturnTarget();
       setWorkspaceOverride(workspace);
     },
-    [refreshBookmarkDashboard, refreshGlobalSearchAnnotations],
+    [recordToolReturnTarget, refreshBookmarkDashboard, refreshGlobalSearchAnnotations],
   );
   const openHomeSidebarPage = useCallback((page: HomeSidebarPage) => {
     setWorkspaceOverride('home');
@@ -545,6 +561,7 @@ export function ReaderApp({
 
       selectReaderSession(sessionId);
       setWorkspaceOverride(null);
+      setWorkspaceReturnTarget(null);
     },
     [documents.sessions, selectReaderSession],
   );
@@ -567,7 +584,7 @@ export function ReaderApp({
       if (open) {
         openSettingsWorkspace();
       } else {
-        setWorkspaceOverride(null);
+        closeToolWorkspace();
       }
     },
     setSidebarOpen,
@@ -961,8 +978,6 @@ export function ReaderApp({
     },
     [persistence],
   );
-  const activeWorkspace: AppWorkspace =
-    workspaceOverride ?? (activeSession ? 'reader' : 'home');
   const handleWorkbenchDragOver = useCallback(
     (event: React.DragEvent<HTMLElement>) => {
       event.preventDefault();
@@ -1178,7 +1193,6 @@ export function ReaderApp({
         setSearchText={setSearchText}
         setSelectedAnnotationId={setSelectedAnnotationId}
         setSidebarOpen={setSidebarOpen}
-        setWorkspaceOverride={setWorkspaceOverride}
         stepHistoryBack={stepHistoryBack}
         stepHistoryForward={stepHistoryForward}
         updateManagedBookmark={updateManagedBookmark}

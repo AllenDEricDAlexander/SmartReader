@@ -134,7 +134,6 @@ type ReaderWorkspaceSwitchProps = {
   setSearchText(value: string): void;
   setSelectedAnnotationId(annotationId: number | null): void;
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
-  setWorkspaceOverride(workspace: AppWorkspace | null): void;
   stepHistoryBack(): void;
   stepHistoryForward(): void;
   updateManagedBookmark(
@@ -224,7 +223,6 @@ export function ReaderWorkspaceSwitch({
   setSearchText,
   setSelectedAnnotationId,
   setSidebarOpen,
-  setWorkspaceOverride,
   stepHistoryBack,
   stepHistoryForward,
   updateManagedBookmark,
@@ -239,7 +237,7 @@ export function ReaderWorkspaceSwitch({
           recentDocumentCount={recentDocuments.length}
           initialSection={settingsInitialSection}
           saving={settingsSaving}
-          onClose={() => setWorkspaceOverride(null)}
+          onClose={closeToolWorkspace}
           onSave={handleSavePreferences}
         />
       ) : null}

@@ -116,7 +116,6 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     setSearchText: vi.fn(),
     setSelectedAnnotationId: vi.fn(),
     setSidebarOpen: vi.fn(),
-    setWorkspaceOverride: vi.fn(),
     stepHistoryBack: vi.fn(),
     stepHistoryForward: vi.fn(),
     updateManagedBookmark: vi.fn().mockResolvedValue(undefined),
@@ -278,6 +277,19 @@ describe('ReaderWorkspaceSwitch', () => {
     expect(openHomeSidebarPage).toHaveBeenCalledWith('bookmarks');
     expect(refreshBookmarkDashboard).toHaveBeenCalledTimes(1);
     expect(openGlobalSearch).not.toHaveBeenCalled();
+  });
+
+  it('routes settings close through closeToolWorkspace', () => {
+    const closeToolWorkspace = vi.fn();
+
+    renderSwitch({
+      activeWorkspace: 'settings',
+      closeToolWorkspace,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭设置' }));
+
+    expect(closeToolWorkspace).toHaveBeenCalledTimes(1);
   });
 
 });

@@ -662,6 +662,117 @@ describe('App', () => {
     expect(persistence.saveDocument).not.toHaveBeenCalled();
   });
 
+  it('returns from settings to home when settings was opened from home with sessions', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:settings-home');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/settings-home.pdf', name: 'settings-home.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-15T00:00:00Z',
+    });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
+    expect(await screen.findByRole('tab', { name: 'settings-home.pdf' })).toBeInTheDocument();
+    fireEvent.click(
+      within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }),
+    );
+    expect(await screen.findByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
+    expect(await screen.findByLabelText('设置工作区')).toBeInTheDocument();
+    expect(screen.queryByLabelText('文档导航栏')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭设置' }));
+    expect(await screen.findByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'settings-home.pdf' })).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }),
+    ).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('returns from settings to the reader when settings was opened from the reader', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:settings-reader');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: {
+        kind: 'desktop-path',
+        path: '/tmp/settings-reader.pdf',
+        name: 'settings-reader.pdf',
+      },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-15T00:00:00Z',
+    });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
+    expect(await screen.findByRole('tab', { name: 'settings-reader.pdf' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    expect(await screen.findByLabelText('设置工作区')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '关闭设置' }));
+
+    expect(await screen.findByLabelText('阅读工作区')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'settings-reader.pdf' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('falls back to home when the reader source disappears while settings is open', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:settings-missing');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: {
+        kind: 'desktop-path',
+        path: '/tmp/settings-missing.pdf',
+        name: 'settings-missing.pdf',
+      },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-15T00:00:00Z',
+    });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
+    expect(await screen.findByRole('tab', { name: 'settings-missing.pdf' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    expect(await screen.findByLabelText('设置工作区')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'w', metaKey: true });
+    expect(screen.queryByRole('tab', { name: 'settings-missing.pdf' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('设置工作区')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭设置' }));
+    expect(await screen.findByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('阅读工作区')).not.toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }),
+    ).toHaveAttribute('aria-current', 'page');
+  });
+
   it('adds a newly opened desktop PDF to recent files without reloading persistence', async () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:book');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
