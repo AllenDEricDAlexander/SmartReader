@@ -85,12 +85,13 @@ button:disabled,
 }
 
 .home-mode {
-  display: block;
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
 }
 
 .reader-mode {
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: 38px minmax(0, 1fr);
 }
 
 .home-dashboard-shell {
@@ -1697,27 +1698,98 @@ button:disabled,
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: 38px 44px minmax(0, 1fr) 30px;
+  grid-template-rows: 44px minmax(0, 1fr) 30px;
 }
 
 .reader-tabs {
-  display: flex;
-  align-items: end;
-  gap: 6px;
-  padding: 6px 10px 0;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 4px 10px;
   border-bottom: 1px solid var(--sr-border);
   background: var(--sr-surface-muted);
+  overflow: hidden;
+}
+
+.reader-home-button,
+.reader-new-file-button {
+  min-width: 0;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  color: var(--sr-text-muted);
+  white-space: nowrap;
+}
+
+.reader-home-button.active,
+.reader-home-button:hover:not(:disabled),
+.reader-new-file-button:hover:not(:disabled) {
+  color: var(--sr-primary);
+}
+
+.reader-tab-list {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.reader-tab-shell {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.reader-tab-close {
+  width: 26px;
+  min-width: 26px;
+  min-height: 30px;
+  padding: 0;
+  margin-left: -4px;
+  border-left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  color: var(--sr-text-muted);
+}
+
+.reader-tab-close:hover:not(:disabled) {
+  border-color: rgba(220, 38, 38, 0.35);
+  color: #dc2626;
+}
+
+.reader-tabs-actions {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.reader-tabs-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .tab {
   min-width: 120px;
   max-width: 220px;
-  height: 32px;
+  height: 30px;
   justify-content: flex-start;
   padding: 0 10px;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3428,7 +3500,7 @@ select {
   }
 
   .reader-workspace {
-    grid-template-rows: 38px 80px minmax(0, 1fr) 30px;
+    grid-template-rows: 80px minmax(0, 1fr) 30px;
   }
 
   .reader-toolbar {

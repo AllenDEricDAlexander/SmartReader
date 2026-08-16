@@ -1,12 +1,11 @@
 import type { Dispatch, ReactNode, RefObject, SetStateAction, WheelEvent } from 'react';
 import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
-import type { DocumentSession, DocumentState } from '../documents/documentModels';
+import type { DocumentSession } from '../documents/documentModels';
 import type { PersistedBookmark, PersistedDocument } from '../persistence/persistenceApi';
 import type { Tag } from '../tags/tagModels';
 import { ReaderLeftPanel } from '../reader/ReaderLeftPanel';
 import { ReaderRightPanel } from '../reader/ReaderRightPanel';
 import { ReaderStatusBar } from '../reader/ReaderStatusBar';
-import { ReaderTabs } from '../reader/ReaderTabs';
 import { ReaderToolbar } from '../reader/ReaderToolbar';
 import { ReaderWorkspace } from '../reader/ReaderWorkspace';
 import type { ViewerActions } from '../viewer/viewerController';
@@ -24,7 +23,6 @@ type ReaderWorkspaceViewProps = {
   activeSessionIsFavorite: boolean;
   activeViewerController: ViewerActions;
   availableTags: Tag[];
-  documents: DocumentState;
   lastSearchCommand: string;
   pageInput: string;
   searchState: ViewerSearchState;
@@ -56,7 +54,6 @@ type ReaderWorkspaceViewProps = {
   openSettingsWorkspace(initialSection?: SettingsSection): void;
   renameBookmark(bookmark: Bookmark, title: string): void | Promise<void>;
   runSearch(keyword: string): void;
-  selectReaderSession(sessionId: string): void;
   setPageInput(value: string): void;
   setSearchText(value: string): void;
   setSelectedAnnotationId(annotationId: number | null): void;
@@ -72,7 +69,6 @@ export function ReaderWorkspaceView({
   activeSessionIsFavorite,
   activeViewerController,
   availableTags,
-  documents,
   lastSearchCommand,
   pageInput,
   searchState,
@@ -104,7 +100,6 @@ export function ReaderWorkspaceView({
   openSettingsWorkspace,
   renameBookmark,
   runSearch,
-  selectReaderSession,
   setPageInput,
   setSearchText,
   setSelectedAnnotationId,
@@ -122,13 +117,6 @@ export function ReaderWorkspaceView({
   return (
     <ReaderWorkspace
       sidebarOpen={sidebarOpen}
-      tabs={
-        <ReaderTabs
-          sessions={documents.sessions}
-          activeSessionId={documents.activeSessionId}
-          onSelectSession={selectReaderSession}
-        />
-      }
       toolbar={
         <ReaderToolbar
           activeSession={activeSession}

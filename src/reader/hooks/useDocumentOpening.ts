@@ -24,6 +24,7 @@ type UseDocumentOpeningInput = {
   documents: DocumentState;
   loadDocumentDecorations(documentKey: string): Promise<void>;
   onDocumentOpened(document: PersistedDocument): void;
+  onDocumentSessionActivated(documentKey: string): void;
   pdfByteCache: PdfByteCache;
   persistence: PersistenceApi;
   setDocuments: Dispatch<SetStateAction<DocumentState>>;
@@ -42,6 +43,7 @@ export function useDocumentOpening({
   documents,
   loadDocumentDecorations,
   onDocumentOpened,
+  onDocumentSessionActivated,
   pdfByteCache,
   persistence,
   setDocuments,
@@ -83,6 +85,7 @@ export function useDocumentOpening({
           });
 
           void loadDocumentDecorations(documentKey);
+          onDocumentSessionActivated(documentKey);
         }
 
         return next;
@@ -92,6 +95,7 @@ export function useDocumentOpening({
       blobUrlCache,
       loadDocumentDecorations,
       onDocumentOpened,
+      onDocumentSessionActivated,
       pdfByteCache,
       setDocuments,
       setViewerSource,

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReaderAnnotation } from '../annotations/annotationModels';
-import type { DocumentSession, DocumentState } from '../documents/documentModels';
+import type { DocumentSession } from '../documents/documentModels';
 import type { PersistedDocument } from '../persistence/persistenceApi';
 import { ViewerController } from '../viewer/viewerController';
 import { defaultSearchOptions, emptySearchState } from '../viewer/viewerTypes';
@@ -28,11 +28,6 @@ function createSession(): DocumentSession {
 describe('ReaderWorkspaceView', () => {
   it('renders the active reader workspace shell', () => {
     const activeSession = createSession();
-    const documents: DocumentState = {
-      sessions: [activeSession],
-      activeSessionId: activeSession.id,
-      sidebarOpen: true,
-    };
     const annotations: ReaderAnnotation[] = [];
 
     render(
@@ -43,7 +38,6 @@ describe('ReaderWorkspaceView', () => {
         activeSessionIsFavorite={false}
         activeViewerController={new ViewerController()}
         availableTags={[]}
-        documents={documents}
         lastSearchCommand=""
         pageInput="2"
         searchState={emptySearchState}
@@ -75,7 +69,6 @@ describe('ReaderWorkspaceView', () => {
         openSettingsWorkspace={vi.fn()}
         renameBookmark={vi.fn()}
         runSearch={vi.fn()}
-        selectReaderSession={vi.fn()}
         setPageInput={vi.fn()}
         setSearchText={vi.fn()}
         setSelectedAnnotationId={vi.fn()}
@@ -86,6 +79,7 @@ describe('ReaderWorkspaceView', () => {
     );
 
     expect(screen.getByText('Viewer content')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /book\.pdf/ })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '阅读工具栏' })).toBeInTheDocument();
+    expect(screen.queryByRole('tablist', { name: '已打开文档' })).not.toBeInTheDocument();
   });
 });

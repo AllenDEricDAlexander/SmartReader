@@ -308,7 +308,9 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: '最近文件' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /打开本地 PDF/ })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '首页' }));
+    fireEvent.click(
+      within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }),
+    );
 
     expect(await screen.findByRole('button', { name: /打开本地 PDF/ })).toBeInTheDocument();
   });
@@ -469,6 +471,195 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
     });
+  });
+
+  it('round-trips from reader to home without closing the session or revoking its URL', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:round-trip');
+    const revokeObjectURL = vi
+      .spyOn(URL, 'revokeObjectURL')
+      .mockImplementation(() => undefined);
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/round-trip.pdf', name: 'round-trip.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-15T00:00:00Z',
+    });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
+    expect(await screen.findByRole('tab', { name: 'round-trip.pdf' })).toBeInTheDocument();
+
+    const navigation = screen.getByLabelText('文档导航栏');
+    fireEvent.click(within(navigation).getByRole('button', { name: '首页' }));
+
+    expect(await screen.findByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'round-trip.pdf' })).toBeInTheDocument();
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+
+    fireEvent.click(await screen.findByRole('button', { name: '最近文件 1' }));
+    expect(await screen.findByRole('heading', { name: '最近文件' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'round-trip.pdf' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'round-trip.pdf' }));
+    expect(await screen.findByLabelText('阅读工作区')).toBeInTheDocument();
+    expect(screen.getByText('PDF blob:round-trip')).toBeInTheDocument();
+  });
+
+  it('closes a background tab first and then returns home after closing the final tab', async () => {
+    let blobIndex = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      blobIndex += 1;
+      return `blob:close-${blobIndex}`;
+    });
+    const revokeObjectURL = vi
+      .spyOn(URL, 'revokeObjectURL')
+      .mockImplementation(() => undefined);
+    const persistence = createEmptyPersistence();
+    const openNativePdf = vi
+      .fn()
+      .mockResolvedValueOnce({
+        source: { kind: 'desktop-path', path: '/tmp/close-a.pdf', name: 'close-a.pdf' },
+        bytes: new Uint8Array([37, 80, 68, 70, 45]),
+        fileSize: 5,
+        modifiedAt: '2026-06-15T00:00:00Z',
+      })
+      .mockResolvedValueOnce({
+        source: { kind: 'desktop-path', path: '/tmp/close-b.pdf', name: 'close-b.pdf' },
+        bytes: new Uint8Array([37, 80, 68, 70, 45]),
+        fileSize: 5,
+        modifiedAt: '2026-06-15T00:00:00Z',
+      });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
+    expect(await screen.findByRole('tab', { name: 'close-a.pdf' })).toBeInTheDocument();
+    fireEvent.click(
+      within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '打开新文件' }),
+    );
+    expect(await screen.findByRole('tab', { name: 'close-b.pdf' })).toBeInTheDocument();
+    expect(screen.getByText('PDF blob:close-2')).toBeInTheDocument();
+
+    const navigation = screen.getByLabelText('文档导航栏');
+    fireEvent.click(within(navigation).getByRole('button', { name: '关闭文档 close-a.pdf' }));
+
+    expect(screen.queryByRole('tab', { name: 'close-a.pdf' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'close-b.pdf' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByText('PDF blob:close-2')).toBeInTheDocument();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:close-1');
+    expect(revokeObjectURL).not.toHaveBeenCalledWith('blob:close-2');
+
+    fireEvent.click(within(navigation).getByRole('button', { name: '关闭文档 close-b.pdf' }));
+    expect(await screen.findByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(persistence.saveReaderSession).toHaveBeenLastCalledWith(
+        expect.objectContaining({ activeDocumentKey: null, tabs: [] }),
+      );
+    });
+  });
+
+  it('opens a new tab from the shared bar and focuses an existing duplicate', async () => {
+    let blobIndex = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      blobIndex += 1;
+      return `blob:open-${blobIndex}`;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const openNativePdf = vi
+      .fn()
+      .mockResolvedValueOnce({
+        source: { kind: 'desktop-path', path: '/tmp/open-a.pdf', name: 'open-a.pdf' },
+        bytes: new Uint8Array([37, 80, 68, 70, 45]),
+        fileSize: 5,
+        modifiedAt: '2026-06-15T00:00:00Z',
+      })
+      .mockResolvedValueOnce({
+        source: { kind: 'desktop-path', path: '/tmp/open-b.pdf', name: 'open-b.pdf' },
+        bytes: new Uint8Array([37, 80, 68, 70, 45]),
+        fileSize: 5,
+        modifiedAt: '2026-06-15T00:00:00Z',
+      })
+      .mockResolvedValueOnce({
+        source: { kind: 'desktop-path', path: '/tmp/open-a.pdf', name: 'open-a.pdf' },
+        bytes: new Uint8Array([37, 80, 68, 70, 45]),
+        fileSize: 5,
+        modifiedAt: '2026-06-15T00:00:00Z',
+      });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
+    expect(await screen.findByRole('tab', { name: 'open-a.pdf' })).toBeInTheDocument();
+    fireEvent.click(
+      within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '打开新文件' }),
+    );
+    expect(await screen.findByRole('tab', { name: 'open-b.pdf' })).toBeInTheDocument();
+
+    fireEvent.click(
+      within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '打开新文件' }),
+    );
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab', { name: 'open-a.pdf' })).toHaveLength(1);
+      expect(screen.getByRole('tab', { name: 'open-a.pdf' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+    expect(openNativePdf).toHaveBeenCalledTimes(3);
+  });
+
+  it('opens a browser PDF from the shared bar when native dialogs are unavailable', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:navigation-browser');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const persistence = createEmptyPersistence();
+    const openNativePdf = vi.fn();
+    const file = new File(['%PDF-1.7'], 'navigation-browser.pdf', { type: 'application/pdf' });
+
+    renderApp(
+      <App
+        bridge={{
+          canOpenNativePdf: () => false,
+          openNativePdf,
+          readDesktopPdf: vi.fn(),
+        }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    const navigation = screen.getByLabelText('文档导航栏');
+    const navigationInput = screen.getByLabelText('从文档导航栏选择 PDF 文件') as HTMLInputElement;
+    const inputClick = vi.spyOn(navigationInput, 'click');
+    fireEvent.click(within(navigation).getByRole('button', { name: '打开新文件' }));
+
+    expect(inputClick).toHaveBeenCalledTimes(1);
+    expect(openNativePdf).not.toHaveBeenCalled();
+
+    fireEvent.change(navigationInput, { target: { files: [file] } });
+    expect(await screen.findByRole('tab', { name: 'navigation-browser.pdf' })).toBeInTheDocument();
+    expect(persistence.saveDocument).not.toHaveBeenCalled();
   });
 
   it('adds a newly opened desktop PDF to recent files without reloading persistence', async () => {
@@ -2201,7 +2392,9 @@ describe('App', () => {
     expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
     expect(screen.queryByLabelText('书签管理工作区')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '首页' }));
+    fireEvent.click(
+      within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }),
+    );
     fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
     expect(screen.getByLabelText('设置工作区')).toBeInTheDocument();
   });

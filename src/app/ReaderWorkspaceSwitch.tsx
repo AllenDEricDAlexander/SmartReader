@@ -130,7 +130,6 @@ type ReaderWorkspaceSwitchProps = {
   refreshBookmarkDashboard(): void | Promise<void>;
   reopenRecentDocument(document: PersistedDocument): Promise<boolean>;
   runSearch(keyword: string): void;
-  selectReaderSession(sessionId: string): void;
   setPageInput(value: string): void;
   setSearchText(value: string): void;
   setSelectedAnnotationId(annotationId: number | null): void;
@@ -221,7 +220,6 @@ export function ReaderWorkspaceSwitch({
   refreshBookmarkDashboard,
   reopenRecentDocument,
   runSearch,
-  selectReaderSession,
   setPageInput,
   setSearchText,
   setSelectedAnnotationId,
@@ -323,7 +321,6 @@ export function ReaderWorkspaceSwitch({
           activeSessionIsFavorite={activeSessionIsFavorite}
           activeViewerController={activeViewerController}
           availableTags={availableTags}
-          documents={documents}
           lastSearchCommand={lastSearchCommand}
           pageInput={pageInput}
           searchState={searchState}
@@ -359,7 +356,6 @@ export function ReaderWorkspaceSwitch({
           openSettingsWorkspace={openSettingsWorkspace}
           renameBookmark={renameBookmark}
           runSearch={runSearch}
-          selectReaderSession={selectReaderSession}
           setPageInput={setPageInput}
           setSearchText={setSearchText}
           setSelectedAnnotationId={setSelectedAnnotationId}

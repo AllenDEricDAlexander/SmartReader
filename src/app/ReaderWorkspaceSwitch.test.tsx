@@ -112,7 +112,6 @@ function renderSwitch(overrides: Partial<Parameters<typeof ReaderWorkspaceSwitch
     refreshBookmarkDashboard: vi.fn(),
     reopenRecentDocument: vi.fn(),
     runSearch: vi.fn(),
-    selectReaderSession: vi.fn(),
     setPageInput: vi.fn(),
     setSearchText: vi.fn(),
     setSelectedAnnotationId: vi.fn(),

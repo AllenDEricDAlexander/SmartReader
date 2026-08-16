@@ -42,6 +42,7 @@ import { useReaderDecorations } from '../reader/hooks/useReaderDecorations';
 import { useReaderNavigation } from '../reader/hooks/useReaderNavigation';
 import { useReaderPersistence } from '../reader/hooks/useReaderPersistence';
 import { useSessionRestore } from '../reader/hooks/useSessionRestore';
+import { ReaderTabs } from '../reader/ReaderTabs';
 import { GlobalSearchPanel } from '../search/GlobalSearchPanel';
 import type { GlobalSearchResult } from '../search/globalSearch';
 import { ViewerController } from '../viewer/viewerController';
@@ -337,6 +338,10 @@ export function ReaderApp({
     [syncRecentDocumentImmediately],
   );
 
+  const handleDocumentSessionActivated = useCallback((_documentKey: string) => {
+    setWorkspaceOverride(null);
+  }, []);
+
   const {
     handleBrowserFileChange,
     handleDrop,
@@ -349,6 +354,7 @@ export function ReaderApp({
     documents,
     loadDocumentDecorations,
     onDocumentOpened: handleDocumentOpened,
+    onDocumentSessionActivated: handleDocumentSessionActivated,
     pdfByteCache,
     persistence,
     setDocuments,
@@ -358,6 +364,7 @@ export function ReaderApp({
 
   const {
     closeActiveTab,
+    closeReaderSession,
     handleViewerWheel,
     jumpToActiveDocumentPage,
     jumpToPage,
@@ -504,6 +511,11 @@ export function ReaderApp({
     setWorkspaceOverride('settings');
   }, []);
 
+  const openHomeWorkspace = useCallback(() => {
+    setWorkspaceOverride('home');
+    setHomeSidebarPage('home');
+  }, []);
+
   const closeToolWorkspace = useCallback(() => {
     setWorkspaceOverride(null);
   }, []);
@@ -521,9 +533,21 @@ export function ReaderApp({
     [refreshBookmarkDashboard, refreshGlobalSearchAnnotations],
   );
   const openHomeSidebarPage = useCallback((page: HomeSidebarPage) => {
-    setWorkspaceOverride(null);
+    setWorkspaceOverride('home');
     setHomeSidebarPage(page);
   }, []);
+
+  const openReaderSession = useCallback(
+    (sessionId: string) => {
+      if (!documents.sessions.some((session) => session.id === sessionId)) {
+        return;
+      }
+
+      selectReaderSession(sessionId);
+      setWorkspaceOverride(null);
+    },
+    [documents.sessions, selectReaderSession],
+  );
   const openPdfAndIgnoreResult = useCallback(() => {
     void openPdf().catch(() => undefined);
   }, [openPdf]);
@@ -1057,6 +1081,19 @@ export function ReaderApp({
       onDragOver={handleWorkbenchDragOver}
       onDrop={handleWorkbenchDrop}
     >
+      {activeWorkspace === 'home' || activeWorkspace === 'reader' ? (
+        <ReaderTabs
+          sessions={documents.sessions}
+          activeSessionId={documents.activeSessionId}
+          homeActive={activeWorkspace === 'home'}
+          canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
+          onOpenHome={openHomeWorkspace}
+          onOpenPdf={openPdf}
+          onBrowserFileChange={handleBrowserFileChange}
+          onSelectSession={openReaderSession}
+          onCloseSession={closeReaderSession}
+        />
+      ) : null}
       <ReaderWorkspaceSwitch
         activeAnnotations={activeAnnotations}
         activeBookmarks={activeBookmarks}
@@ -1137,7 +1174,6 @@ export function ReaderApp({
         refreshBookmarkDashboard={refreshBookmarkDashboard}
         reopenRecentDocument={reopenRecentDocument}
         runSearch={runSearch}
-        selectReaderSession={selectReaderSession}
         setPageInput={setPageInput}
         setSearchText={setSearchText}
         setSelectedAnnotationId={setSelectedAnnotationId}

@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 
 type ReaderWorkspaceProps = {
   sidebarOpen: boolean;
-  tabs: ReactNode;
   toolbar: ReactNode;
   leftPanel: ReactNode;
   viewer: ReactNode;
@@ -12,7 +11,6 @@ type ReaderWorkspaceProps = {
 
 export function ReaderWorkspace({
   sidebarOpen,
-  tabs,
   toolbar,
   leftPanel,
   viewer,
@@ -24,7 +22,6 @@ export function ReaderWorkspace({
       className={sidebarOpen ? 'reader-workspace' : 'reader-workspace sidebar-collapsed'}
       aria-label="阅读工作区"
     >
-      {tabs}
       {toolbar}
       <div className="reader-body">
         {sidebarOpen ? leftPanel : null}
