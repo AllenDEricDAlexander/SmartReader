@@ -120,6 +120,16 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
+## macOS 本机打包安装
+
+确认已经执行过 `bun install`，然后运行：
+
+```bash
+./scripts/build-install-macos.sh
+```
+
+脚本会构建 macOS `.app`，应用仅供本机使用的临时签名，安装或更新 `/Applications/SmartReader.app`，再校验应用标识、可执行文件和签名，但不会自动启动应用。可通过 `--install-dir <绝对路径>` 安装到其他目录。
+
 ## 验证清单
 
 文档或代码变更后优先运行与变更范围匹配的最小命令：
