@@ -12,14 +12,13 @@ export type RenderRangeOptions = {
 };
 
 /**
- * Default overscan. The viewer library keeps three pages on each side, so a
- * spread of seven pages holds canvases at once. Reading moves forward far more
- * often than backward, so the window is biased ahead and trimmed behind: the
- * same perceived smoothness for roughly half the resident canvases, which is
- * what large image-heavy documents are sensitive to.
+ * Default render overscan. The window follows the latest visible range and
+ * keeps ten pages on each side for smooth continuous reading in either
+ * direction. This controls the viewer's rendered page window, not the PDF byte
+ * cache, Blob URL cache, or every internal PDF.js decoded resource.
  */
-const defaultPagesBehind = 1;
-const defaultPagesAhead = 2;
+const defaultPagesBehind = 10;
+const defaultPagesAhead = 10;
 
 /**
  * Builds the `setRenderRange` callback for the viewer. Returned bounds may fall

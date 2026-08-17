@@ -488,6 +488,28 @@ describe('PdfViewerBridge', () => {
     expect(pdfViewerCoreMock.lastViewerProps?.defaultScale).toBe(1.5);
   });
 
+  it('passes the ten-page dynamic render window to the real viewer', () => {
+    render(
+      <PdfViewerBridge
+        source={{ sessionId: 'session-a', url: 'blob:book' }}
+        onProgressChange={vi.fn()}
+      />,
+    );
+
+    const setRenderRange = pdfViewerCoreMock.lastViewerProps?.setRenderRange as
+      | ((range: { startPage: number; endPage: number; numPages: number }) => {
+          startPage: number;
+          endPage: number;
+        })
+      | undefined;
+
+    expect(setRenderRange).toBeTypeOf('function');
+    expect(setRenderRange?.({ startPage: 20, endPage: 20, numPages: 100 })).toEqual({
+      startPage: 10,
+      endPage: 30,
+    });
+  });
+
   it('opens at the first page when there is nothing to restore', () => {
     render(
       <PdfViewerBridge
