@@ -29,14 +29,26 @@ export function useReaderNavigation({
   setViewerSource,
 }: UseReaderNavigationInput) {
   const syncViewerSource = useCallback(
-    (sessionId: string | null) => {
-      if (!sessionId) {
+    (state: DocumentState) => {
+      const targetSession = state.sessions.find(
+        (session) => session.id === state.activeSessionId,
+      );
+
+      if (!targetSession) {
         setViewerSource(null);
         return;
       }
 
-      const url = blobUrlCache.getForSession(sessionId);
-      setViewerSource(url ? { sessionId, url } : null);
+      const url = blobUrlCache.getForSession(targetSession.id);
+      setViewerSource(
+        url
+          ? {
+              sessionId: targetSession.id,
+              url,
+              restore: { page: targetSession.page, zoom: targetSession.zoom },
+            }
+          : null,
+      );
     },
     [blobUrlCache, setViewerSource],
   );
@@ -45,7 +57,9 @@ export function useReaderNavigation({
     (sessionId: string) => {
       setDocuments((current) => {
         const next = selectSession(current, sessionId);
-        syncViewerSource(next.activeSessionId);
+        if (next !== current) {
+          syncViewerSource(next);
+        }
         return next;
       });
     },
@@ -60,7 +74,7 @@ export function useReaderNavigation({
         const next = closeDocumentSession(current, sessionId);
 
         if (next.activeSessionId !== previousActiveSessionId) {
-          syncViewerSource(next.activeSessionId);
+          syncViewerSource(next);
         }
 
         return next;
@@ -80,7 +94,9 @@ export function useReaderNavigation({
   const selectNextReaderSession = useCallback(() => {
     setDocuments((current) => {
       const next = selectNextSession(current);
-      syncViewerSource(next.activeSessionId);
+      if (next !== current) {
+        syncViewerSource(next);
+      }
       return next;
     });
   }, [setDocuments, syncViewerSource]);
@@ -88,7 +104,9 @@ export function useReaderNavigation({
   const selectPreviousReaderSession = useCallback(() => {
     setDocuments((current) => {
       const next = selectPreviousSession(current);
-      syncViewerSource(next.activeSessionId);
+      if (next !== current) {
+        syncViewerSource(next);
+      }
       return next;
     });
   }, [setDocuments, syncViewerSource]);

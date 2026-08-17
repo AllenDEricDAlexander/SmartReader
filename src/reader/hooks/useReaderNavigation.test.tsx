@@ -17,36 +17,119 @@ function createNavigationFixture() {
     desktopPdfSource('/tmp/a.pdf'),
   );
   const state = addDocumentSession(first, desktopPdfSource('/tmp/b.pdf'));
-  let currentState = state;
+  const stateWithProgress: DocumentState = {
+    ...state,
+    sessions: state.sessions.map((session, index) =>
+      index === 0
+        ? {
+            ...session,
+            page: 42,
+            zoom: 1.5,
+            history: { ...session.history, currentPage: 42 },
+          }
+        : {
+            ...session,
+            page: 7,
+            zoom: 0.9,
+            history: { ...session.history, currentPage: 7 },
+          },
+    ),
+  };
+  let currentState = stateWithProgress;
   const setDocuments: Dispatch<SetStateAction<DocumentState>> = vi.fn((update) => {
     currentState = typeof update === 'function' ? update(currentState) : update;
   });
   const setViewerSource = vi.fn();
+  const getForSession = vi.fn((sessionId: string) => {
+    if (sessionId === state.sessions[0].id) {
+      return 'blob:a';
+    }
+
+    if (sessionId === state.sessions[1].id) {
+      return 'blob:b';
+    }
+
+    return null;
+  });
   const blobUrlCache = {
-    getForSession: vi.fn((sessionId: string) => {
-      if (sessionId === state.sessions[0].id) {
-        return 'blob:a';
-      }
-
-      if (sessionId === state.sessions[1].id) {
-        return 'blob:b';
-      }
-
-      return null;
-    }),
+    getForSession,
     revokeForSession: vi.fn(),
   } as unknown as BlobUrlCache;
 
   return {
-    activeSession: state.sessions[1],
+    activeSession: stateWithProgress.sessions[1],
     activeViewerController: {} as ViewerActions,
     blobUrlCache,
     getCurrentState: () => currentState,
+    getForSession,
     setDocuments,
     setViewerSource,
-    state,
+    state: stateWithProgress,
   };
 }
+
+describe('useReaderNavigation session activation', () => {
+  it('restores the selected session page and zoom', () => {
+    const fixture = createNavigationFixture();
+    const targetSession = fixture.state.sessions[0];
+    const { result } = renderHook(() => useReaderNavigation(fixture));
+
+    act(() => {
+      result.current.selectReaderSession(targetSession.id);
+    });
+
+    expect(fixture.getCurrentState().activeSessionId).toBe(targetSession.id);
+    expect(fixture.setViewerSource).toHaveBeenLastCalledWith({
+      sessionId: targetSession.id,
+      url: 'blob:a',
+      restore: { page: 42, zoom: 1.5 },
+    });
+  });
+
+  it('restores each target while cycling sessions', () => {
+    const fixture = createNavigationFixture();
+    const firstSession = fixture.state.sessions[0];
+    const secondSession = fixture.state.sessions[1];
+    const { result } = renderHook(() => useReaderNavigation(fixture));
+
+    act(() => {
+      result.current.selectNextReaderSession();
+    });
+
+    expect(fixture.setViewerSource).toHaveBeenLastCalledWith({
+      sessionId: firstSession.id,
+      url: 'blob:a',
+      restore: { page: 42, zoom: 1.5 },
+    });
+
+    act(() => {
+      result.current.selectPreviousReaderSession();
+    });
+
+    expect(fixture.setViewerSource).toHaveBeenLastCalledWith({
+      sessionId: secondSession.id,
+      url: 'blob:b',
+      restore: { page: 7, zoom: 0.9 },
+    });
+  });
+
+  it('clears the viewer source when the target session has no Blob URL', () => {
+    const fixture = createNavigationFixture();
+    const targetSession = fixture.state.sessions[0];
+    fixture.getForSession.mockReturnValue(null);
+    const { result } = renderHook(() => useReaderNavigation(fixture));
+
+    act(() => {
+      result.current.selectReaderSession(targetSession.id);
+    });
+
+    expect(fixture.setViewerSource).toHaveBeenLastCalledWith(null);
+    expect(fixture.getCurrentState().sessions[0]).toMatchObject({
+      page: 42,
+      zoom: 1.5,
+    });
+  });
+});
 
 describe('useReaderNavigation document closing', () => {
   it('closes a background session without synchronizing the active viewer', () => {
@@ -79,6 +162,7 @@ describe('useReaderNavigation document closing', () => {
     expect(fixture.setViewerSource).toHaveBeenCalledWith({
       sessionId: fallbackSessionId,
       url: 'blob:a',
+      restore: { page: 42, zoom: 1.5 },
     });
   });
 

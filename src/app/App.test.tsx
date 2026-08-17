@@ -1552,6 +1552,72 @@ describe('App', () => {
     });
   });
 
+  it('keeps a tab reading page after switching away and back', async () => {
+    vi.spyOn(URL, 'createObjectURL')
+      .mockReturnValueOnce('blob:progress-sync')
+      .mockReturnValueOnce('blob:tab-b');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const persistence = createEmptyPersistence();
+    const openNativePdf = vi
+      .fn()
+      .mockResolvedValueOnce({
+        source: { kind: 'desktop-path', path: '/tmp/progress-a.pdf', name: 'progress-a.pdf' },
+        bytes: new Uint8Array([37, 80, 68, 70, 45]),
+        fileSize: 5,
+        modifiedAt: '2026-06-15T00:00:00Z',
+      })
+      .mockResolvedValueOnce({
+        source: { kind: 'desktop-path', path: '/tmp/progress-b.pdf', name: 'progress-b.pdf' },
+        bytes: new Uint8Array([37, 80, 68, 70, 45]),
+        fileSize: 5,
+        modifiedAt: '2026-06-15T00:00:00Z',
+      });
+
+    renderApp(
+      <App
+        bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: 'o', metaKey: true });
+    const firstTab = await screen.findByRole('tab', { name: 'progress-a.pdf' });
+    await waitFor(() => {
+      expect(firstTab).toHaveAttribute('title', expect.stringContaining('4/10'));
+    });
+
+    fireEvent.keyDown(window, { key: 'o', metaKey: true });
+    await screen.findByRole('tab', { name: 'progress-b.pdf' });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'progress-a.pdf' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'progress-a.pdf' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+      expect(screen.getByRole('tab', { name: 'progress-a.pdf' })).toHaveAttribute(
+        'title',
+        expect.stringContaining('4/10'),
+      );
+    });
+
+    await waitFor(() => {
+      expect(persistence.saveReaderSession).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          activeDocumentKey: 'desktop:/tmp/progress-a.pdf',
+          tabs: expect.arrayContaining([
+            expect.objectContaining({
+              documentKey: 'desktop:/tmp/progress-a.pdf',
+              page: 4,
+            }),
+          ]),
+        }),
+      );
+    });
+  });
+
   it('keeps file and tab shortcuts on the shared navigation', async () => {
     let blobIndex = 0;
     vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
