@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { ComponentType } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReaderAnnotation } from '../annotations/annotationModels';
@@ -57,6 +57,7 @@ describe('ReaderWorkspaceView', () => {
         searchText=""
         selectedAnnotation={null}
         sidebarOpen={true}
+        rightPanelOpen={true}
         viewerContent={<div>Viewer content</div>}
         addBookmarkForActivePage={vi.fn()}
         addPageNote={vi.fn()}
@@ -79,6 +80,7 @@ describe('ReaderWorkspaceView', () => {
         setSearchText={vi.fn()}
         setSelectedAnnotationId={vi.fn()}
         setSidebarOpen={vi.fn()}
+        setRightPanelOpen={vi.fn()}
         stepHistoryBack={vi.fn()}
         stepHistoryForward={vi.fn()}
       />,
@@ -92,5 +94,19 @@ describe('ReaderWorkspaceView', () => {
     expect(screen.queryByRole('button', { name: 'Close active tab' })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('在文档中查找…')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'More options' })).toBeInTheDocument();
+    expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
+    expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle sidebar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle right sidebar' }));
+
+    expect(screen.getByRole('button', { name: 'Toggle sidebar' })).toHaveAttribute(
+      'title',
+      '收起侧栏',
+    );
+    expect(screen.getByRole('button', { name: 'Toggle right sidebar' })).toHaveAttribute(
+      'title',
+      '收起右侧栏',
+    );
   });
 });

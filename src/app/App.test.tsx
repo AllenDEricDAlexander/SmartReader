@@ -446,6 +446,23 @@ describe('App', () => {
 
     expect(await screen.findByLabelText('阅读工作区')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
+
+    const leftPanelToggle = screen.getByRole('button', { name: 'Toggle sidebar' });
+    const rightPanelToggle = screen.getByRole('button', { name: 'Toggle right sidebar' });
+    expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
+    expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
+
+    fireEvent.click(leftPanelToggle);
+    expect(screen.queryByLabelText('阅读侧栏')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
+
+    fireEvent.click(rightPanelToggle);
+    expect(screen.queryByLabelText('阅读检查器')).not.toBeInTheDocument();
+
+    fireEvent.click(leftPanelToggle);
+    fireEvent.click(rightPanelToggle);
+    expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
+    expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
   });
 
   it('opens a PDF from the native dialog and displays a tab', async () => {
@@ -1129,9 +1146,16 @@ describe('App', () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(screen.getByText('PDF blob:restored')).toBeInTheDocument();
-    });
+    expect(
+      await within(screen.getByLabelText('文档导航栏')).findByRole('button', { name: '首页' }),
+    ).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.queryByLabelText('阅读工作区')).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'book.pdf' }));
+    expect(await screen.findByText('PDF blob:restored')).toBeInTheDocument();
 
     expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/book.pdf');
   });
@@ -1180,6 +1204,7 @@ describe('App', () => {
       />,
     );
 
+    fireEvent.click(await screen.findByRole('tab', { name: 'missing.pdf' }));
     await waitFor(() => {
       expect(screen.getByText('file does not exist')).toBeInTheDocument();
     });

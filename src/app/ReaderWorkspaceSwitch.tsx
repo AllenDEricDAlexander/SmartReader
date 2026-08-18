@@ -80,6 +80,7 @@ type ReaderWorkspaceSwitchProps = {
   settingsInitialSection: SettingsSection;
   settingsSaving: boolean;
   sidebarOpen: boolean;
+  rightPanelOpen: boolean;
   viewerContent: ReactNode;
   addBookmarkForActivePage(): void;
   addPageNote(): void;
@@ -132,6 +133,7 @@ type ReaderWorkspaceSwitchProps = {
   setSearchText(value: string): void;
   setSelectedAnnotationId(annotationId: number | null): void;
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
+  setRightPanelOpen: Dispatch<SetStateAction<boolean>>;
   stepHistoryBack(): void;
   stepHistoryForward(): void;
   updateManagedBookmark(
@@ -174,6 +176,7 @@ export function ReaderWorkspaceSwitch({
   settingsInitialSection,
   settingsSaving,
   sidebarOpen,
+  rightPanelOpen,
   viewerContent,
   addBookmarkForActivePage,
   addPageNote,
@@ -219,6 +222,7 @@ export function ReaderWorkspaceSwitch({
   setSearchText,
   setSelectedAnnotationId,
   setSidebarOpen,
+  setRightPanelOpen,
   stepHistoryBack,
   stepHistoryForward,
   updateManagedBookmark,
@@ -329,6 +333,7 @@ export function ReaderWorkspaceSwitch({
           searchText={searchText}
           selectedAnnotation={selectedAnnotation}
           sidebarOpen={sidebarOpen}
+          rightPanelOpen={rightPanelOpen}
           viewerContent={viewerContent}
           addBookmarkForActivePage={addBookmarkForActivePage}
           addPageNote={addPageNote}
@@ -351,6 +356,7 @@ export function ReaderWorkspaceSwitch({
           setSearchText={setSearchText}
           setSelectedAnnotationId={setSelectedAnnotationId}
           setSidebarOpen={setSidebarOpen}
+          setRightPanelOpen={setRightPanelOpen}
           stepHistoryBack={stepHistoryBack}
           stepHistoryForward={stepHistoryForward}
         />

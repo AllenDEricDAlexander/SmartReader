@@ -5,6 +5,8 @@ import {
   Maximize2,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Search,
   Star,
   StickyNote,
@@ -22,6 +24,7 @@ type ReaderToolbarProps = {
   searchInputRef?: RefObject<HTMLInputElement>;
   pageInput: string;
   sidebarOpen: boolean;
+  rightPanelOpen: boolean;
   onSearchTextChange(value: string): void;
   onPageInputChange(value: string): void;
   onSearch(): void;
@@ -35,6 +38,7 @@ type ReaderToolbarProps = {
   onZoomIn(): void;
   onZoomOut(): void;
   onToggleSidebar(): void;
+  onToggleRightPanel(): void;
   onHistoryBack(): void;
   onHistoryForward(): void;
   onAddBookmark(): void | Promise<void>;
@@ -51,6 +55,7 @@ export function ReaderToolbar({
   searchInputRef,
   pageInput,
   sidebarOpen,
+  rightPanelOpen,
   onSearchTextChange,
   onPageInputChange,
   onSearch,
@@ -64,6 +69,7 @@ export function ReaderToolbar({
   onZoomIn,
   onZoomOut,
   onToggleSidebar,
+  onToggleRightPanel,
   onHistoryBack,
   onHistoryForward,
   onAddBookmark,
@@ -94,6 +100,15 @@ export function ReaderToolbar({
           title={sidebarOpen ? '收起侧栏' : '展开侧栏'}
         >
           {sidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+        </button>
+        <button
+          type="button"
+          className="toolbar-icon-button"
+          onClick={onToggleRightPanel}
+          aria-label="Toggle right sidebar"
+          title={rightPanelOpen ? '收起右侧栏' : '展开右侧栏'}
+        >
+          {rightPanelOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
         </button>
       </div>
 

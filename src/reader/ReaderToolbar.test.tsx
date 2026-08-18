@@ -42,6 +42,7 @@ function renderToolbar(searchState: ViewerSearchState) {
       searchState={searchState}
       pageInput="3"
       sidebarOpen={true}
+      rightPanelOpen={true}
       onSearchTextChange={vi.fn()}
       onPageInputChange={vi.fn()}
       onSearch={vi.fn()}
@@ -55,6 +56,7 @@ function renderToolbar(searchState: ViewerSearchState) {
       onZoomIn={vi.fn()}
       onZoomOut={vi.fn()}
       onToggleSidebar={vi.fn()}
+      onToggleRightPanel={vi.fn()}
       onHistoryBack={vi.fn()}
       onHistoryForward={vi.fn()}
       onAddBookmark={vi.fn()}
@@ -74,6 +76,8 @@ describe('ReaderToolbar search state', () => {
     expect(screen.queryByLabelText('选择 PDF 文件')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Close active tab' })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('在文档中查找…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Toggle sidebar' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Toggle right sidebar' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Previous page' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Next page' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Zoom in' })).toBeInTheDocument();

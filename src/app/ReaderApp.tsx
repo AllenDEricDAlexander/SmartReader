@@ -95,6 +95,7 @@ export function ReaderApp({
   const [documents, setDocuments] = useState(createEmptyDocumentState);
   const [viewerSource, setViewerSource] = useState<ViewerSource | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [searchText, setSearchText] = useState('');
   const [lastSearchCommand, setLastSearchCommand] = useState('');
   const [searchState, setSearchState] = useState<ViewerSearchState>(emptySearchState);
@@ -107,7 +108,7 @@ export function ReaderApp({
     searchInputRef.current?.select();
   }, []);
   const [pageInput, setPageInput] = useState('');
-  const [workspaceOverride, setWorkspaceOverride] = useState<AppWorkspace | null>(null);
+  const [workspaceOverride, setWorkspaceOverride] = useState<AppWorkspace | null>('home');
   const [workspaceReturnTarget, setWorkspaceReturnTarget] = useState<'home' | 'reader' | null>(
     null,
   );
@@ -1143,6 +1144,7 @@ export function ReaderApp({
         settingsInitialSection={settingsInitialSection}
         settingsSaving={settingsSaving}
         sidebarOpen={sidebarOpen}
+        rightPanelOpen={rightPanelOpen}
         viewerContent={viewerContent}
         addBookmarkForActivePage={addBookmarkForActivePage}
         addPageNote={addPageNote}
@@ -1191,6 +1193,7 @@ export function ReaderApp({
         setSearchText={setSearchText}
         setSelectedAnnotationId={setSelectedAnnotationId}
         setSidebarOpen={setSidebarOpen}
+        setRightPanelOpen={setRightPanelOpen}
         stepHistoryBack={stepHistoryBack}
         stepHistoryForward={stepHistoryForward}
         updateManagedBookmark={updateManagedBookmark}

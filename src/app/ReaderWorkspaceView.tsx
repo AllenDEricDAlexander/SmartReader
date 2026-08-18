@@ -33,6 +33,7 @@ type ReaderWorkspaceViewProps = {
   searchText: string;
   selectedAnnotation: ReaderAnnotation | null;
   sidebarOpen: boolean;
+  rightPanelOpen: boolean;
   viewerContent: ReactNode;
   addBookmarkForActivePage(): void;
   addPageNote(): void;
@@ -55,6 +56,7 @@ type ReaderWorkspaceViewProps = {
   setSearchText(value: string): void;
   setSelectedAnnotationId(annotationId: number | null): void;
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
+  setRightPanelOpen: Dispatch<SetStateAction<boolean>>;
   stepHistoryBack(): void;
   stepHistoryForward(): void;
 };
@@ -76,6 +78,7 @@ export function ReaderWorkspaceView({
   searchText,
   selectedAnnotation,
   sidebarOpen,
+  rightPanelOpen,
   viewerContent,
   addBookmarkForActivePage,
   addPageNote,
@@ -98,6 +101,7 @@ export function ReaderWorkspaceView({
   setSearchText,
   setSelectedAnnotationId,
   setSidebarOpen,
+  setRightPanelOpen,
   stepHistoryBack,
   stepHistoryForward,
 }: ReaderWorkspaceViewProps) {
@@ -111,6 +115,7 @@ export function ReaderWorkspaceView({
   return (
     <ReaderWorkspace
       sidebarOpen={sidebarOpen}
+      rightPanelOpen={rightPanelOpen}
       toolbar={
         <ReaderToolbar
           activeSession={activeSession}
@@ -119,6 +124,7 @@ export function ReaderWorkspaceView({
           searchInputRef={searchInputRef}
           pageInput={pageInput}
           sidebarOpen={sidebarOpen}
+          rightPanelOpen={rightPanelOpen}
           onSearchTextChange={setSearchText}
           onPageInputChange={setPageInput}
           onSearch={() => runSearch(searchText)}
@@ -132,6 +138,7 @@ export function ReaderWorkspaceView({
           onZoomIn={() => activeViewerController.zoomIn()}
           onZoomOut={() => activeViewerController.zoomOut()}
           onToggleSidebar={() => setSidebarOpen((open) => !open)}
+          onToggleRightPanel={() => setRightPanelOpen((open) => !open)}
           onHistoryBack={stepHistoryBack}
           onHistoryForward={stepHistoryForward}
           onAddBookmark={addBookmarkForActivePage}

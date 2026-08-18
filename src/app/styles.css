@@ -1966,6 +1966,14 @@ select {
   grid-template-columns: minmax(0, 1fr) 280px;
 }
 
+.reader-workspace.inspector-collapsed .reader-body {
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.reader-workspace.sidebar-collapsed.inspector-collapsed .reader-body {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .reader-left-panel,
 .reader-right-panel {
   min-width: 0;
