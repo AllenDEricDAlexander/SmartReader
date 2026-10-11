@@ -1,5 +1,6 @@
 mod db;
 mod file_commands;
+mod library_storage;
 
 use tauri::{Emitter, Manager};
 
@@ -66,6 +67,9 @@ pub fn run() {
             file_commands::stat_desktop_pdf,
             file_commands::read_desktop_pdf_bytes,
             file_commands::read_cached_pdf,
+            library_storage::read_library_storage,
+            library_storage::write_library_storage,
+            library_storage::read_library_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SmartReader");

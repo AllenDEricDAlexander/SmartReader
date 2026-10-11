@@ -1,0 +1,143 @@
+import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
+
+export type PaperMetadata = {
+  title: string;
+  authors: string[];
+  journal: string;
+  year: string;
+  doi: string;
+  abstract: string;
+  keywords: string[];
+  researchTopics: string[];
+  researchFields: string[];
+  disciplines: string[];
+  journalType: string;
+  indexingStatus: string;
+};
+
+export type MetadataField = keyof PaperMetadata;
+export type ClassificationDimension =
+  | 'researchFields'
+  | 'disciplines'
+  | 'year'
+  | 'journalType'
+  | 'researchTopics';
+
+export type IndexedPage = { page: number; text: string };
+export type Paper = {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  addedAt: string;
+  updatedAt: string;
+  metadata: PaperMetadata;
+  manualFields: MetadataField[];
+  pages: IndexedPage[];
+  pageCount: number;
+  indexStatus: 'pending' | 'ready' | 'empty' | 'error';
+  indexError: string | null;
+  aiStatus: 'idle' | 'pending' | 'ready' | 'error';
+  aiError: string | null;
+  favorite: boolean;
+  pinned: boolean;
+  readingSeconds: number;
+  lastReadAt: string | null;
+  lastPage: number;
+  zoom: number;
+  recentHidden: boolean;
+  annotations: ReaderAnnotation[];
+  bookmarks: Bookmark[];
+  tagIds: number[];
+};
+
+export type EncryptedData = { iv: string; data: string };
+export type EncryptedSecret = { salt: string; encrypted: EncryptedData };
+export type StoredPaper =
+  | { id: string; kind: 'plain'; paper: Paper }
+  | { id: string; kind: 'encrypted'; vaultId: string; encrypted: EncryptedData };
+
+export type LibraryFolder = {
+  id: string;
+  name: string;
+  parentId: string | null;
+  dimension: ClassificationDimension | null;
+  automatic: boolean;
+  createdAt: string;
+};
+
+export type FolderVault = {
+  id: string;
+  folderId: string;
+  salt: string;
+  verifier: EncryptedData;
+};
+
+export type AiProviderProfile = {
+  id: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+  savedKey: EncryptedSecret | null;
+};
+
+export type AiSettings = {
+  providers: AiProviderProfile[];
+  activeProviderId: string | null;
+  autoEnrich: boolean;
+};
+
+export type LibraryPreferences = {
+  previewMode: 'hover' | 'pinned' | 'off';
+  fieldUsage: Partial<Record<MetadataField, number>>;
+};
+
+export type LibrarySnapshot = {
+  schemaVersion: 1;
+  updatedAt: string;
+  papers: StoredPaper[];
+  folders: LibraryFolder[];
+  memberships: Record<string, string[]>;
+  vaults: FolderVault[];
+  preferences: LibraryPreferences;
+  ai: AiSettings;
+  nextDecorationId: number;
+};
+
+export function emptyMetadata(title = ''): PaperMetadata {
+  return {
+    title,
+    authors: [],
+    journal: '',
+    year: '',
+    doi: '',
+    abstract: '',
+    keywords: [],
+    researchTopics: [],
+    researchFields: [],
+    disciplines: [],
+    journalType: '',
+    indexingStatus: '未知',
+  };
+}
+
+export function emptyLibrary(): LibrarySnapshot {
+  return {
+    schemaVersion: 1,
+    updatedAt: new Date().toISOString(),
+    papers: [],
+    folders: [],
+    memberships: {},
+    vaults: [],
+    preferences: { previewMode: 'hover', fieldUsage: {} },
+    ai: { providers: [], activeProviderId: null, autoEnrich: false },
+    nextDecorationId: -1,
+  };
+}
+
+export function paperDocumentKey(id: string): string {
+  return `paper:${id}`;
+}
+
+export function paperIdFromDocumentKey(key: string): string | null {
+  return key.startsWith('paper:') ? key.slice('paper:'.length) : null;
+}

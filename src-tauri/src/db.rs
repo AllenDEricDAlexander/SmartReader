@@ -30,6 +30,10 @@ const MIGRATIONS: &[Migration] = &[
         version: "006_bookmark_management",
         sql: include_str!("migrations/006_bookmark_management.sql"),
     },
+    Migration {
+        version: "007_research_library",
+        sql: include_str!("migrations/007_research_library.sql"),
+    },
 ];
 const READER_PREFERENCES_KEY: &str = "reader_preferences";
 pub const DEFAULT_CACHE_TOTAL_BYTES: i64 = 5 * 1024 * 1024 * 1024;
@@ -61,7 +65,7 @@ impl serde::Serialize for DbError {
 }
 
 pub struct DatabaseState {
-    connection: Mutex<Connection>,
+    pub(crate) connection: Mutex<Connection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
