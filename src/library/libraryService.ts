@@ -55,6 +55,7 @@ export class LibraryService {
   private indexedListeners = new Set<(paperId: string) => void>();
   private indexing = new Map<string, { promise: Promise<Paper>; controller: AbortController }>();
   private accessEpoch = 0;
+  private invalidatedAt = new Map<string, number>();
   private accessChanges = 0;
   private pendingAccessIds = new Map<string, number>();
   private maintenance = new Set<Promise<void>>();
@@ -127,7 +128,7 @@ export class LibraryService {
   captureAccess(): number { return this.accessEpoch; }
 
   canAccess(id: string, token: number): boolean {
-    return token === this.accessEpoch && !this.pendingAccessIds.has(id) && this.getPaper(id) !== undefined;
+    return (this.invalidatedAt.get(id) ?? 0) <= token && !this.pendingAccessIds.has(id) && this.getPaper(id) !== undefined;
   }
 
   /** Keeps credentials available until a multi-store operation and its compensation finish. */
@@ -600,6 +601,7 @@ export class LibraryService {
   private invalidateAccess(ids: string[]) {
     this.accessEpoch += 1;
     for (const id of ids) {
+      this.invalidatedAt.set(id, this.accessEpoch);
       this.indexing.get(id)?.controller.abort(new Error('索引已中断，解锁后可重试。'));
       this.indexing.delete(id);
     }

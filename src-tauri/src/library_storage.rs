@@ -10,6 +10,8 @@ const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_FILE_BYTES: usize = 256 * 1024 * 1024;
 const MAX_BATCH_BYTES: usize = 512 * 1024 * 1024;
 const MAX_BATCH_FILES: usize = 512;
+const MAX_MANIFEST_BYTES: usize = MAX_STATE_BYTES + MAX_BATCH_FILES * 200;
+const BINARY_HEADER_BYTES: usize = 8;
 // Revisions cross the JavaScript IPC boundary and must remain exact integers.
 const MAX_REVISION: u64 = 9_007_199_254_740_991;
 
@@ -53,6 +55,34 @@ pub struct LibraryBlobMutation {
     pub bytes: Option<Vec<u8>>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BinaryLibraryManifest {
+    expected_revision: u64,
+    data: Value,
+    blobs: Vec<BinaryBlobDescriptor>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BinaryBlobDescriptor {
+    id: String,
+    byte_length: BinaryBlobLength,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum BinaryBlobLength {
+    Bytes(u64),
+    Delete(()),
+}
+
+struct BinaryLibraryWrite {
+    expected_revision: u64,
+    data: Value,
+    blobs: Vec<LibraryBlobMutation>,
+}
+
 #[tauri::command]
 pub fn read_library_storage(
     state: State<'_, DatabaseState>,
@@ -79,6 +109,24 @@ pub fn write_library_storage(
 }
 
 #[tauri::command]
+pub fn write_library_storage_binary(
+    state: State<'_, DatabaseState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<u64, LibraryStorageError> {
+    let parsed = parse_binary_request(request.body())?;
+    let mut connection = state
+        .connection
+        .lock()
+        .map_err(|_| LibraryStorageError::DatabaseUnavailable)?;
+    write_snapshot(
+        &mut connection,
+        parsed.expected_revision,
+        parsed.data,
+        parsed.blobs,
+    )
+}
+
+#[tauri::command]
 pub fn read_library_file(
     state: State<'_, DatabaseState>,
     id: String,
@@ -101,6 +149,104 @@ fn read_snapshot(connection: &Connection) -> Result<LibraryStorageSnapshot, Libr
         data: data_json
             .map(|json| serde_json::from_str(&json))
             .transpose()?,
+    })
+}
+
+fn parse_binary_request(
+    body: &tauri::ipc::InvokeBody,
+) -> Result<BinaryLibraryWrite, LibraryStorageError> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = body else {
+        return Err(LibraryStorageError::InvalidInput(
+            "binary library writes require a raw IPC body",
+        ));
+    };
+    if bytes.len() < BINARY_HEADER_BYTES
+        || bytes.len() > BINARY_HEADER_BYTES + MAX_MANIFEST_BYTES + MAX_BATCH_BYTES
+        || &bytes[..4] != b"SRL1"
+    {
+        return Err(LibraryStorageError::InvalidInput(
+            "invalid binary library frame header or size",
+        ));
+    }
+    let manifest_length = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize;
+    let manifest_end = BINARY_HEADER_BYTES
+        .checked_add(manifest_length)
+        .filter(|end| manifest_length <= MAX_MANIFEST_BYTES && *end <= bytes.len())
+        .ok_or(LibraryStorageError::InvalidInput(
+            "binary library manifest is oversized or truncated",
+        ))?;
+    let manifest: BinaryLibraryManifest =
+        serde_json::from_slice(&bytes[BINARY_HEADER_BYTES..manifest_end])
+            .map_err(|_| LibraryStorageError::InvalidInput("invalid binary library manifest"))?;
+    if manifest.expected_revision >= MAX_REVISION || manifest.blobs.len() > MAX_BATCH_FILES {
+        return Err(LibraryStorageError::InvalidInput(
+            "binary library revision or file count exceeds the supported range",
+        ));
+    }
+    let state_length = serde_json::to_vec(&manifest.data)
+        .map_err(|_| LibraryStorageError::InvalidInput("invalid library state"))?
+        .len();
+    if state_length > MAX_STATE_BYTES {
+        return Err(LibraryStorageError::InvalidInput(
+            "library state exceeds 64 MiB",
+        ));
+    }
+    let mut offset = manifest_end;
+    let mut batch_bytes = 0usize;
+    let mut ids = HashSet::new();
+    let mut payloads = Vec::with_capacity(manifest.blobs.len());
+    for blob in manifest.blobs {
+        validate_id(&blob.id)?;
+        if !ids.insert(blob.id.clone()) {
+            return Err(LibraryStorageError::InvalidInput(
+                "a save cannot change the same file id twice",
+            ));
+        }
+        let range = match blob.byte_length {
+            BinaryBlobLength::Delete(()) => None,
+            BinaryBlobLength::Bytes(length) => {
+                let length = usize::try_from(length)
+                    .ok()
+                    .filter(|length| *length <= MAX_FILE_BYTES)
+                    .ok_or(LibraryStorageError::InvalidInput(
+                        "an imported file exceeds 256 MiB",
+                    ))?;
+                batch_bytes = batch_bytes
+                    .checked_add(length)
+                    .filter(|total| *total <= MAX_BATCH_BYTES)
+                    .ok_or(LibraryStorageError::InvalidInput(
+                        "the imported files in one save exceed 512 MiB",
+                    ))?;
+                let end = offset
+                    .checked_add(length)
+                    .ok_or(LibraryStorageError::InvalidInput(
+                        "binary file payload length exceeds the supported range",
+                    ))?;
+                let range = offset..end;
+                offset = end;
+                Some(range)
+            }
+        };
+        payloads.push((blob.id, range));
+    }
+    if offset != bytes.len() {
+        return Err(LibraryStorageError::InvalidInput(
+            "binary file payload is truncated or has trailing bytes",
+        ));
+    }
+    // Validate every descriptor and the complete frame before allocating any
+    // file copies. The existing transaction path owns these raw byte buffers.
+    let blobs = payloads
+        .into_iter()
+        .map(|(id, range)| LibraryBlobMutation {
+            id,
+            bytes: range.map(|range| bytes[range].to_vec()),
+        })
+        .collect();
+    Ok(BinaryLibraryWrite {
+        expected_revision: manifest.expected_revision,
+        data: manifest.data,
+        blobs,
     })
 }
 
@@ -241,6 +387,240 @@ mod tests {
         LibraryBlobMutation {
             id: id.to_string(),
             bytes: bytes.map(Vec::from),
+        }
+    }
+
+    fn binary_frame(manifest: Value, payload: &[u8]) -> tauri::ipc::InvokeBody {
+        let manifest = serde_json::to_vec(&manifest).unwrap();
+        let mut frame = b"SRL1".to_vec();
+        frame.extend_from_slice(&(manifest.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&manifest);
+        frame.extend_from_slice(payload);
+        tauri::ipc::InvokeBody::Raw(frame)
+    }
+
+    fn write_binary_frame(
+        connection: &mut Connection,
+        frame: tauri::ipc::InvokeBody,
+    ) -> Result<u64, LibraryStorageError> {
+        let parsed = parse_binary_request(&frame)?;
+        write_snapshot(
+            connection,
+            parsed.expected_revision,
+            parsed.data,
+            parsed.blobs,
+        )
+    }
+
+    fn assert_invalid_binary(frame: tauri::ipc::InvokeBody) {
+        match parse_binary_request(&frame) {
+            Err(LibraryStorageError::InvalidInput(message)) => {
+                assert!(!message.contains("PRIVATE-CONTENT"));
+            }
+            _ => panic!("invalid binary frame must be rejected without exposing its contents"),
+        }
+    }
+
+    #[test]
+    fn binary_frame_writes_chinese_metadata_deletes_and_preserves_empty_files() {
+        let mut connection = test_connection();
+        write_snapshot(
+            &mut connection,
+            0,
+            json!({"title": "old"}),
+            vec![blob("remove", Some(b"old"))],
+        )
+        .unwrap();
+        let data =
+            json!({"title": "认知神经科学论文 🧠", "encrypted": {"iv": "abc", "data": "opaque"}});
+        let frame = binary_frame(
+            json!({
+                "expectedRevision": 1,
+                "data": data,
+                "blobs": [
+                    {"id": "remove", "byteLength": null},
+                    {"id": "empty", "byteLength": 0},
+                    {"id": "paper", "byteLength": 5},
+                    {"id": "cipher", "byteLength": 3}
+                ]
+            }),
+            &[37, 80, 68, 70, 45, 0, 128, 255],
+        );
+        assert_eq!(write_binary_frame(&mut connection, frame).unwrap(), 2);
+        assert_eq!(read_snapshot(&connection).unwrap().data, Some(data));
+        assert!(matches!(
+            read_file(&connection, "remove"),
+            Err(LibraryStorageError::MissingFile)
+        ));
+        assert_eq!(read_file(&connection, "empty").unwrap(), Vec::<u8>::new());
+        assert_eq!(read_file(&connection, "paper").unwrap(), b"%PDF-");
+        assert_eq!(read_file(&connection, "cipher").unwrap(), vec![0, 128, 255]);
+    }
+
+    #[test]
+    fn binary_frame_preserves_cas_conflicts_and_atomic_rollback() {
+        let mut connection = test_connection();
+        write_snapshot(
+            &mut connection,
+            0,
+            json!({"title": "keep"}),
+            vec![blob("keep", Some(b"original"))],
+        )
+        .unwrap();
+        let stale = binary_frame(
+            json!({
+                "expectedRevision": 0, "data": {"title": "stale"},
+                "blobs": [{"id": "keep", "byteLength": null}]
+            }),
+            &[],
+        );
+        assert!(matches!(
+            write_binary_frame(&mut connection, stale),
+            Err(LibraryStorageError::Conflict {
+                expected: 0,
+                current: 1
+            })
+        ));
+        connection
+            .execute_batch(
+                "CREATE TRIGGER fail_binary_file BEFORE INSERT ON research_library_files
+             WHEN NEW.id = 'fail' BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END;",
+            )
+            .unwrap();
+        let failed = binary_frame(
+            json!({
+                "expectedRevision": 1, "data": {"title": "discard"},
+                "blobs": [
+                    {"id": "keep", "byteLength": null},
+                    {"id": "new", "byteLength": 2},
+                    {"id": "fail", "byteLength": 1}
+                ]
+            }),
+            &[1, 2, 3],
+        );
+        assert!(matches!(
+            write_binary_frame(&mut connection, failed),
+            Err(LibraryStorageError::Sqlite(_))
+        ));
+        assert_eq!(read_file(&connection, "keep").unwrap(), b"original");
+        assert!(matches!(
+            read_file(&connection, "new"),
+            Err(LibraryStorageError::MissingFile)
+        ));
+        assert_eq!(
+            read_snapshot(&connection).unwrap(),
+            LibraryStorageSnapshot {
+                revision: 1,
+                data: Some(json!({"title": "keep"}))
+            }
+        );
+    }
+
+    #[test]
+    fn binary_parser_rejects_json_bodies_bad_headers_and_invalid_utf8() {
+        assert_invalid_binary(tauri::ipc::InvokeBody::Json(
+            json!({"data": "PRIVATE-CONTENT", "bytes": [83, 82, 76, 49]}),
+        ));
+        let tauri::ipc::InvokeBody::Raw(valid_bytes) =
+            binary_frame(json!({"expectedRevision": 0, "data": {}, "blobs": []}), &[])
+        else {
+            unreachable!();
+        };
+        assert_invalid_binary(tauri::ipc::InvokeBody::Json(
+            serde_json::to_value(valid_bytes).unwrap(),
+        ));
+        for bytes in [
+            b"".as_slice(),
+            b"SRL1",
+            b"SRL1\0\0\0",
+            b"BAD1\0\0\0\0",
+            b"SRL2\0\0\0\0",
+            b"SRL1\0\0\0\0",
+            b"SRL1\0\0\0\x01\xff",
+        ] {
+            assert_invalid_binary(tauri::ipc::InvokeBody::Raw(bytes.to_vec()));
+        }
+        let mut too_large = b"SRL1".to_vec();
+        too_large.extend_from_slice(&((MAX_MANIFEST_BYTES + 1) as u32).to_be_bytes());
+        assert_invalid_binary(tauri::ipc::InvokeBody::Raw(too_large));
+        let mut overflowing_length = b"SRL1".to_vec();
+        overflowing_length.extend_from_slice(&u32::MAX.to_be_bytes());
+        assert_invalid_binary(tauri::ipc::InvokeBody::Raw(overflowing_length));
+        assert_invalid_binary(tauri::ipc::InvokeBody::Raw(b"SRL1\0\0\0\x20{}".to_vec()));
+    }
+
+    #[test]
+    fn binary_parser_requires_exact_payload_lengths_and_required_descriptor_fields() {
+        let manifest = json!({"expectedRevision": 0, "data": {"title": "PRIVATE-CONTENT"}, "blobs": [{"id": "paper", "byteLength": 2}]});
+        assert_invalid_binary(binary_frame(manifest.clone(), &[1]));
+        assert_invalid_binary(binary_frame(manifest, &[1, 2, 3]));
+        assert_invalid_binary(binary_frame(
+            json!({"expectedRevision": 0, "data": {}, "blobs": []}),
+            &[0],
+        ));
+        for descriptor in [
+            json!({"id": "paper"}),
+            json!({"id": "paper", "byteLength": -1}),
+            json!({"id": "paper", "byteLength": 1.5}),
+            json!({"id": "paper", "byteLength": "2"}),
+            json!({"id": "paper", "byteLength": null, "bytes": [1]}),
+        ] {
+            assert_invalid_binary(binary_frame(
+                json!({"expectedRevision": 0, "data": {}, "blobs": [descriptor]}),
+                &[],
+            ));
+        }
+    }
+
+    #[test]
+    fn binary_parser_rejects_invalid_ids_duplicates_and_size_limits_before_copying_payloads() {
+        let manifests = [
+            json!({"expectedRevision": 0, "data": {}, "blobs": [{"id": "../PRIVATE-CONTENT", "byteLength": null}]}),
+            json!({"expectedRevision": 0, "data": {}, "blobs": [{"id": "same", "byteLength": null}, {"id": "same", "byteLength": 0}]}),
+            json!({"expectedRevision": 0, "data": {}, "blobs": [{"id": "large", "byteLength": MAX_FILE_BYTES + 1}]}),
+            json!({"expectedRevision": 0, "data": {}, "blobs": [{"id": "overflow", "byteLength": u64::MAX}]}),
+            json!({"expectedRevision": 0, "data": {}, "blobs": (0..3).map(|index| json!({"id": format!("file-{index}"), "byteLength": MAX_FILE_BYTES})).collect::<Vec<_>>()}),
+            json!({"expectedRevision": 0, "data": {}, "blobs": (0..=MAX_BATCH_FILES).map(|index| json!({"id": format!("file-{index}"), "byteLength": null})).collect::<Vec<_>>()}),
+            json!({"expectedRevision": MAX_REVISION, "data": {}, "blobs": []}),
+        ];
+        for manifest in manifests {
+            assert_invalid_binary(binary_frame(manifest, &[]));
+        }
+    }
+
+    #[test]
+    fn binary_parser_checks_declared_limits_before_requiring_large_payloads() {
+        let cases = [
+            (
+                json!([{"id": "large", "byteLength": MAX_FILE_BYTES + 1}]),
+                "an imported file exceeds 256 MiB",
+            ),
+            (
+                json!((0..3)
+                    .map(
+                        |index| json!({"id": format!("file-{index}"), "byteLength": MAX_FILE_BYTES})
+                    )
+                    .collect::<Vec<_>>()),
+                "the imported files in one save exceed 512 MiB",
+            ),
+            (
+                json!((0..=MAX_BATCH_FILES)
+                    .map(|index| json!({"id": format!("file-{index}"), "byteLength": null}))
+                    .collect::<Vec<_>>()),
+                "binary library revision or file count exceeds the supported range",
+            ),
+        ];
+        for (blobs, expected) in cases {
+            let frame = binary_frame(
+                json!({"expectedRevision": 0, "data": {}, "blobs": blobs}),
+                &[],
+            );
+            match parse_binary_request(&frame) {
+                Err(LibraryStorageError::InvalidInput(message)) => assert_eq!(message, expected),
+                _ => {
+                    panic!("declared limits must be validated before reading or copying file bytes")
+                }
+            }
         }
     }
 

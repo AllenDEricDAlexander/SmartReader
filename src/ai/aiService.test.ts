@@ -124,6 +124,26 @@ describe('research AI service', () => {
     expect(() => parseMetadataResponse('{}')).toThrow();
   });
 
+  it('finishes public-paper enrichment when an unrelated private folder locks', async () => {
+    const { ai, library, completion } = setup();
+    await ai.saveProvider(profile, 'session-key');
+    const privatePaper = await library.importPdf(pdf, 'private.pdf');
+    const publicPaper = await library.importPdf(new TextEncoder().encode('%PDF-1.7\npublic'), 'public.pdf');
+    const folder = await library.createFolder('私密');
+    await library.categorize([privatePaper.id], [folder.id], 'move');
+    const vault = await library.encryptFolder(folder.id, 'vault password');
+    let finish!: (value: string) => void;
+    completion.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const job = ai.enrich(publicPaper.id);
+    await vi.waitFor(() => expect(completion).toHaveBeenCalledTimes(1));
+    await library.lockVault(vault.id);
+    finish('{"researchTopics":["公开主题"]}');
+    await job;
+    expect(library.getPaper(publicPaper.id)?.aiStatus).toBe('ready');
+    expect(library.getPaper(publicPaper.id)?.metadata.researchTopics).toEqual(['公开主题']);
+    ai.dispose();
+  });
+
   it('serializes provider changes without losing concurrent additions or their session keys', async () => {
     const { ai, library } = setup();
     const providers = await Promise.all([

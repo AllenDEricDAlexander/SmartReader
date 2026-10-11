@@ -73,6 +73,7 @@ pub fn run() {
             file_commands::list_desktop_pdfs,
             library_storage::read_library_storage,
             library_storage::write_library_storage,
+            library_storage::write_library_storage_binary,
             library_storage::read_library_file,
             ai_http::ai_http_request,
             ai_http::cancel_ai_request,
