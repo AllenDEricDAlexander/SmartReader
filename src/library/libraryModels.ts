@@ -97,6 +97,7 @@ export type LibrarySnapshot = {
   papers: StoredPaper[];
   folders: LibraryFolder[];
   memberships: Record<string, string[]>;
+  automaticMemberships: Record<string, string[]>;
   vaults: FolderVault[];
   preferences: LibraryPreferences;
   ai: AiSettings;
@@ -127,6 +128,7 @@ export function emptyLibrary(): LibrarySnapshot {
     papers: [],
     folders: [],
     memberships: {},
+    automaticMemberships: {},
     vaults: [],
     preferences: { previewMode: 'hover', fieldUsage: {} },
     ai: { providers: [], activeProviderId: null, autoEnrich: false },
