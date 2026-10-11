@@ -1,3 +1,4 @@
+mod ai_http;
 mod db;
 mod file_commands;
 mod library_storage;
@@ -29,6 +30,7 @@ pub fn run() {
         .setup(|app| {
             let database = db::setup_database(app.handle())?;
             app.manage(database);
+            app.manage(ai_http::AiHttpState::new());
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
@@ -70,6 +72,8 @@ pub fn run() {
             library_storage::read_library_storage,
             library_storage::write_library_storage,
             library_storage::read_library_file,
+            ai_http::ai_http_request,
+            ai_http::cancel_ai_request,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SmartReader");
