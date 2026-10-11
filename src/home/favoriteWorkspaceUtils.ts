@@ -40,6 +40,7 @@ export type FavoriteRecommendation = {
 export const localBrowserDirectoryLabel = '本地浏览器文件';
 
 export function getFavoriteDirectoryLabel(document: FavoriteDocument): string {
+  if (document.documentKey.startsWith('paper:')) return '本地文献库';
   if (!document.path) {
     return localBrowserDirectoryLabel;
   }

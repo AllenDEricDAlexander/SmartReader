@@ -2,6 +2,7 @@ import type { PersistenceApi } from '../persistence/persistenceApi';
 import type { TauriBridge } from '../platform/tauriBridge';
 import type { PdfRenderer } from '../viewer/PdfViewerBridge';
 import type { ViewerActions } from '../viewer/viewerController';
+import type { ResearchServices } from './ResearchContext';
 
 export type AppWorkspace =
   | 'home'
@@ -14,6 +15,7 @@ export type AppWorkspace =
   | 'bookmarks';
 
 export type ReaderAppProps = {
+  research?: ResearchServices;
   bridge?: TauriBridge;
   persistence?: PersistenceApi;
   viewerController?: ViewerActions;

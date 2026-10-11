@@ -91,6 +91,7 @@ export const defaultSearchOptions: ViewerSearchOptions = {
 };
 
 export type ViewerSearchState = {
+  error?: string;
   keyword: string;
   matches: ViewerSearchMatch[];
   /** 1-based index of the focused match, or 0 when nothing is focused. */

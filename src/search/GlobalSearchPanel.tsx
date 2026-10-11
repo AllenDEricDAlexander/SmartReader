@@ -14,6 +14,7 @@ import {
 } from './globalSearch';
 
 type GlobalSearchPanelProps = {
+  libraryResults?: GlobalSearchResult[];
   open: boolean;
   query: string;
   recentDocuments: PersistedDocument[];
@@ -33,10 +34,12 @@ const sourceLabels: Record<GlobalSearchSource, string> = {
   bookmark: '书签',
   annotation: '批注',
   fullText: '全文',
+  library: '文献全文',
 };
 const focusRestoreMarker = 'globalSearchRestoreFocus';
 
 export function GlobalSearchPanel({
+  libraryResults,
   open,
   query,
   recentDocuments,
@@ -54,15 +57,15 @@ export function GlobalSearchPanel({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const results = useMemo(
     () =>
-      buildGlobalSearchResults({
+      [...(libraryResults ?? []), ...buildGlobalSearchResults({
         query,
         recentDocuments,
         favoriteDocuments,
         bookmarks,
         annotations,
         activeSession,
-      }),
-    [activeSession, annotations, bookmarks, favoriteDocuments, query, recentDocuments],
+      })],
+    [activeSession, annotations, bookmarks, favoriteDocuments, query, recentDocuments, libraryResults],
   );
   const normalizedQuery = query.trim();
   const providerErrors = [bookmarkError, annotationError].filter(

@@ -58,7 +58,7 @@ export function HomeRecentSessions({
                 </span>
                 <span className="session-main">
                   <strong>{document.displayName}</strong>
-                  <span>{getDirectoryPath(document.path)}</span>
+                  <span>{getDirectoryPath(document.path, document.documentKey)}</span>
                 </span>
                 <span className="session-meta">
                   <span className="session-progress">{formatPageProgress(document)}</span>

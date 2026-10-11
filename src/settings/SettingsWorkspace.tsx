@@ -7,8 +7,10 @@ import { CacheSettings } from './CacheSettings';
 import { DesktopIntegrationSettings } from './DesktopIntegrationSettings';
 import { SessionRestoreSettings } from './SessionRestoreSettings';
 import { ShortcutSettings } from './ShortcutSettings';
+import { AiSettings } from './AiSettings';
+import { useResearch } from '../app/ResearchContext';
 
-export type SettingsSection = 'shortcuts' | 'cache' | 'desktop' | 'restore';
+export type SettingsSection = 'shortcuts' | 'cache' | 'desktop' | 'restore' | 'ai';
 
 type SettingsWorkspaceProps = {
   commandRegistry: CommandRegistry;
@@ -38,6 +40,7 @@ export function SettingsWorkspace({
   onClose,
   onSave,
 }: SettingsWorkspaceProps) {
+  const research = useResearch();
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
   const [draftPreferences, setDraftPreferences] = useState(preferences);
   const [dirty, setDirty] = useState(false);
@@ -78,7 +81,7 @@ export function SettingsWorkspace({
           </div>
         </div>
         <nav className="workspace-nav" aria-label="设置导航">
-          {sections.map((section) => (
+          {[...sections, ...(research ? [{ id: 'ai' as const, label: 'AI 厂商' }] : [])].map((section) => (
             <button
               key={section.id}
               type="button"
@@ -97,6 +100,7 @@ export function SettingsWorkspace({
             <h1>设置</h1>
           </div>
           <div className="workspace-actions">
+            {activeSection !== 'ai' ? <>
             <button
               type="button"
               className="secondary-action"
@@ -117,12 +121,14 @@ export function SettingsWorkspace({
               <Save size={14} />
               保存设置
             </button>
+            </> : null}
             <button type="button" aria-label="关闭设置" onClick={handleClose}>
               <X size={14} />
             </button>
           </div>
         </header>
         <div className="settings-content">
+          {activeSection === 'ai' && research ? <AiSettings library={research.library} ai={research.ai} /> : null}
           {activeSection === 'shortcuts' ? (
             <ShortcutSettings
               commandRegistry={commandRegistry}

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { Bookmark, ReaderAnnotation } from '../../annotations/annotationModels';
 import {
   addOrReplaceAnnotation,
@@ -34,6 +34,8 @@ export function useReaderDecorations({
   activeSession,
   persistence,
 }: UseReaderDecorationsInput) {
+  const loadVersions = useRef(new Map<string, number>());
+  const privacyVersions = useRef(new Map<string, number>());
   const [bookmarksByDocument, setBookmarksByDocument] = useState<Record<string, Bookmark[]>>({});
   const [annotationsByDocument, setAnnotationsByDocument] = useState<
     Record<string, ReaderAnnotation[]>
@@ -41,10 +43,13 @@ export function useReaderDecorations({
 
   const loadDocumentDecorations = useCallback(
     async (documentKey: string) => {
+      const version = (loadVersions.current.get(documentKey) ?? 0) + 1;
+      loadVersions.current.set(documentKey, version);
       const [bookmarks, annotations] = await Promise.all([
         persistence.listBookmarks(documentKey),
         persistence.listAnnotations(documentKey),
       ]);
+      if (loadVersions.current.get(documentKey) !== version) return;
 
       setBookmarksByDocument((current) => ({ ...current, [documentKey]: bookmarks }));
       setAnnotationsByDocument((current) => ({
@@ -55,12 +60,23 @@ export function useReaderDecorations({
     [persistence],
   );
 
+  const forgetDocumentDecorations = useCallback((documentKeys: string[]) => {
+    for (const key of documentKeys) {
+      loadVersions.current.set(key, (loadVersions.current.get(key) ?? 0) + 1);
+      privacyVersions.current.set(key, (privacyVersions.current.get(key) ?? 0) + 1);
+    }
+    const excluded = new Set(documentKeys);
+    setBookmarksByDocument((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !excluded.has(key))));
+    setAnnotationsByDocument((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !excluded.has(key))));
+  }, []);
+
   const addBookmarkForActivePage = useCallback(async () => {
     if (!activeSession) {
       return;
     }
 
     const now = new Date().toISOString();
+    const privacy = privacyVersions.current.get(activeSession.documentKey) ?? 0;
     const saved = await persistence.saveBookmark({
       id: null,
       documentKey: activeSession.documentKey,
@@ -70,6 +86,7 @@ export function useReaderDecorations({
       createdAt: now,
       updatedAt: now,
     });
+    if ((privacyVersions.current.get(activeSession.documentKey) ?? 0) !== privacy) return;
 
     setBookmarksByDocument((current) => ({
       ...current,
@@ -100,12 +117,14 @@ export function useReaderDecorations({
         return bookmark;
       }
 
+      const privacy = privacyVersions.current.get(documentKey) ?? 0;
       const saved = await persistence.saveBookmark({
         ...bookmark,
         title: normalizedTitle,
         note: normalizedNote,
         updatedAt: new Date().toISOString(),
       });
+      if ((privacyVersions.current.get(documentKey) ?? 0) !== privacy) return undefined;
 
       setBookmarksByDocument((current) => {
         const bookmarks = current[documentKey];
@@ -136,7 +155,9 @@ export function useReaderDecorations({
 
   const deleteBookmarkForDocument = useCallback(
     async (documentKey: string, bookmarkId: number) => {
+      const privacy = privacyVersions.current.get(documentKey) ?? 0;
       await persistence.deleteBookmark(bookmarkId);
+      if ((privacyVersions.current.get(documentKey) ?? 0) !== privacy) return;
       setBookmarksByDocument((current) => {
         const bookmarks = current[documentKey];
 
@@ -160,6 +181,7 @@ export function useReaderDecorations({
       }
 
       const now = new Date().toISOString();
+      const privacy = privacyVersions.current.get(activeSession.documentKey) ?? 0;
       const saved = await persistence.saveAnnotation({
         id: null,
         documentKey: activeSession.documentKey,
@@ -167,6 +189,7 @@ export function useReaderDecorations({
         updatedAt: now,
         ...input,
       });
+      if ((privacyVersions.current.get(activeSession.documentKey) ?? 0) !== privacy) return undefined;
 
       const normalized = normalizeAnnotation(saved);
 
@@ -199,12 +222,14 @@ export function useReaderDecorations({
 
   const updateAnnotationForDocument = useCallback(
     async (documentKey: string, annotation: ReaderAnnotation, updates: Partial<ReaderAnnotation>) => {
+      const privacy = privacyVersions.current.get(documentKey) ?? 0;
       const { tagIds: _tagIds, ...annotationWithoutTags } = annotation;
       const saved = await persistence.saveAnnotation({
         ...annotationWithoutTags,
         ...updates,
         updatedAt: new Date().toISOString(),
       });
+      if ((privacyVersions.current.get(documentKey) ?? 0) !== privacy) return undefined;
       const normalized = normalizeAnnotation(saved);
 
       setAnnotationsByDocument((current) => ({
@@ -219,11 +244,13 @@ export function useReaderDecorations({
 
   const toggleAnnotationTagForDocument = useCallback(
     async (documentKey: string, annotationId: number, tagId: number, selected: boolean) => {
+      const privacy = privacyVersions.current.get(documentKey) ?? 0;
       if (selected) {
         await persistence.detachAnnotationTag(annotationId, tagId);
       } else {
         await persistence.attachAnnotationTag(annotationId, tagId);
       }
+      if ((privacyVersions.current.get(documentKey) ?? 0) !== privacy) return;
 
       setAnnotationsByDocument((current) => ({
         ...current,
@@ -239,8 +266,10 @@ export function useReaderDecorations({
   );
 
   const deleteAnnotationForDocument = useCallback(
-    (documentKey: string, annotationId: number) => {
-      void persistence.deleteAnnotation(annotationId);
+    async (documentKey: string, annotationId: number) => {
+      const privacy = privacyVersions.current.get(documentKey) ?? 0;
+      await persistence.deleteAnnotation(annotationId);
+      if ((privacyVersions.current.get(documentKey) ?? 0) !== privacy) return;
       setAnnotationsByDocument((current) => ({
         ...current,
         [documentKey]: removeAnnotation(current[documentKey] ?? [], annotationId),
@@ -251,39 +280,31 @@ export function useReaderDecorations({
 
   const importAnnotationsForDocument = useCallback(
     async (documentKey: string, json: string) => {
-      let imported: ReaderAnnotation[];
+      if (!json.trim()) return;
+      const privacy = privacyVersions.current.get(documentKey) ?? 0;
+      const imported = importAnnotations(json);
+      const savedAnnotations = await Promise.all(
+        imported.map((annotation) =>
+          persistence.saveAnnotation({
+            ...annotation,
+            id: null,
+            documentKey,
+            tagIds: annotation.tagIds ?? [],
+            updatedAt: new Date().toISOString(),
+          }),
+        ),
+      );
+      if ((privacyVersions.current.get(documentKey) ?? 0) !== privacy) return;
 
-      try {
-        imported = importAnnotations(json);
-      } catch {
-        return;
-      }
-
-      try {
-        const savedAnnotations = await Promise.all(
-          imported.map((annotation) =>
-            persistence.saveAnnotation({
-              ...annotation,
-              id: null,
-              documentKey,
-              tagIds: annotation.tagIds ?? [],
-              updatedAt: new Date().toISOString(),
-            }),
+      setAnnotationsByDocument((current) => ({
+        ...current,
+        [documentKey]: savedAnnotations
+          .map(normalizeAnnotation)
+          .reduce(
+            (annotations, annotation) => addOrReplaceAnnotation(annotations, annotation),
+            current[documentKey] ?? [],
           ),
-        );
-
-        setAnnotationsByDocument((current) => ({
-          ...current,
-          [documentKey]: savedAnnotations
-            .map(normalizeAnnotation)
-            .reduce(
-              (annotations, annotation) => addOrReplaceAnnotation(annotations, annotation),
-              current[documentKey] ?? [],
-            ),
-        }));
-      } catch {
-        return;
-      }
+      }));
     },
     [persistence],
   );
@@ -297,6 +318,7 @@ export function useReaderDecorations({
     deleteAnnotationForDocument,
     importAnnotationsForDocument,
     loadDocumentDecorations,
+    forgetDocumentDecorations,
     renameBookmarkForDocument,
     saveAnnotationForActiveDocument,
     toggleAnnotationTagForDocument,

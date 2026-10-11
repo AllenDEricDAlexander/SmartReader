@@ -37,6 +37,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             db::save_document,
+            db::get_document,
             db::list_recent_documents,
             db::remove_recent_document,
             db::clear_recent_documents,
@@ -69,6 +70,7 @@ pub fn run() {
             file_commands::stat_desktop_pdf,
             file_commands::read_desktop_pdf_bytes,
             file_commands::read_cached_pdf,
+            file_commands::list_desktop_pdfs,
             library_storage::read_library_storage,
             library_storage::write_library_storage,
             library_storage::read_library_file,

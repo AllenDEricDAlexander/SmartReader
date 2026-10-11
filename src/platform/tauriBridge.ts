@@ -44,6 +44,8 @@ export type TauriBridge = {
   canOpenNativePdf?(): boolean;
   openNativePdf(): Promise<OpenedDesktopPdf | null>;
   readDesktopPdf(path: string): Promise<OpenedDesktopPdf>;
+  selectNativePdfPaths?(): Promise<string[]>;
+  selectNativePdfFolder?(): Promise<string[]>;
 };
 
 export function createTauriBridge(
@@ -74,6 +76,15 @@ export function createTauriBridge(
     },
     readDesktopPdf(path) {
       return readDesktopPdfWithInvoke(invoke, path);
+    },
+    async selectNativePdfPaths() {
+      const selected = await open({ multiple: true, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+      return selected ? (Array.isArray(selected) ? selected : [selected]) : [];
+    },
+    async selectNativePdfFolder() {
+      const selected = await open({ directory: true, multiple: false });
+      if (!selected || Array.isArray(selected)) return [];
+      return invoke<string[]>('list_desktop_pdfs', { directory: selected });
     },
   };
 }

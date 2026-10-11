@@ -91,6 +91,11 @@ export type LibraryPreferences = {
   fieldUsage: Partial<Record<MetadataField, number>>;
 };
 
+export type LibraryReaderSession = {
+  activePaperId: string | null;
+  openPaperIds: string[];
+};
+
 export type LibrarySnapshot = {
   schemaVersion: 1;
   updatedAt: string;
@@ -102,6 +107,7 @@ export type LibrarySnapshot = {
   preferences: LibraryPreferences;
   ai: AiSettings;
   nextDecorationId: number;
+  readerSession?: LibraryReaderSession;
 };
 
 export function emptyMetadata(title = ''): PaperMetadata {

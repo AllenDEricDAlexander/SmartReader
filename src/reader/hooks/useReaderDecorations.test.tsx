@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { Bookmark } from '../../annotations/annotationModels';
+import type { Bookmark, ReaderAnnotation } from '../../annotations/annotationModels';
 import type { DocumentSession } from '../../documents/documentModels';
 import type { PersistenceApi } from '../../persistence/persistenceApi';
 import { useReaderDecorations } from './useReaderDecorations';
@@ -40,6 +40,44 @@ const activeSession: DocumentSession = {
 };
 
 describe('useReaderDecorations bookmarks', () => {
+  it('does not repopulate cleared bookmarks when a save completes after locking', async () => {
+    let finish!: (value: Bookmark) => void;
+    const pending = new Promise<Bookmark>((resolve) => { finish = resolve; });
+    const persistence = { saveBookmark: vi.fn(() => pending) } as unknown as PersistenceApi;
+    const { result } = renderHook(() => useReaderDecorations({ activeSession, persistence }));
+    let saving!: Promise<void>;
+    act(() => { saving = result.current.addBookmarkForActivePage(); });
+    act(() => result.current.forgetDocumentDecorations([bookmark.documentKey]));
+    await act(async () => { finish(bookmark); await saving; });
+    expect(result.current.bookmarksByDocument).toEqual({});
+  });
+
+  it('does not repopulate cleared annotations when a save completes after locking', async () => {
+    let finish!: (value: ReaderAnnotation) => void;
+    const pending = new Promise<ReaderAnnotation>((resolve) => { finish = resolve; });
+    const persistence = { saveAnnotation: vi.fn(() => pending) } as unknown as PersistenceApi;
+    const { result } = renderHook(() => useReaderDecorations({ activeSession, persistence }));
+    let saving!: Promise<ReaderAnnotation | undefined>;
+    act(() => { saving = result.current.saveAnnotationForActiveDocument({ page: 3, type: 'note', color: '#fff', text: 'private', quote: null, areas: [] }); });
+    act(() => result.current.forgetDocumentDecorations([bookmark.documentKey]));
+    await act(async () => {
+      finish({ id: 7, documentKey: bookmark.documentKey, page: 3, type: 'note', color: '#fff', text: 'private', quote: null, areas: [], createdAt: '', updatedAt: '' });
+      expect(await saving).toBeUndefined();
+    });
+    expect(result.current.annotationsByDocument).toEqual({});
+  });
+
+  it('keeps annotations visible when persistence rejects deletion', async () => {
+    const annotation: ReaderAnnotation = { id: 7, documentKey: bookmark.documentKey, page: 3, type: 'note', color: '#fff', text: 'my note', quote: null, areas: [], tagIds: [], createdAt: '', updatedAt: '' };
+    const persistence = {
+      listBookmarks: vi.fn().mockResolvedValue([]), listAnnotations: vi.fn().mockResolvedValue([annotation]),
+      deleteAnnotation: vi.fn().mockRejectedValue(new Error('disk full')),
+    } as unknown as PersistenceApi;
+    const { result } = renderHook(() => useReaderDecorations({ activeSession, persistence }));
+    await act(async () => { await result.current.loadDocumentDecorations(bookmark.documentKey); });
+    await expect(result.current.deleteAnnotationForDocument(bookmark.documentKey, 7)).rejects.toThrow('disk full');
+    expect(result.current.annotationsByDocument[bookmark.documentKey]).toEqual([annotation]);
+  });
   it('persists a normalized title and note before updating loaded local state', async () => {
     const persistence = {
       listBookmarks: vi.fn().mockResolvedValue([bookmark]),

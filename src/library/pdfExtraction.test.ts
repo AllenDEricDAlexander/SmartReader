@@ -118,6 +118,37 @@ describe('PDF extraction', () => {
     expect((await extractPdf(pdfBytes)).metadata).toMatchObject({ year: '', journal: '', doi: '', abstract: '', indexingStatus: '未知' });
   });
 
+  it('keeps short PDF subjects as research topics without promoting XMP keywords into disciplines', async () => {
+    mockPdf([['Body text']], { Subject: '认知神经；注意力' }, { 'dc:subject': ['fMRI', 'experiment'] });
+    expect((await extractPdf(pdfBytes)).metadata).toMatchObject({
+      researchTopics: ['认知神经', '注意力'],
+      keywords: ['fMRI', 'experiment'],
+      researchFields: [],
+      disciplines: [],
+    });
+  });
+
+  it.each([
+    'Abstract: We compare the performance of learning mechanisms.',
+    '摘 要：本文比较不同学习机制的表现。',
+    'This study investigates how cognitive control influences learning',
+    'An experiment was conducted. The results support the proposed mechanism.',
+    'A'.repeat(101),
+  ])('does not turn an abstract-like or long Subject into a research topic: %s', async (subject) => {
+    mockPdf([['Body text']], { Subject: subject });
+    expect((await extractPdf(pdfBytes)).metadata.researchTopics).toEqual([]);
+  });
+
+  it('accepts a topic phrase at the 100-character boundary and prefers XMP over Custom facts', async () => {
+    mockPdf([['Body text']], {
+      Subject: 'A'.repeat(100),
+      Custom: { DOI: '10.1234/custom', Journal: 'Custom journal', PublicationYear: 2020 },
+    }, { 'prism:doi': '10.1234/xmp', 'prism:publicationname': 'XMP journal', 'prism:publicationdate': '2025-01-01' });
+    expect((await extractPdf(pdfBytes)).metadata).toMatchObject({
+      researchTopics: ['A'.repeat(100)], doi: '10.1234/xmp', journal: 'XMP journal', year: '2025',
+    });
+  });
+
   it('handles a separate keyword heading and stops a Chinese abstract at the introduction', async () => {
     mockPdf([['学习策略研究', '摘要', '这是摘要。', '1 引言', '这是正文。', 'Keywords', 'learning; cognition']]);
     expect((await extractPdf(pdfBytes)).metadata).toMatchObject({
@@ -204,9 +235,35 @@ describe('PDF extraction', () => {
     expect(result.pageCount).toBe(1);
     expect(result.pages[0].text).toContain('Searchable cognition evidence');
   });
+
+  it.each([
+    ['/PublicationYear 2024', '2024'],
+    ['/pUbLiCaTiOnDaTe (2023-09-12)', '2023'],
+    ['/PublicationDate (D:20220912000000Z)', '2022'],
+  ])('extracts real PDF.js Custom Info DOI/Journal and explicit publication year from %s', async (publicationInfo, year) => {
+    const actual = await vi.importActual<typeof import('pdfjs-dist')>('pdfjs-dist');
+    actual.GlobalWorkerOptions.workerSrc = resolve('node_modules/pdfjs-dist/build/pdf.worker.js');
+    vi.mocked(getDocument).mockImplementation(actual.getDocument);
+    const bytes = minimalPdf(`/dOi (10.1234/custom.2024) /jOuRnAl (Journal of Real Fixtures) ${publicationInfo} /CreationDate (D:20261011000000Z) /Subject (Cognitive neuroscience)`);
+    const task = actual.getDocument({ data: bytes.slice(), isEvalSupported: false });
+    try {
+      const doc = await task.promise;
+      const { info } = await doc.getMetadata();
+      expect(info).toMatchObject({ Custom: { dOi: '10.1234/custom.2024', jOuRnAl: 'Journal of Real Fixtures' } });
+      expect(info).not.toHaveProperty('dOi');
+      expect(info).not.toHaveProperty('jOuRnAl');
+    } finally {
+      await task.destroy();
+    }
+
+    expect((await extractPdf(bytes)).metadata).toMatchObject({
+      doi: '10.1234/custom.2024', journal: 'Journal of Real Fixtures', year,
+      researchTopics: ['Cognitive neuroscience'], indexingStatus: '未知',
+    });
+  });
 });
 
-function minimalPdf(): Uint8Array {
+function minimalPdf(extraInfo = ''): Uint8Array {
   const stream = 'BT /F1 12 Tf 72 700 Td (Searchable cognition evidence) Tj ET';
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
@@ -214,7 +271,7 @@ function minimalPdf(): Uint8Array {
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
     `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
-    '<< /Title (A real PDF fixture) /Author (Ada Researcher) >>',
+    `<< /Title (A real PDF fixture) /Author (Ada Researcher) ${extraInfo} >>`,
   ];
   let content = '%PDF-1.4\n';
   const offsets = objects.map((object, index) => {

@@ -24,6 +24,16 @@ describe('persistenceApi', () => {
     expect(invoke).toHaveBeenCalledWith('save_document', { document });
   });
 
+  it('looks up a document by its stable key independently of the recent-file list', async () => {
+    const document = { documentKey: 'desktop:/tmp/hidden.pdf', displayName: 'hidden.pdf' };
+    const invoke = vi.fn().mockResolvedValueOnce(document).mockResolvedValueOnce(null);
+    const api = createPersistenceApi(invoke);
+    await expect(api.getDocument!(document.documentKey)).resolves.toEqual(document);
+    expect(invoke).toHaveBeenNthCalledWith(1, 'get_document', { documentKey: document.documentKey });
+    await expect(api.getDocument!('desktop:/tmp/missing.pdf')).resolves.toBeNull();
+    expect(invoke).toHaveBeenNthCalledWith(2, 'get_document', { documentKey: 'desktop:/tmp/missing.pdf' });
+  });
+
   it('lists recent documents through Tauri invoke', async () => {
     const invoke = vi.fn().mockResolvedValue([{ documentKey: 'desktop:/tmp/book.pdf' }]);
     const api = createPersistenceApi(invoke);

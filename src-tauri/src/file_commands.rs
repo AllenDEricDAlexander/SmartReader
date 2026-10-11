@@ -11,6 +11,10 @@ pub enum FileCommandError {
     NotAFile,
     #[error("file is not a PDF")]
     InvalidPdf,
+    #[error("path is not a directory")]
+    NotADirectory,
+    #[error("folder import supports at most 2000 PDFs and 20 directory levels")]
+    FolderLimit,
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -119,6 +123,45 @@ pub fn read_cached_pdf(cache_path: String) -> Result<CachedPdfFile, FileCommandE
     Ok(CachedPdfFile { cache_path, bytes })
 }
 
+#[tauri::command]
+pub fn list_desktop_pdfs(directory: String) -> Result<Vec<String>, FileCommandError> {
+    let root = fs::canonicalize(directory)?;
+    if !root.is_dir() {
+        return Err(FileCommandError::NotADirectory);
+    }
+    let mut pending = vec![(root, 0usize)];
+    let mut files = Vec::new();
+    while let Some((directory, depth)) = pending.pop() {
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            // Do not follow links outside the selected tree or recurse through cycles.
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                if depth >= 20 {
+                    return Err(FileCommandError::FolderLimit);
+                }
+                pending.push((entry.path(), depth + 1));
+            } else if file_type.is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|value| value.eq_ignore_ascii_case("pdf"))
+            {
+                files.push(entry.path().to_string_lossy().into_owned());
+                if files.len() > 2000 {
+                    return Err(FileCommandError::FolderLimit);
+                }
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
 pub fn validate_pdf_bytes(bytes: &[u8]) -> Result<(), FileCommandError> {
     if bytes.starts_with(b"%PDF-") {
         Ok(())
@@ -141,6 +184,22 @@ pub fn cache_file_name(document_key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lists_nested_pdfs_without_following_links() {
+        let dir = std::env::temp_dir().join(format!("smartreader-folder-{}", std::process::id()));
+        fs::create_dir_all(dir.join("nested")).expect("create folder");
+        fs::write(dir.join("a.PDF"), b"%PDF-1.7").expect("write pdf");
+        fs::write(dir.join("notes.txt"), b"notes").expect("write text");
+        fs::write(dir.join("nested/b.pdf"), b"%PDF-1.7").expect("write nested pdf");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&dir, dir.join("nested/loop")).expect("create link");
+        let paths = list_desktop_pdfs(dir.to_string_lossy().into_owned()).expect("enumerate");
+        assert_eq!(paths.len(), 2);
+        assert!(paths[0].ends_with("a.PDF"));
+        assert!(paths[1].ends_with("nested/b.pdf"));
+        fs::remove_dir_all(dir).expect("remove fixture");
+    }
 
     #[test]
     fn accepts_pdf_header() {

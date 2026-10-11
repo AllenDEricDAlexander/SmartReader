@@ -38,6 +38,8 @@ import { AnnotationManagerWorkspace } from '../workspaces/AnnotationManagerWorks
 import { BookmarkManagerWorkspace } from '../workspaces/BookmarkManagerWorkspace';
 import { CompareWorkspace } from '../workspaces/CompareWorkspace';
 import { ImportWorkspace } from '../workspaces/ImportWorkspace';
+import { LibraryCompareWorkspace } from '../workspaces/LibraryCompareWorkspace';
+import { useResearch } from './ResearchContext';
 import type { AppWorkspace } from './appTypes';
 import { ReaderWorkspaceView } from './ReaderWorkspaceView';
 
@@ -47,6 +49,10 @@ type AppVersion = {
 };
 
 type ReaderWorkspaceSwitchProps = {
+  workspaceContent?: ReactNode;
+  importContent?: ReactNode;
+  onImportFolder?(): void | Promise<void>;
+  importing?: boolean;
   activeAnnotations: ReaderAnnotation[];
   activeBookmarks: PersistedBookmark[];
   activeSession: DocumentSession | null;
@@ -143,6 +149,10 @@ type ReaderWorkspaceSwitchProps = {
 };
 
 export function ReaderWorkspaceSwitch({
+  workspaceContent,
+  importContent,
+  onImportFolder,
+  importing,
   activeAnnotations,
   activeBookmarks,
   activeSession,
@@ -227,6 +237,7 @@ export function ReaderWorkspaceSwitch({
   stepHistoryForward,
   updateManagedBookmark,
 }: ReaderWorkspaceSwitchProps) {
+  const research = useResearch();
   return (
     <>
       {activeWorkspace === 'settings' ? (
@@ -242,7 +253,7 @@ export function ReaderWorkspaceSwitch({
         />
       ) : null}
       {activeWorkspace === 'import' ? (
-        <ImportWorkspace
+        importContent ?? <ImportWorkspace
           onOpenPdf={openImportPdf}
           onBrowserFileChange={handleImportBrowserFileChange}
           canOpenNativePdf={canOpenNativePdf}
@@ -250,7 +261,7 @@ export function ReaderWorkspaceSwitch({
         />
       ) : null}
       {activeWorkspace === 'compare' ? (
-        <CompareWorkspace
+        research ? <LibraryCompareWorkspace library={research.library} onClose={closeToolWorkspace} /> : <CompareWorkspace
           recentDocuments={recentDocuments}
           onOpenDocument={openCompareDocument}
           onClose={closeToolWorkspace}
@@ -363,6 +374,10 @@ export function ReaderWorkspaceSwitch({
       ) : null}
       {activeWorkspace === 'home' ? (
         <HomeDashboard
+          workspaceContent={workspaceContent}
+          onImportFolder={onImportFolder}
+          onOpenAi={research ? () => openHomeSidebarPage('ai') : undefined}
+          taskStatus={importing ? 'importing' : 'idle'}
           recentDocuments={recentDocuments}
           favoriteDocuments={favoriteDocuments}
           bookmarkDashboard={bookmarkDashboard}

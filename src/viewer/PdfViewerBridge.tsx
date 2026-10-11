@@ -1,4 +1,5 @@
 import { PasswordStatus, SpecialZoomLevel, Worker, Viewer } from '@react-pdf-viewer/core';
+import type { PdfJs } from '@react-pdf-viewer/core';
 import { highlightPlugin, Trigger, type HighlightArea } from '@react-pdf-viewer/highlight';
 import type { Match } from '@react-pdf-viewer/search';
 import { toolbarPlugin } from '@react-pdf-viewer/toolbar';
@@ -48,6 +49,9 @@ type PdfDocumentProxy = {
   getMetadata(): Promise<{ info?: PdfDocumentMetadataInfo } | undefined>;
 };
 
+// Imported files must not enable PDF.js generated font-code evaluation.
+const safePdfOptions = (options: PdfJs.GetDocumentParams) => ({ ...options, isEvalSupported: false });
+
 export type PdfRendererProps = {
   fileUrl: string;
   annotations: ReaderAnnotation[];
@@ -91,6 +95,7 @@ export function PdfViewerBridge({
 
   return (
     <ActivePdfViewerBridge
+      key={`${source.sessionId}:${source.url}`}
       source={source}
       annotations={annotations}
       controller={controller}
@@ -128,6 +133,23 @@ function ActivePdfViewerBridge({
   controller?: ViewerController;
   renderer?: PdfRenderer;
 }) {
+  const alive = useRef(true);
+  const callbacks = useRef({ onHighlightSelection, onSearchStateChange, onDocumentInfo });
+  useLayoutEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+  useLayoutEffect(() => { callbacks.current = { onHighlightSelection, onSearchStateChange, onDocumentInfo }; },
+    [onHighlightSelection, onSearchStateChange, onDocumentInfo]);
+  const reportSelection = useCallback((selection: ViewerHighlightSelection) => {
+    if (alive.current) callbacks.current.onHighlightSelection?.(selection);
+  }, []);
+  const reportSearch = useCallback((state: ViewerSearchState) => {
+    if (alive.current) callbacks.current.onSearchStateChange?.(state);
+  }, []);
+  const reportInfo = useCallback((info: ViewerDocumentInfo) => {
+    if (alive.current) callbacks.current.onDocumentInfo?.(info);
+  }, []);
   const currentPageRef = useRef(1);
   const totalPageCountRef = useRef<number | null>(null);
   const currentZoomRef = useRef(1);
@@ -150,6 +172,7 @@ function ActivePdfViewerBridge({
   }, [source.sessionId, source.url]);
 
   const handleLoadError = useCallback((error: ViewerLoadError) => {
+    if (!alive.current) return;
     hasReportedLoadRef.current = true;
     setLoadError(error);
     onLoadErrorRef.current?.(error);
@@ -182,6 +205,7 @@ function ActivePdfViewerBridge({
   // these callbacks stable stops that feedback from reaching the viewer as new
   // props on every scrolled page.
   const reportProgress = useCallback(() => {
+    if (!alive.current) return;
     onProgressChangeRef.current({
       sessionId: source.sessionId,
       page: currentPageRef.current,
@@ -249,11 +273,11 @@ function ActivePdfViewerBridge({
     return renderer({
       fileUrl: source.url,
       annotations,
-      onHighlightSelection,
+      onHighlightSelection: onHighlightSelection ? reportSelection : undefined,
       onPageChange: reportPage,
       onZoomChange: reportZoom,
       onLoadError: handleLoadError,
-      onSearchStateChange,
+      onSearchStateChange: reportSearch,
     });
   }
 
@@ -263,14 +287,14 @@ function ActivePdfViewerBridge({
       restore={source.restore}
       annotations={annotations}
       controller={controller}
-      onHighlightSelection={onHighlightSelection}
+      onHighlightSelection={onHighlightSelection ? reportSelection : undefined}
       onPageChange={reportPage}
       onZoomChange={reportZoom}
       onLoadError={handleLoadError}
       onPasswordRequired={handlePasswordRequired}
-      onDocumentInfo={onDocumentInfo}
+      onDocumentInfo={reportInfo}
       sessionId={source.sessionId}
-      onSearchStateChange={onSearchStateChange}
+      onSearchStateChange={reportSearch}
     />
   );
 }
@@ -357,7 +381,7 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
   // never has to reach this component as a new prop.
   const highlightPluginInstance = highlightPlugin({
     trigger: Trigger.TextSelection,
-    renderHighlightTarget: (props) => (
+    renderHighlightTarget: (props) => onHighlightSelectionRef.current ? (
       <SelectionMarkupMenu
         left={props.selectionRegion.left}
         top={props.selectionRegion.top + props.selectionRegion.height}
@@ -373,7 +397,7 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
         }}
         onDismiss={props.cancel}
       />
-    ),
+    ) : <></>,
     renderHighlights: (props) => (
       <>
         {annotations
@@ -408,7 +432,11 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
       return undefined;
     }
 
+    let disposed = false;
+    let searchGeneration = 0;
+
     const publishSearchState = (state: ViewerSearchState) => {
+      if (disposed) return;
       searchStateRef.current = state;
       onSearchStateChangeRef.current?.(state);
     };
@@ -434,6 +462,7 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
       // keyword and match count that would contradict the toolbar.
       openSearch: () => undefined,
       search: (keyword, options = defaultSearchOptions) => {
+        const generation = ++searchGeneration;
         const trimmed = keyword.trim();
 
         if (!trimmed) {
@@ -449,12 +478,17 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
             wholeWords: options.wholeWords,
           })
           .then((matches) => {
+            if (disposed || generation !== searchGeneration) return;
             publishSearchState({
               keyword: trimmed,
               matches: matches.map(toSearchMatch),
               currentIndex: matches.length > 0 ? 1 : 0,
               options,
             });
+          }).catch(() => {
+            if (!disposed && generation === searchGeneration) {
+              publishSearchState({ ...emptySearchState, keyword: trimmed, options, error: 'PDF 全文搜索失败，请重试。' });
+            }
           });
       },
       searchNext: () => focusMatch(searchStateRef.current.currentIndex + 1),
@@ -470,7 +504,7 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
       fitPage: () => zoomPluginInstance.zoomTo(SpecialZoomLevel.PageFit),
     });
 
-    return () => controller.clear();
+    return () => { disposed = true; controller.clear(); };
   }, [controller, pageNavigationPluginInstance, searchPluginInstance, zoomPluginInstance]);
 
   const plugins = [toolbarPluginInstance, highlightPluginInstance];
@@ -480,6 +514,7 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
       <Worker workerUrl="/pdf.worker.min.js">
         <Viewer
           fileUrl={fileUrl}
+          transformGetDocumentParams={safePdfOptions}
           plugins={plugins}
           initialPage={initialPage}
           defaultScale={restore?.zoom}

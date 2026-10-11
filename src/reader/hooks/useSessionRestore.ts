@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import { BlobUrlCache } from '../../cache/blobUrlCache';
 import { PdfByteCache } from '../../cache/pdfByteCache';
-import type { DocumentState } from '../../documents/documentModels';
+import type { DocumentSession, DocumentState } from '../../documents/documentModels';
 import {
   createEmptyDocumentState,
   markSessionError,
@@ -15,6 +15,7 @@ import type {
 import type { ReaderPreferences } from '../../preferences/preferencesModels';
 import type { TauriBridge } from '../../platform/tauriBridge';
 import type { ViewerSource } from '../../viewer/viewerTypes';
+import type { LibraryService } from '../../library/libraryService';
 
 type UseSessionRestoreInput = {
   bridge: TauriBridge;
@@ -22,6 +23,7 @@ type UseSessionRestoreInput = {
   loadDocumentDecorations(documentKey: string): Promise<void>;
   pdfByteCache: PdfByteCache;
   persistence: PersistenceApi;
+  library?: LibraryService;
   preferences: ReaderPreferences;
   preferencesLoaded: boolean;
   setDocuments: Dispatch<SetStateAction<DocumentState>>;
@@ -36,6 +38,7 @@ export function useSessionRestore({
   loadDocumentDecorations,
   pdfByteCache,
   persistence,
+  library,
   preferences,
   preferencesLoaded,
   setDocuments,
@@ -44,8 +47,27 @@ export function useSessionRestore({
   setViewerSource,
 }: UseSessionRestoreInput) {
   const restoredRef = useRef(false);
+  const publishRestoredBytes = useCallback((session: DocumentSession, bytes: Uint8Array, canRestore: () => boolean) => {
+    setDocuments((current) => {
+      if (!canRestore()) return current;
+      const live = current.sessions.find((item) => item.id === session.id && item.source === session.source);
+      if (!live) return current;
+
+      // State updaters can replay. Reuse the URL, and never replace a newer open's bytes.
+      let url = blobUrlCache.getForSession(live.id);
+      if (!url) {
+        pdfByteCache.set(live.documentKey, bytes);
+        url = blobUrlCache.createForSession(live.id, bytes);
+      }
+      if (current.activeSessionId === live.id) {
+        const source: ViewerSource = { sessionId: live.id, url, restore: { page: live.page, zoom: live.zoom } };
+        setViewerSource((previous) => canRestore() ? source : previous);
+      }
+      return current;
+    });
+  }, [blobUrlCache, pdfByteCache, setDocuments, setViewerSource]);
   const restoreSession = useCallback(
-    async (isCancelled: () => boolean = () => false) => {
+    async (isCancelled: () => boolean = () => false, force = false) => {
       const restoredDocuments = await persistence.listRecentDocuments();
 
       if (isCancelled()) {
@@ -54,7 +76,7 @@ export function useSessionRestore({
 
       setRecentDocuments(restoredDocuments);
 
-      if (restoredDocuments.length === 0 || !preferences.sessionRestoreEnabled) {
+      if (restoredDocuments.length === 0 || (!force && !preferences.sessionRestoreEnabled)) {
         return;
       }
 
@@ -87,6 +109,19 @@ export function useSessionRestore({
 
         void loadDocumentDecorations(session.documentKey);
 
+        if (session.source.kind === 'library' && library) {
+          const access = library.captureAccess();
+          const paperId = session.source.paperId;
+          try {
+            const bytes = await library.readPdf(paperId);
+            publishRestoredBytes(session, bytes, () => !isCancelled() && library.canAccess(paperId, access));
+          } catch (error) {
+            setDocuments((current) => !isCancelled() && library.canAccess(paperId, access)
+              && current.sessions.some((item) => item.id === session.id && item.source === session.source)
+              ? markSessionError(current, session.id, error instanceof Error ? error.message : String(error)) : current);
+          }
+          continue;
+        }
         if (session.source.kind !== 'desktop-path') {
           continue;
         }
@@ -98,42 +133,26 @@ export function useSessionRestore({
             return;
           }
 
-          pdfByteCache.set(session.documentKey, opened.bytes);
-          const url = blobUrlCache.createForSession(session.id, opened.bytes);
-
-          if (session.id === restoredState.activeSessionId) {
-            // Hand the persisted position to the viewer so it opens there
-            // directly rather than painting page 1 and jumping afterwards.
-            setViewerSource({
-              sessionId: session.id,
-              url,
-              restore: { page: session.page, zoom: session.zoom },
-            });
-          }
+          publishRestoredBytes(session, opened.bytes, () => !isCancelled());
         } catch (error) {
           if (!isCancelled()) {
-            setDocuments((current) =>
-              markSessionError(
-                current,
-                session.id,
-                error instanceof Error ? error.message : String(error),
-              ),
-            );
+            setDocuments((current) => !isCancelled()
+              && current.sessions.some((item) => item.id === session.id && item.source === session.source)
+              ? markSessionError(current, session.id, error instanceof Error ? error.message : String(error)) : current);
           }
         }
       }
     },
     [
       bridge,
-      blobUrlCache,
       loadDocumentDecorations,
-      pdfByteCache,
       persistence,
+      publishRestoredBytes,
+      library,
       preferences,
       setDocuments,
       setRecentDocuments,
       setSidebarOpen,
-      setViewerSource,
     ],
   );
 
@@ -143,16 +162,18 @@ export function useSessionRestore({
     }
 
     let cancelled = false;
+    let completed = false;
     restoredRef.current = true;
 
     restoreSession(() => cancelled).catch(() => {
       if (!cancelled) {
         setDocuments(createEmptyDocumentState());
       }
-    });
+    }).finally(() => { completed = true; });
 
     return () => {
       cancelled = true;
+      if (!completed) restoredRef.current = false;
     };
   }, [preferencesLoaded, restoreSession, setDocuments]);
 
@@ -170,7 +191,7 @@ function scopeRestoredSession(
 
   const restorableDocumentKeys = new Set(
     documents
-      .filter((document) => document.path)
+      .filter((document) => document.path || document.documentKey.startsWith('paper:'))
       .map((document) => document.documentKey),
   );
   const tabsByDocumentKey = new Map(

@@ -25,6 +25,14 @@ function createSession(overrides: Partial<DocumentSession> = {}): DocumentSessio
 }
 
 describe('ReaderViewerContent', () => {
+  it('never renders a PDF from another session beneath the active document', () => {
+    const renderer = vi.fn(() => <div>Wrong document</div>);
+    render(<ReaderViewerContent activeSession={createSession()} viewerSource={{ sessionId: 'session-b', url: 'blob:other' }}
+      annotations={[]} controller={new ViewerController()} renderer={renderer} onOpenPdf={vi.fn()} onRetry={vi.fn()}
+      onHighlightSelection={vi.fn()} onProgressChange={vi.fn()} onLoadError={vi.fn()} onSearchStateChange={vi.fn()} onDocumentInfo={vi.fn()} />);
+    expect(renderer).not.toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent('正在载入所选文献');
+  });
   it('renders the empty state when there is no active session', () => {
     render(
       <ReaderViewerContent

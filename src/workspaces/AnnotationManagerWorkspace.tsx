@@ -2,6 +2,7 @@ import { Highlighter, X } from 'lucide-react';
 import type { PersistedAnnotationRecord } from '../persistence/persistenceApi';
 
 type AnnotationManagerWorkspaceProps = {
+  title?: string;
   annotations: PersistedAnnotationRecord[];
   error: string | null;
   canOpenAnnotation(annotation: PersistedAnnotationRecord): boolean;
@@ -10,6 +11,7 @@ type AnnotationManagerWorkspaceProps = {
 };
 
 export function AnnotationManagerWorkspace({
+  title = '批注管理',
   annotations,
   error,
   canOpenAnnotation,
@@ -17,11 +19,11 @@ export function AnnotationManagerWorkspace({
   onOpenAnnotation,
 }: AnnotationManagerWorkspaceProps) {
   return (
-    <section className="tool-workspace" aria-label="批注管理工作区">
+    <section className="tool-workspace" aria-label={`${title}工作区`}>
       <header className="workspace-header">
         <div>
           <p>Annotations</p>
-          <h1>批注管理</h1>
+          <h1>{title}</h1>
         </div>
         <button type="button" aria-label="返回首页" onClick={onClose}>
           <X size={14} />
@@ -31,7 +33,7 @@ export function AnnotationManagerWorkspace({
         <section className="tool-panel">
           <div className="panel-title">
             <Highlighter size={18} />
-            <h2>全部批注</h2>
+            <h2>{title === '笔记管理' ? '全部笔记' : '全部批注'}</h2>
           </div>
           {error ? (
             <p className="muted-copy" role="status">

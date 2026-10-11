@@ -1,4 +1,8 @@
 import { FileText, Star } from 'lucide-react';
+import { useState } from 'react';
+import { useLibraryView, useResearch } from '../app/ResearchContext';
+import { PaperPreview } from '../library/PaperPreview';
+import { PaperMetadataEditor } from '../library/PaperMetadataEditor';
 import type { ReaderAnnotation } from '../annotations/annotationModels';
 import type {
   ViewerDocumentInfo,
@@ -44,7 +48,7 @@ type ReaderRightPanelProps = {
 };
 
 function sourceLabel(session: DocumentSession): string {
-  return session.source.kind === 'desktop-path' ? '本地文件' : '浏览器临时文件';
+  return session.source.kind === 'library' ? '本地文献库' : session.source.kind === 'desktop-path' ? '本地文件' : '浏览器临时文件';
 }
 
 export function ReaderRightPanel({
@@ -73,11 +77,20 @@ export function ReaderRightPanel({
   onSaveAnnotationNote,
   onToggleAnnotationTag,
 }: ReaderRightPanelProps) {
+  const research = useResearch();
+  const libraryView = useLibraryView(research?.library);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const paperId = activeSession?.source.kind === 'library' ? activeSession.source.paperId : null;
+  const paper = libraryView.papers.find((item) => item.id === paperId);
   const filePath = activeSession?.source.kind === 'desktop-path' ? activeSession.source.path : null;
 
   return (
     <aside className="reader-right-panel" aria-label="阅读检查器">
-      <section className="panel-section">
+      {paper && research ? <PaperPreview paper={paper} mode="pinned"
+        fieldUsage={libraryView.snapshot.preferences.fieldUsage}
+        onEdit={() => setEditingId(paper.id)} onOpenPage={onJumpToPage}
+        onToggleFavorite={() => research.library.updatePaper(paper.id, { favorite: !paper.favorite })}
+        onFieldView={(field) => research.library.recordFieldView(field)} /> : <section className="panel-section">
         <div className="panel-title">
           <FileText size={16} />
           <h2>文档信息</h2>
@@ -153,7 +166,9 @@ export function ReaderRightPanel({
           <Star size={14} fill={isFavorite ? 'currentColor' : 'none'} />
           {isFavorite ? '取消收藏' : '收藏文档'}
         </button>
-      </section>
+      </section>}
+      {paper && research && editingId === paper.id ? <PaperMetadataEditor key={paper.id} paper={paper}
+        onSave={(changes) => research.library.editMetadata(paper.id, changes)} onClose={() => setEditingId(null)} /> : null}
 
       <SearchInspector
         query={searchText}

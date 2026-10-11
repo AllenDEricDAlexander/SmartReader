@@ -6,7 +6,7 @@ type ReaderStatusBarProps = {
 
 export function ReaderStatusBar({ activeSession }: ReaderStatusBarProps) {
   const sourceLabel =
-    activeSession?.source.kind === 'desktop-path' ? '本地文件' : activeSession ? '浏览器文件' : '无文档';
+    activeSession?.source.kind === 'library' ? '本地文献库' : activeSession?.source.kind === 'desktop-path' ? '本地文件' : activeSession ? '浏览器文件' : '无文档';
   const pageLabel = activeSession
     ? `第 ${activeSession.page}${activeSession.totalPages ? ` / ${activeSession.totalPages}` : ''} 页`
     : '—';
@@ -19,7 +19,7 @@ export function ReaderStatusBar({ activeSession }: ReaderStatusBarProps) {
       <span>{progressLabel}</span>
       <span>{pageLabel}</span>
       <span>{zoomLabel}</span>
-      {activeSession?.source.kind === 'desktop-path' ? (
+      {activeSession?.source.kind === 'desktop-path' || activeSession?.source.kind === 'library' ? (
         <span className="status-ok">阅读进度已自动保存</span>
       ) : activeSession ? (
         <span>浏览器打开不跨重启恢复</span>

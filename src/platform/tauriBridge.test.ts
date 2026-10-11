@@ -69,6 +69,25 @@ describe('tauriBridge', () => {
     await expect(bridge.openNativePdf()).resolves.toBeNull();
   });
 
+  it('selects multiple PDF paths without eagerly loading their contents', async () => {
+    const open = vi.fn().mockResolvedValue(['/tmp/a.pdf', '/tmp/b.pdf']);
+    const invoke = vi.fn();
+    const bridge = createTauriBridge({ open, invoke });
+    await expect(bridge.selectNativePdfPaths?.()).resolves.toEqual(['/tmp/a.pdf', '/tmp/b.pdf']);
+    expect(open).toHaveBeenCalledWith({ multiple: true, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('enumerates a selected folder and treats cancellation as an empty selection', async () => {
+    const open = vi.fn().mockResolvedValueOnce('/tmp/papers').mockResolvedValueOnce(null);
+    const invoke = vi.fn().mockResolvedValue(['/tmp/papers/nested/a.pdf']);
+    const bridge = createTauriBridge({ open, invoke });
+    await expect(bridge.selectNativePdfFolder?.()).resolves.toEqual(['/tmp/papers/nested/a.pdf']);
+    expect(invoke).toHaveBeenCalledWith('list_desktop_pdfs', { directory: '/tmp/papers' });
+    await expect(bridge.selectNativePdfFolder?.()).resolves.toEqual([]);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
   it('reports native PDF opening as unavailable outside the Tauri runtime', () => {
     Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
 

@@ -516,7 +516,7 @@ export function HomeRecentFilesWorkspace({
         <strong data-testid="recent-workspace-document-name" title={document.displayName}>
           {document.displayName}
         </strong>
-        <span title={document.path ?? '本地浏览器文件'}>{getDirectoryPath(document.path)}</span>
+        <span title={document.path ?? (document.documentKey.startsWith('paper:') ? '本地文献库' : '本地浏览器文件')}>{getDirectoryPath(document.path, document.documentKey)}</span>
       </div>
     </div>
   );
@@ -586,8 +586,8 @@ export function HomeRecentFilesWorkspace({
                 />
               </td>
               <td>{renderFileMain(document)}</td>
-              <td className="path-cell" title={document.path ?? '本地浏览器文件'}>
-                {getDirectoryPath(document.path)}
+              <td className="path-cell" title={document.path ?? (document.documentKey.startsWith('paper:') ? '本地文献库' : '本地浏览器文件')}>
+                {getDirectoryPath(document.path, document.documentKey)}
               </td>
               <td>{formatDateTime(document.lastOpenedAt ?? document.modifiedAt)}</td>
               <td>

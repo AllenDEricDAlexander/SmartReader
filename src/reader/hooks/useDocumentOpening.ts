@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import { BlobUrlCache } from '../../cache/blobUrlCache';
 import { PdfByteCache } from '../../cache/pdfByteCache';
 import type { DocumentState } from '../../documents/documentModels';
@@ -17,6 +17,9 @@ import type {
 } from '../../persistence/persistenceApi';
 import type { TauriBridge } from '../../platform/tauriBridge';
 import type { ViewerSource } from '../../viewer/viewerTypes';
+import type { LibraryService } from '../../library/libraryService';
+import { errorMessage } from '../../library/libraryService';
+import { pushHardNavigation } from '../../documents/readingHistory';
 
 type UseDocumentOpeningInput = {
   blobUrlCache: BlobUrlCache;
@@ -27,6 +30,8 @@ type UseDocumentOpeningInput = {
   onDocumentSessionActivated(documentKey: string): void;
   pdfByteCache: PdfByteCache;
   persistence: PersistenceApi;
+  library?: LibraryService;
+  onError?(message: string): void;
   setDocuments: Dispatch<SetStateAction<DocumentState>>;
   setRecentDocuments: Dispatch<SetStateAction<PersistedDocument[]>>;
   setViewerSource: Dispatch<SetStateAction<ViewerSource | null>>;
@@ -35,6 +40,12 @@ type UseDocumentOpeningInput = {
 type OpenMetadata = {
   fileSize?: number | null;
   modifiedAt?: string | null;
+  page?: number;
+  zoom?: number;
+  pageCount?: number;
+  accessToken?: number;
+  navigate?: boolean;
+  tagIds?: number[];
 };
 
 export function useDocumentOpening({
@@ -46,45 +57,61 @@ export function useDocumentOpening({
   onDocumentSessionActivated,
   pdfByteCache,
   persistence,
+  library,
+  onError,
   setDocuments,
   setRecentDocuments,
   setViewerSource,
 }: UseDocumentOpeningInput) {
-  const openBytes = useCallback(
+  const sessionsRef = useRef(documents.sessions);
+  sessionsRef.current = documents.sessions;
+  const activateBytes = useCallback(
     (source: FileSource, bytes: Uint8Array, metadata: OpenMetadata = {}) => {
-      if (source.kind === 'desktop-path') {
+      if (source.kind === 'library' && !library?.canAccess(source.paperId, metadata.accessToken ?? -1)) return;
+      if (source.kind === 'desktop-path' || source.kind === 'library') {
         onDocumentOpened({
           documentKey: getDocumentKey(source),
-          path: source.path,
+          path: source.kind === 'desktop-path' ? source.path : null,
           displayName: getFileSourceName(source),
           fileSize: metadata.fileSize ?? null,
           modifiedAt: metadata.modifiedAt ?? null,
-          pageCount: null,
-          lastPage: 1,
+          pageCount: metadata.pageCount ?? null,
+          lastPage: metadata.page ?? 1,
           progress: 0,
           missing: false,
           lastOpenedAt: null,
-          tagIds: [],
+          tagIds: metadata.tagIds ?? [],
         });
       }
 
       setDocuments((current) => {
-        const next = addDocumentSession(current, source);
+        if (source.kind === 'library' && !library?.canAccess(source.paperId, metadata.accessToken ?? -1)) return current;
+        const wasOpen = current.sessions.some((session) => session.documentKey === getDocumentKey(source));
+        let next = addDocumentSession(current, source);
         const documentKey = getDocumentKey(source);
-        const session = next.sessions.find((candidate) => candidate.documentKey === documentKey);
+        let session = next.sessions.find((candidate) => candidate.documentKey === documentKey);
+
+        if (session && metadata.page !== undefined) {
+          session = { ...session, page: metadata.page, zoom: metadata.zoom ?? session.zoom,
+            totalPages: metadata.pageCount ?? session.totalPages,
+            history: metadata.navigate && wasOpen ? pushHardNavigation(session.history, metadata.page)
+              : { ...session.history, currentPage: metadata.page } };
+          next = { ...next, sessions: next.sessions.map((item) => item.documentKey === documentKey ? session! : item) };
+        }
 
         if (session) {
           pdfByteCache.set(documentKey, bytes);
           const url = blobUrlCache.createForSession(session.id, bytes);
           // Re-opening a document that is already in a tab keeps its position;
           // a genuinely new session simply carries page 1.
-          setViewerSource({
+          const viewer = {
             sessionId: session.id,
             url,
             restore: { page: session.page, zoom: session.zoom },
-          });
+          };
+          setViewerSource((previous) => source.kind !== 'library' || library?.canAccess(source.paperId, metadata.accessToken ?? -1) ? viewer : previous);
 
-          void loadDocumentDecorations(documentKey);
+          void loadDocumentDecorations(documentKey).catch((error) => onError?.(errorMessage(error)));
           onDocumentSessionActivated(documentKey);
         }
 
@@ -93,6 +120,8 @@ export function useDocumentOpening({
     },
     [
       blobUrlCache,
+      library,
+      onError,
       loadDocumentDecorations,
       onDocumentOpened,
       onDocumentSessionActivated,
@@ -102,10 +131,46 @@ export function useDocumentOpening({
     ],
   );
 
+  const openLibraryPaper = useCallback(async (id: string, page?: number) => {
+    if (!library) throw new Error('文献库仅在桌面客户端可用。');
+    await library.initialize();
+    const paper = library.getPaper(id);
+    if (!paper) throw new Error('请先解锁文献所在的文件夹。');
+    const token = library.captureAccess();
+    const bytes = await library.readPdf(id);
+    if (!library.canAccess(id, token)) throw new Error('文献已锁定，请重新打开。');
+    const existing = sessionsRef.current.find((session) => session.documentKey === `paper:${id}`);
+    const targetPage = Math.max(1, Math.min(page ?? existing?.page ?? paper.lastPage, paper.pageCount || Infinity));
+    await library.recordReading(id, 0, targetPage, existing?.zoom ?? paper.zoom);
+    if (!library.canAccess(id, token)) throw new Error('文献已锁定，请重新打开。');
+    activateBytes({ kind: 'library', paperId: id, name: paper.fileName }, bytes, {
+      fileSize: paper.fileSize, page: targetPage, zoom: existing?.zoom ?? paper.zoom,
+      pageCount: paper.pageCount, accessToken: token, navigate: page !== undefined,
+    });
+  }, [activateBytes, library]);
+
+  const openBytes = useCallback(async (source: FileSource, bytes: Uint8Array, metadata: OpenMetadata = {}) => {
+    if (library && source.kind !== 'library') {
+      if (source.kind === 'desktop-path') {
+        const key = getDocumentKey(source);
+        const existing = persistence.getDocument ? await persistence.getDocument(key)
+          : (await persistence.listRecentDocuments()).find((document) => document.documentKey === key);
+        if (existing) {
+          activateBytes(source, bytes, { ...metadata, page: existing.lastPage, pageCount: existing.pageCount ?? undefined, tagIds: existing.tagIds });
+          return;
+        }
+      }
+      const paper = await library.importPdf(bytes, getFileSourceName(source));
+      await openLibraryPaper(paper.id);
+    } else {
+      activateBytes(source, bytes, metadata);
+    }
+  }, [activateBytes, library, openLibraryPaper, persistence]);
+
   const openDesktopPath = useCallback(
     async (path: string) => {
       const opened = await bridge.readDesktopPdf(path);
-      openBytes(opened.source, opened.bytes, {
+      await openBytes(opened.source, opened.bytes, {
         fileSize: opened.fileSize,
         modifiedAt: opened.modifiedAt,
       });
@@ -114,23 +179,33 @@ export function useDocumentOpening({
   );
 
   const openPdf = useCallback(async () => {
-    const opened = await bridge.openNativePdf();
+    try {
+      const opened = await bridge.openNativePdf();
 
-    if (!opened) {
+      if (!opened) {
+        return false;
+      }
+
+      await openBytes(opened.source, opened.bytes, {
+        fileSize: opened.fileSize,
+        modifiedAt: opened.modifiedAt,
+      });
+      return true;
+    } catch (error) {
+      if (!library) throw error;
+      onError?.(errorMessage(error));
       return false;
     }
-
-    openBytes(opened.source, opened.bytes, {
-      fileSize: opened.fileSize,
-      modifiedAt: opened.modifiedAt,
-    });
-    return true;
-  }, [bridge, openBytes]);
+  }, [bridge, openBytes, onError, library]);
 
   const reopenDesktopSession = useCallback(
     async (sessionId: string) => {
       const session = documents.sessions.find((candidate) => candidate.id === sessionId);
 
+      if (session?.source.kind === 'library') {
+        try { await openLibraryPaper(session.source.paperId); } catch (error) { onError?.(errorMessage(error)); }
+        return;
+      }
       if (!session || session.source.kind !== 'desktop-path') {
         return;
       }
@@ -161,11 +236,15 @@ export function useDocumentOpening({
         );
       }
     },
-    [blobUrlCache, bridge, documents.sessions, pdfByteCache, setDocuments, setViewerSource],
+    [blobUrlCache, bridge, documents.sessions, openLibraryPaper, onError, pdfByteCache, setDocuments, setViewerSource],
   );
 
   const reopenRecentDocument = useCallback(
     async (document: PersistedDocument) => {
+      if (document.documentKey.startsWith('paper:')) {
+        try { await openLibraryPaper(document.documentKey.slice('paper:'.length)); return true; }
+        catch (error) { onError?.(errorMessage(error)); return false; }
+      }
       if (!document.path) {
         return false;
       }
@@ -182,7 +261,7 @@ export function useDocumentOpening({
         return false;
       }
     },
-    [openDesktopPath, setRecentDocuments],
+    [openDesktopPath, openLibraryPaper, onError, setRecentDocuments],
   );
 
   useEffect(() => {
@@ -190,9 +269,11 @@ export function useDocumentOpening({
     let disposeListener: (() => void) | null = null;
 
     listenForOpenWith((paths) => {
-      for (const path of paths) {
-        void openDesktopPath(path);
-      }
+      void (async () => {
+        for (const path of paths) {
+          try { await openDesktopPath(path); } catch (error) { onError?.(errorMessage(error)); }
+        }
+      })();
     }).then((dispose) => {
       if (disposed) {
         dispose();
@@ -205,46 +286,42 @@ export function useDocumentOpening({
       disposed = true;
       disposeListener?.();
     };
-  }, [openDesktopPath]);
+  }, [openDesktopPath, onError]);
 
   const handleDrop = useCallback(
     async (event: React.DragEvent<HTMLElement>) => {
       event.preventDefault();
-      const [file] = getPdfFilesFromDrop(event.dataTransfer.files);
-
-      if (!file) {
-        return;
+      for (const file of getPdfFilesFromDrop(event.dataTransfer.files)) {
+        try {
+          await openBytes(fileToBrowserSource(file), new Uint8Array(await file.arrayBuffer()), {
+            fileSize: file.size, modifiedAt: new Date(file.lastModified).toISOString(),
+          });
+        } catch (error) { onError?.(errorMessage(error)); }
       }
-
-      openBytes(fileToBrowserSource(file), new Uint8Array(await file.arrayBuffer()), {
-        fileSize: file.size,
-        modifiedAt: new Date(file.lastModified).toISOString(),
-      });
     },
-    [openBytes],
+    [openBytes, onError],
   );
 
   const handleBrowserFileChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const [file] = Array.from(event.target.files ?? []);
-
-      if (!file) {
-        return;
-      }
-
-      openBytes(fileToBrowserSource(file), new Uint8Array(await file.arrayBuffer()), {
-        fileSize: file.size,
-        modifiedAt: new Date(file.lastModified).toISOString(),
-      });
+      const files = Array.from(event.target.files ?? []);
       event.target.value = '';
+      for (const file of files) {
+        try {
+          await openBytes(fileToBrowserSource(file), new Uint8Array(await file.arrayBuffer()), {
+            fileSize: file.size, modifiedAt: new Date(file.lastModified).toISOString(),
+          });
+        } catch (error) { onError?.(errorMessage(error)); }
+      }
     },
-    [openBytes],
+    [openBytes, onError],
   );
 
   return {
     handleBrowserFileChange,
     handleDrop,
     openBytes,
+    openLibraryPaper,
     openDesktopPath,
     openPdf,
     reopenDesktopSession,

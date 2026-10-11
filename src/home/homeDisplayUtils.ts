@@ -1,6 +1,7 @@
 import type { PersistedDocument } from '../persistence/persistenceApi';
 
-export function getDirectoryPath(path: string | null): string {
+export function getDirectoryPath(path: string | null, documentKey?: string): string {
+  if (documentKey?.startsWith('paper:')) return '本地文献库';
   if (!path) {
     return '本地浏览器文件';
   }

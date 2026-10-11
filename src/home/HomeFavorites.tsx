@@ -47,7 +47,7 @@ export function HomeFavorites({
                   </span>
                   <span className="favorite-card-copy">
                     <strong title={document.displayName}>{document.displayName}</strong>
-                    <span title={document.path ?? '本地浏览器文件'}>
+                    <span title={document.path ?? (document.documentKey.startsWith('paper:') ? '本地文献库' : '本地浏览器文件')}>
                       {getDirectoryPath(document.path)}
                     </span>
                   </span>

@@ -57,7 +57,7 @@ export function mergeRecentDocuments(
 
 export function mapSessionsToPersistedTabs(sessions: DocumentSession[]): PersistedSessionTab[] {
   return sessions
-    .filter((session) => session.source.kind === 'desktop-path')
+    .filter((session) => session.source.kind === 'desktop-path' || session.source.kind === 'library')
     .map((session, tabOrder) => ({
       documentKey: session.documentKey,
       tabOrder,
@@ -68,5 +68,5 @@ export function mapSessionsToPersistedTabs(sessions: DocumentSession[]): Persist
 }
 
 export function countRestorablePersistedTabs(tabs: PersistedSessionTab[]): number {
-  return tabs.filter((tab) => tab.documentKey.startsWith('desktop:')).length;
+  return tabs.filter((tab) => tab.documentKey.startsWith('desktop:') || tab.documentKey.startsWith('paper:')).length;
 }

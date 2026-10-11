@@ -98,6 +98,11 @@ function extractMetadata(
   pages: IndexedPage[],
 ): PaperMetadata {
   const info = embedded.info as Record<string, unknown>;
+  // PDF.js exposes nonstandard Info dictionary entries under Custom, retaining
+  // the producer's original field casing rather than promoting them to info.
+  const customInfo = info.Custom && typeof info.Custom === 'object' && !Array.isArray(info.Custom)
+    ? new Map(Object.entries(info.Custom).map(([key, value]) => [key.toLowerCase(), value]))
+    : new Map<string, unknown>();
   const xmp = (key: string): unknown => embedded.metadata?.get(key);
   const openingText = pages.slice(0, 2).map((page) => page.text).join('\n');
   const metadata = emptyMetadata();
@@ -106,13 +111,14 @@ function extractMetadata(
   if (metadata.authors.length === 0) {
     metadata.authors = listValue(info.Author);
   }
-  metadata.journal = textValue(xmp('prism:publicationname')) || textValue(info.Journal) ||
+  metadata.journal = textValue(xmp('prism:publicationname')) || textValue(customInfo.get('journal')) || textValue(info.Journal) ||
     labelledLine(openingText, /(?:Journal|Publication|期刊|发表期刊)\s*[:：]\s*([^\n]+)/i);
   metadata.year = extractYear(textValue(xmp('prism:publicationdate')) || textValue(xmp('prism:coverdate')) || textValue(xmp('dc:date'))) ||
+    explicitPublicationYear(customInfo.get('publicationyear')) || explicitPublicationYear(customInfo.get('publicationdate')) ||
     extractYear(labelledLine(openingText, /(?:Published(?:\s+online)?|Publication\s+date|发表年份|发表时间|出版年份|出版时间)\s*[:：]?\s*([^\n]+)/i)) ||
     extractYear(openingText.match(/(?:©|Copyright(?:\s+\(c\))?)\s*((?:19|20)\d{2})/i)?.[1] ?? '');
   metadata.doi = extractDoi(textValue(xmp('prism:doi'))) || extractDoi(textValue(xmp('dc:identifier'))) ||
-    extractDoi(textValue(info.DOI)) || extractDoi(openingText);
+    extractDoi(textValue(customInfo.get('doi'))) || extractDoi(textValue(info.DOI)) || extractDoi(openingText);
   metadata.abstract = textValue(xmp('dc:description')) || extractAbstract(openingText);
   metadata.keywords = listValue(xmp('dc:subject'));
   if (metadata.keywords.length === 0) {
@@ -124,6 +130,7 @@ function extractMetadata(
   if (metadata.keywords.length === 0) {
     metadata.keywords = listValue(labelledLine(openingText, /(?:Keywords?|Key\s+words|Index\s+terms|关\s*键\s*词)[^\S\n]*(?:[:：—–-]\s*|\n\s*)([^\n]+)/i));
   }
+  metadata.researchTopics = subjectTopics(info.Subject);
   metadata.journalType = textValue(xmp('prism:aggregationtype'));
   return metadata;
 }
@@ -157,6 +164,20 @@ function labelledLine(text: string, label: RegExp): string {
 
 function extractYear(text: string): string {
   return text.match(/\b((?:18|19|20)\d{2})\b/)?.[1] ?? '';
+}
+
+function explicitPublicationYear(value: unknown): string {
+  const text = typeof value === 'number' && Number.isInteger(value) ? String(value) : textValue(value);
+  return text.match(/^D:((?:18|19|20)\d{2})/)?.[1] ?? extractYear(text);
+}
+
+function subjectTopics(value: unknown): string[] {
+  const subject = textValue(value);
+  if (!subject || subject.length > 100 || /[.!?。！？]/.test(subject) ||
+    /\babstract\b|摘\s*要|本文|本研究|结果表明|\bthis\s+(?:paper|study|research)\b|\bwe\s+(?:present|propose|investigate|study|show|compare|demonstrate|analy[sz]e)\b/i.test(subject)) {
+    return [];
+  }
+  return listValue(subject);
 }
 
 function extractDoi(text: string): string {

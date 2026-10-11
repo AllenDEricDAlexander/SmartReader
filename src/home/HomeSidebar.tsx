@@ -12,6 +12,7 @@ import {
   NotebookPen,
   Search,
   Star,
+  Sparkles,
   Tags,
   type LucideIcon,
 } from 'lucide-react';
@@ -28,6 +29,7 @@ type HomeSidebarPage =
   | 'fullTextSearch'
   | 'annotations'
   | 'bookmarks'
+  | 'ai'
   | 'compare';
 
 type HomeSidebarCounts = {
@@ -58,6 +60,7 @@ type HomeSidebarProps = {
   onOpenAnnotations(): void;
   onOpenBookmarks(): void;
   onOpenCompare(): void;
+  onOpenAi?(): void;
   onOpenCacheManagement(): void;
 };
 
@@ -150,6 +153,7 @@ export function HomeSidebar({
   onOpenAnnotations,
   onOpenBookmarks,
   onOpenCompare,
+  onOpenAi,
   onOpenCacheManagement,
 }: HomeSidebarProps) {
   const usagePercent = clampProgress(
@@ -215,6 +219,7 @@ export function HomeSidebar({
   ];
 
   const toolItems: SidebarItem[] = [
+    ...(onOpenAi ? [{ page: 'ai' as const, label: 'AI 科研助手', Icon: Sparkles, onClick: onOpenAi }] : []),
     {
       page: 'fullTextSearch',
       label: '全文搜索',

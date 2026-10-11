@@ -9,7 +9,7 @@ import {
 } from './libraryFolders';
 import {
   emptyLibrary, emptyMetadata, paperDocumentKey,
-  type AiSettings, type FolderVault, type LibraryPreferences, type LibrarySnapshot,
+  type AiSettings, type FolderVault, type LibraryPreferences, type LibraryReaderSession, type LibrarySnapshot,
   type MetadataField, type Paper, type PaperMetadata,
 } from './libraryModels';
 import { LibrarySearchIndex } from './librarySearch';
@@ -25,6 +25,7 @@ type LibraryTransaction = {
   snapshot: LibrarySnapshot;
   decrypted: Map<string, Paper>;
   blobs: LibraryFileWrite[];
+  indexChanged: boolean;
 };
 
 export type LibraryView = {
@@ -54,6 +55,9 @@ export class LibraryService {
   private indexedListeners = new Set<(paperId: string) => void>();
   private indexing = new Map<string, { promise: Promise<Paper>; controller: AbortController }>();
   private accessEpoch = 0;
+  private accessChanges = 0;
+  private pendingAccessIds = new Map<string, number>();
+  private maintenance = new Set<Promise<void>>();
   private searchIndex = new LibrarySearchIndex();
   private view: LibraryView = {
     loaded: false, error: null, snapshot: this.snapshot,
@@ -104,15 +108,15 @@ export class LibraryService {
   }
 
   async reload(): Promise<void> {
-    await this.exclusive(async () => {
-      this.invalidateAccess(this.snapshot.papers.map((paper) => paper.id));
+    const ids = this.snapshot.papers.map((paper) => paper.id);
+    await this.changeAccess(() => this.exclusive(async () => {
       this.notifyLocked(this.snapshot.papers.map((paper) => paper.id));
       this.keys.clear();
       this.decrypted.clear();
       this.loaded = false;
       this.publish();
       await this.initialize();
-    });
+    }), ids);
   }
 
   getPaper(id: string): Paper | undefined {
@@ -123,7 +127,18 @@ export class LibraryService {
   captureAccess(): number { return this.accessEpoch; }
 
   canAccess(id: string, token: number): boolean {
-    return token === this.accessEpoch && this.getPaper(id) !== undefined;
+    return token === this.accessEpoch && !this.pendingAccessIds.has(id) && this.getPaper(id) !== undefined;
+  }
+
+  /** Keeps credentials available until a multi-store operation and its compensation finish. */
+  async withStableAccess<T>(operation: () => Promise<T>): Promise<T> {
+    await this.initialize();
+    if (this.accessChanges) throw new Error('文献保护状态正在变化，请稍后重试。');
+    let release: () => void = () => undefined;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    this.maintenance.add(barrier);
+    try { return await operation(); }
+    finally { this.maintenance.delete(barrier); release(); }
   }
 
   search(query: string, options?: { limit?: number; paperIds?: string[] }) {
@@ -161,6 +176,7 @@ export class LibraryService {
         annotations: [], bookmarks: [], tagIds: [],
       };
       tx.snapshot.papers.push({ id, kind: 'plain', paper });
+      tx.indexChanged = true;
       tx.snapshot.memberships[id] = [];
       tx.blobs.push({ id, bytes: copy });
       if (options.folderId) await this.applyCategories(tx, [id], [options.folderId], 'add');
@@ -257,9 +273,22 @@ export class LibraryService {
     });
   }
 
-  async updatePaper(id: string, updates: PaperUpdates): Promise<void> {
+  async updatePaper(id: string, updates: PaperUpdates | ((paper: Paper) => PaperUpdates)): Promise<void> {
     await this.mutate(async (tx) => {
-      await this.putPaper(tx, { ...this.requirePaper(id, tx), ...updates });
+      const paper = this.requirePaper(id, tx);
+      await this.putPaper(tx, { ...paper, ...(typeof updates === 'function' ? updates(paper) : updates) });
+    });
+  }
+
+  async saveReaderSession(session: LibraryReaderSession): Promise<void> {
+    await this.mutate((tx) => {
+      const existingIds = new Set(tx.snapshot.papers.map((paper) => paper.id));
+      const openPaperIds = [...new Set(session.openPaperIds)].filter((id) => existingIds.has(id));
+      tx.snapshot.readerSession = {
+        openPaperIds,
+        activePaperId: session.activePaperId && openPaperIds.includes(session.activePaperId)
+          ? session.activePaperId : null,
+      };
     });
   }
 
@@ -272,18 +301,20 @@ export class LibraryService {
   }
 
   async deletePapers(ids: string[]): Promise<void> {
-    await this.mutate(async (tx) => {
-      for (const id of new Set(ids)) {
-        this.requirePaper(id, tx);
-        tx.snapshot.papers = tx.snapshot.papers.filter((item) => item.id !== id);
-        delete tx.snapshot.memberships[id];
-        delete tx.snapshot.automaticMemberships[id];
-        tx.decrypted.delete(id);
-        tx.blobs.push({ id, bytes: null });
-      }
-    });
-    this.invalidateAccess(ids);
-    this.notifyLocked(ids);
+    return this.changeAccess(async () => {
+      await this.mutate(async (tx) => {
+        for (const id of new Set(ids)) {
+          this.requirePaper(id, tx);
+          tx.snapshot.papers = tx.snapshot.papers.filter((item) => item.id !== id);
+          tx.indexChanged = true;
+          delete tx.snapshot.memberships[id];
+          delete tx.snapshot.automaticMemberships[id];
+          tx.decrypted.delete(id);
+          tx.blobs.push({ id, bytes: null });
+        }
+      });
+      this.notifyLocked(ids);
+    }, ids);
   }
 
   async recordReading(id: string, seconds: number, page: number, zoom: number): Promise<void> {
@@ -348,30 +379,32 @@ export class LibraryService {
   }
 
   async encryptFolder(folderId: string, password: string): Promise<FolderVault> {
-    const { key, salt } = await createVaultKey(password);
-    const vault: FolderVault = {
-      id: crypto.randomUUID(), folderId, salt,
-      verifier: await encryptJson(key, 'SmartReader library vault', `vault:${folderId}`),
-    };
-    await this.mutate(async (tx) => {
-      if (!tx.snapshot.folders.some((folder) => folder.id === folderId)) throw new Error('分类文件夹不存在。');
-      const affected = new Set([folderId, ...descendantFolderIds(tx.snapshot, folderId)]);
-      if (folderVaultId(tx.snapshot, folderId) || tx.snapshot.vaults.some((item) => affected.has(item.folderId))) {
-        throw new Error('文件夹已加密，或包含独立的加密子文件夹。');
-      }
-      const ids = tx.snapshot.papers.filter((record) =>
-        (tx.snapshot.memberships[record.id] ?? []).some((id) => affected.has(id)),
-      ).map((record) => record.id);
-      tx.snapshot.vaults.push(vault);
-      for (const id of ids) {
-        const record = tx.snapshot.papers.find((item) => item.id === id)!;
-        if (record.kind === 'encrypted') throw new Error('有文献已属于其他加密文件夹，请先解除原加密。');
-        await this.sealPaper(tx, this.requirePaper(id, tx), vault.id, key);
-      }
+    return this.changeAccess(async () => {
+      const { key, salt } = await createVaultKey(password);
+      const vault: FolderVault = {
+        id: crypto.randomUUID(), folderId, salt,
+        verifier: await encryptJson(key, 'SmartReader library vault', `vault:${folderId}`),
+      };
+      await this.mutate(async (tx) => {
+        if (!tx.snapshot.folders.some((folder) => folder.id === folderId)) throw new Error('分类文件夹不存在。');
+        const affected = new Set([folderId, ...descendantFolderIds(tx.snapshot, folderId)]);
+        if (folderVaultId(tx.snapshot, folderId) || tx.snapshot.vaults.some((item) => affected.has(item.folderId))) {
+          throw new Error('文件夹已加密，或包含独立的加密子文件夹。');
+        }
+        const ids = tx.snapshot.papers.filter((record) =>
+          (tx.snapshot.memberships[record.id] ?? []).some((id) => affected.has(id)),
+        ).map((record) => record.id);
+        tx.snapshot.vaults.push(vault);
+        for (const id of ids) {
+          const record = tx.snapshot.papers.find((item) => item.id === id)!;
+          if (record.kind === 'encrypted') throw new Error('有文献已属于其他加密文件夹，请先解除原加密。');
+          await this.sealPaper(tx, this.requirePaper(id, tx), vault.id, key);
+        }
+      });
+      this.keys.set(vault.id, key);
+      this.publish();
+      return vault;
     });
-    this.keys.set(vault.id, key);
-    this.publish();
-    return vault;
   }
 
   async unlockVault(vaultId: string, password: string): Promise<void> {
@@ -409,35 +442,35 @@ export class LibraryService {
   async lockVault(vaultId: string): Promise<void> {
     const ids = this.snapshot.papers.filter((record) => record.kind === 'encrypted' && record.vaultId === vaultId)
       .map((record) => record.id);
-    // Invalidate pending opens at request time, before awaiting the storage queue.
-    this.invalidateAccess(ids);
-    await this.exclusive(async () => {
+    await this.changeAccess(() => this.exclusive(async () => {
       this.keys.delete(vaultId);
       for (const id of ids) this.decrypted.delete(id);
       this.notifyLocked(ids);
       this.publish();
-    });
+    }), ids);
   }
 
   async decryptFolder(vaultId: string): Promise<void> {
-    await this.mutate(async (tx) => {
-      const key = this.keys.get(vaultId);
-      if (!key) throw new Error('请先解锁文件夹。');
-      for (const record of [...tx.snapshot.papers]) {
-        if (record.kind !== 'encrypted' || record.vaultId !== vaultId) continue;
-        const paper = this.requirePaper(record.id, tx);
-        const bytes = await this.storage.readFile(record.id);
-        tx.blobs.push({ id: record.id, bytes: await decryptFile(key, bytes, `pdf:${record.id}`) });
-        tx.snapshot.papers[tx.snapshot.papers.findIndex((item) => item.id === record.id)] = {
-          id: record.id, kind: 'plain', paper,
-        };
-        classifyPaper(tx.snapshot, paper);
-        tx.decrypted.delete(record.id);
-      }
-      tx.snapshot.vaults = tx.snapshot.vaults.filter((vault) => vault.id !== vaultId);
+    return this.changeAccess(async () => {
+      await this.mutate(async (tx) => {
+        const key = this.keys.get(vaultId);
+        if (!key) throw new Error('请先解锁文件夹。');
+        for (const record of [...tx.snapshot.papers]) {
+          if (record.kind !== 'encrypted' || record.vaultId !== vaultId) continue;
+          const paper = this.requirePaper(record.id, tx);
+          const bytes = await this.storage.readFile(record.id);
+          tx.blobs.push({ id: record.id, bytes: await decryptFile(key, bytes, `pdf:${record.id}`) });
+          tx.snapshot.papers[tx.snapshot.papers.findIndex((item) => item.id === record.id)] = {
+            id: record.id, kind: 'plain', paper,
+          };
+          classifyPaper(tx.snapshot, paper);
+          tx.decrypted.delete(record.id);
+        }
+        tx.snapshot.vaults = tx.snapshot.vaults.filter((vault) => vault.id !== vaultId);
+      });
+      this.keys.delete(vaultId);
+      this.publish();
     });
-    this.keys.delete(vaultId);
-    this.publish();
   }
 
   async savePreferences(updates: Partial<LibraryPreferences>): Promise<void> {
@@ -488,6 +521,8 @@ export class LibraryService {
   private async putPaper(tx: LibraryTransaction, paper: Paper) {
     const index = tx.snapshot.papers.findIndex((record) => record.id === paper.id);
     const record = tx.snapshot.papers[index];
+    const previous = record.kind === 'plain' ? record.paper : tx.decrypted.get(paper.id);
+    tx.indexChanged ||= previous?.metadata !== paper.metadata || previous?.pages !== paper.pages;
     const saved = { ...paper, updatedAt: new Date().toISOString() };
     if (record.kind === 'plain') tx.snapshot.papers[index] = { ...record, paper: saved };
     else {
@@ -521,7 +556,7 @@ export class LibraryService {
     return this.exclusive(async () => {
       await this.initialize();
       const tx: LibraryTransaction = {
-        snapshot: structuredClone(this.snapshot), decrypted: new Map(this.decrypted), blobs: [],
+        snapshot: structuredClone(this.snapshot), decrypted: new Map(this.decrypted), blobs: [], indexChanged: false,
       };
       const result = await operation(tx);
       tx.snapshot.updatedAt = new Date().toISOString();
@@ -529,7 +564,7 @@ export class LibraryService {
       this.revision = revision;
       this.snapshot = tx.snapshot;
       this.decrypted = tx.decrypted;
-      this.publish();
+      this.publish(null, tx.indexChanged);
       return result;
     });
   }
@@ -539,6 +574,23 @@ export class LibraryService {
     // A rejected operation is reported to its caller but must not poison later saves.
     this.queue = result.catch(() => undefined);
     return result;
+  }
+
+  private async changeAccess<T>(operation: () => Promise<T>, ids: string[] = []): Promise<T> {
+    this.accessChanges += 1;
+    if (ids.length) this.invalidateAccess(ids);
+    for (const id of ids) this.pendingAccessIds.set(id, (this.pendingAccessIds.get(id) ?? 0) + 1);
+    try {
+      await Promise.all(this.maintenance);
+      return await operation();
+    } finally {
+      this.accessChanges -= 1;
+      for (const id of ids) {
+        const remaining = (this.pendingAccessIds.get(id) ?? 1) - 1;
+        if (remaining) this.pendingAccessIds.set(id, remaining);
+        else this.pendingAccessIds.delete(id);
+      }
+    }
   }
 
   private notifyLocked(ids: string[]) {
@@ -553,12 +605,12 @@ export class LibraryService {
     }
   }
 
-  private publish(error: string | null = null) {
+  private publish(error: string | null = null, indexChanged = true) {
     const papers = this.snapshot.papers.flatMap((record) => {
       const paper = record.kind === 'plain' ? record.paper : this.decrypted.get(record.id);
       return paper ? [paper] : [];
     });
-    this.searchIndex.rebuild(papers);
+    if (indexChanged) this.searchIndex.rebuild(papers);
     this.view = {
       loaded: this.loaded, error, snapshot: this.snapshot, papers,
       lockedPaperIds: this.snapshot.papers.filter((record) => record.kind === 'encrypted' && !this.decrypted.has(record.id))

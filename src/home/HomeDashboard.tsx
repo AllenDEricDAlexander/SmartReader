@@ -5,6 +5,7 @@ import {
   type ChangeEventHandler,
   type DragEventHandler,
   type SetStateAction,
+  type ReactNode,
 } from 'react';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { BookmarkDashboard, PersistedDocument } from '../persistence/persistenceApi';
@@ -41,6 +42,9 @@ type HomeNoticeState = {
 };
 
 type HomeDashboardProps = {
+  workspaceContent?: ReactNode;
+  onImportFolder?(): void | Promise<void>;
+  onOpenAi?(): void;
   recentDocuments: PersistedDocument[];
   favoriteDocuments: FavoriteDocument[];
   bookmarkDashboard?: BookmarkDashboard | null;
@@ -102,6 +106,9 @@ type HomeDashboardProps = {
 };
 
 export function HomeDashboard({
+  workspaceContent,
+  onImportFolder,
+  onOpenAi,
   recentDocuments,
   favoriteDocuments,
   bookmarkDashboard = null,
@@ -257,7 +264,7 @@ export function HomeDashboard({
           onOpenPdf={handleOpenPdf}
           onDropPdf={onDropPdf}
           onRejectDrop={(message) => showNotice('无法打开文件', message)}
-          onOpenFolder={onOpenFolders}
+          onOpenFolder={onImportFolder ? () => void onImportFolder() : onOpenFolders}
         />
         <HomeRecentSessions
           documents={recentDocuments}
@@ -360,7 +367,7 @@ export function HomeDashboard({
   );
 
   const mainContent =
-    activeSidebarPage === 'recentFiles' ? (
+    workspaceContent ? <div className="home-content home-research-content">{workspaceContent}</div> : activeSidebarPage === 'recentFiles' ? (
       recentFilesContent
     ) : activeSidebarPage === 'favoriteFiles' ? (
       favoriteFilesContent
@@ -413,6 +420,7 @@ export function HomeDashboard({
           onOpenAnnotations={onOpenAnnotations}
           onOpenBookmarks={onOpenBookmarks}
           onOpenCompare={onOpenCompare}
+          onOpenAi={onOpenAi}
           onOpenCacheManagement={onOpenCacheManagement}
         />
         <div className="home-main">{mainContent}</div>

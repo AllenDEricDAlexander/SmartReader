@@ -11,8 +11,10 @@ import { BlobUrlCache } from '../cache/blobUrlCache';
 import { PdfByteCache } from '../cache/pdfByteCache';
 import {
   createEmptyDocumentState,
+  closeDocumentSession,
   markSessionError,
   updateSessionProgress,
+  recordHardNavigation,
 } from '../documents/documentSessionStore';
 import type { DocumentSession } from '../documents/documentModels';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
@@ -38,12 +40,20 @@ import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels
 import { useDocumentOpening } from '../reader/hooks/useDocumentOpening';
 import { useReaderCommands } from '../reader/hooks/useReaderCommands';
 import { useStableCallback } from '../reader/hooks/useStableCallback';
+import { useReadingTime } from '../reader/hooks/useReadingTime';
 import { useReaderDecorations } from '../reader/hooks/useReaderDecorations';
 import { useReaderNavigation } from '../reader/hooks/useReaderNavigation';
 import { useReaderPersistence } from '../reader/hooks/useReaderPersistence';
 import { useSessionRestore } from '../reader/hooks/useSessionRestore';
 import { ReaderTabs } from '../reader/ReaderTabs';
 import { GlobalSearchPanel } from '../search/GlobalSearchPanel';
+import { AiAssistant } from '../ai/AiAssistant';
+import { LibraryWorkspace } from '../library/LibraryWorkspace';
+import { paperToPersistedDocument } from '../library/libraryPersistence';
+import { paperIdFromDocumentKey } from '../library/libraryModels';
+import { errorMessage } from '../library/libraryService';
+import { AnnotationManagerWorkspace } from '../workspaces/AnnotationManagerWorkspace';
+import { SessionRestoreWorkspace } from '../workspaces/SessionRestoreWorkspace';
 import type { GlobalSearchResult } from '../search/globalSearch';
 import { ViewerController } from '../viewer/viewerController';
 import {
@@ -60,6 +70,7 @@ import {
 import type { AppWorkspace, ReaderAppProps } from './appTypes';
 import { ReaderViewerContent } from './ReaderViewerContent';
 import { ReaderWorkspaceSwitch } from './ReaderWorkspaceSwitch';
+import { useLibraryView, useResearch } from './ResearchContext';
 import {
   countRestorablePersistedTabs,
   mapSessionToPersistedDocument,
@@ -88,12 +99,19 @@ export function ReaderApp({
   viewerController,
   viewerRenderer,
 }: ReaderAppProps) {
+  const research = useResearch();
+  const libraryView = useLibraryView(research?.library);
+  const [appError, setAppError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState('');
+  const importingRef = useRef(false);
   const { bridge, persistence, sessionPersistence } = useReaderPersistence({
     bridge: providedBridge,
     persistence: providedPersistence,
   });
   const [documents, setDocuments] = useState(createEmptyDocumentState);
   const [viewerSource, setViewerSource] = useState<ViewerSource | null>(null);
+  const [viewerReadyIdentity, setViewerReadyIdentity] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [searchText, setSearchText] = useState('');
@@ -133,10 +151,32 @@ export function ReaderApp({
   const [globalSearchAnnotationError, setGlobalSearchAnnotationError] = useState<string | null>(
     null,
   );
-  const globalSearchBookmarks = useMemo(
-    () => flattenBookmarkDashboard(bookmarkDashboard),
-    [bookmarkDashboard],
-  );
+  const displayRecentDocuments = useMemo(() => research ? [
+    ...libraryView.papers.filter((paper) => !paper.recentHidden).map(paperToPersistedDocument),
+    ...recentDocuments.filter((document) => !document.documentKey.startsWith('paper:')),
+  ].sort((a, b) => (b.lastOpenedAt ?? '').localeCompare(a.lastOpenedAt ?? '')) : recentDocuments,
+  [libraryView.papers, recentDocuments, research]);
+  const displayFavoriteDocuments = useMemo(() => research ? [
+    ...libraryView.papers.filter((paper) => paper.favorite).map(paperToPersistedDocument),
+    ...favoriteDocuments.filter((document) => !document.documentKey.startsWith('paper:')),
+  ] : favoriteDocuments, [favoriteDocuments, libraryView.papers, research]);
+  const displayAnnotations = useMemo(() => research ? [
+    ...libraryView.papers.flatMap((paper) => paper.annotations.map((annotation) => ({ ...annotation,
+      documentDisplayName: paper.fileName, documentPath: null, documentMissing: false,
+    }))),
+    ...globalSearchAnnotations.filter((annotation) => !annotation.documentKey.startsWith('paper:')),
+  ] : globalSearchAnnotations, [globalSearchAnnotations, libraryView.papers, research]);
+  const displayBookmarkDashboard = useMemo(() => {
+    if (!research) return bookmarkDashboard;
+    const groups = [
+      ...(bookmarkDashboard?.groups ?? []).filter((group) => !group.document.documentKey.startsWith('paper:')),
+      ...libraryView.papers.filter((paper) => paper.bookmarks.length).map((paper) => ({
+        document: paperToPersistedDocument(paper), bookmarkCount: paper.bookmarks.length, bookmarks: paper.bookmarks,
+      })),
+    ];
+    return { groups, totalBookmarks: groups.reduce((total, group) => total + group.bookmarkCount, 0) };
+  }, [bookmarkDashboard, libraryView.papers, research]);
+  const globalSearchBookmarks = useMemo(() => flattenBookmarkDashboard(displayBookmarkDashboard), [displayBookmarkDashboard]);
   const [pendingGlobalSearchJump, setPendingGlobalSearchJump] = useState<{
     documentKey: string;
     page: number;
@@ -149,10 +189,7 @@ export function ReaderApp({
   const annotationRefreshRequestRef = useRef(0);
   const blobUrlCache = useMemo(() => new BlobUrlCache(), []);
   const pdfByteCache = useMemo(() => new PdfByteCache(), []);
-  const documentPersistence = useMemo(
-    () => createDebouncedFlush(persistence.saveDocument, 250),
-    [persistence],
-  );
+  const documentPersistence = useMemo(() => new Map<string, ReturnType<typeof createDebouncedFlush<PersistedDocument>>>(), [persistence]);
   const defaultViewerController = useMemo(() => new ViewerController(), []);
   const activeViewerController = viewerController ?? defaultViewerController;
   const bridgeViewerController =
@@ -160,10 +197,19 @@ export function ReaderApp({
       ? activeViewerController
       : defaultViewerController;
 
-  const activeSession =
-    documents.sessions.find((session) => session.id === documents.activeSessionId) ?? null;
+  const visibleLibraryIds = libraryView.papers.map((paper) => paper.id).join(',');
+  const displayDocuments = useMemo(() => {
+    if (!research) return documents;
+    const sessions = documents.sessions.filter((session) => session.source.kind !== 'library'
+      || research.library.getPaper(session.source.paperId) !== undefined);
+    return { ...documents, sessions, activeSessionId: sessions.some((session) => session.id === documents.activeSessionId) ? documents.activeSessionId : null };
+  }, [documents, research, visibleLibraryIds]);
+  const activeSession = displayDocuments.sessions.find((session) => session.id === displayDocuments.activeSessionId) ?? null;
   const activeWorkspace: AppWorkspace =
     workspaceOverride ?? (activeSession ? 'reader' : 'home');
+  useReadingTime({ library: research?.library, session: activeSession, active: activeWorkspace === 'reader',
+    ready: Boolean(viewerSource && viewerSource.sessionId === activeSession?.id
+      && viewerReadyIdentity === `${viewerSource.sessionId}:${viewerSource.url}`), onError: setAppError });
 
   const {
     annotationsByDocument,
@@ -174,6 +220,7 @@ export function ReaderApp({
     deleteAnnotationForDocument,
     importAnnotationsForDocument,
     loadDocumentDecorations,
+    forgetDocumentDecorations,
     saveAnnotationForActiveDocument,
     toggleAnnotationTagForDocument,
     updateAnnotationForDocument,
@@ -203,12 +250,13 @@ export function ReaderApp({
     [],
   );
 
-  useSessionRestore({
+  const { restoreSession } = useSessionRestore({
     bridge,
     blobUrlCache,
     loadDocumentDecorations,
     pdfByteCache,
     persistence,
+    library: research?.library,
     preferences: readerPreferences,
     preferencesLoaded,
     setDocuments,
@@ -216,6 +264,49 @@ export function ReaderApp({
     setSidebarOpen,
     setViewerSource,
   });
+
+  useEffect(() => {
+    if (!research) return;
+    void research.library.initialize().catch((error) => setAppError(errorMessage(error)));
+    return research.library.onLocked((ids) => {
+      const keys = new Set(ids.map((id) => `paper:${id}`));
+      sessionPersistence.cancel();
+      for (const key of keys) {
+        documentPersistence.get(key)?.cancel();
+        documentPersistence.delete(key);
+        pdfByteCache.delete(key);
+      }
+      forgetDocumentDecorations([...keys]);
+      setDocuments((current) => {
+        let next = current;
+        for (const session of current.sessions) {
+          if (keys.has(session.documentKey)) {
+            blobUrlCache.revokeForSession(session.id);
+            next = closeDocumentSession(next, session.id);
+          }
+        }
+        const active = next.sessions.find((session) => session.id === next.activeSessionId);
+        const url = active ? blobUrlCache.getForSession(active.id) : null;
+        setViewerSource(active && url ? { sessionId: active.id, url, restore: { page: active.page, zoom: active.zoom } } : null);
+        return next;
+      });
+      setRecentDocuments((items) => items.filter((item) => !keys.has(item.documentKey)));
+      setFavoriteDocuments((items) => items.filter((item) => !keys.has(item.documentKey)));
+      setGlobalSearchAnnotations((items) => items.filter((item) => !keys.has(item.documentKey)));
+      setBookmarkDashboard((current) => current ? {
+        groups: current.groups.filter((group) => !keys.has(group.document.documentKey)),
+        totalBookmarks: current.groups.filter((group) => !keys.has(group.document.documentKey)).reduce((sum, group) => sum + group.bookmarkCount, 0),
+      } : null);
+      setSearchState(emptySearchState);
+      setSearchText('');
+      setGlobalSearchQuery('');
+      setGlobalSearchOpen(false);
+      setSelectedAnnotationId(null);
+      setDocumentInfo(null);
+    });
+  }, [blobUrlCache, documentPersistence, forgetDocumentDecorations, pdfByteCache, research, sessionPersistence]);
+
+
 
   useEffect(() => {
     let cancelled = false;
@@ -288,7 +379,7 @@ export function ReaderApp({
   }, [activeSession?.documentKey]);
 
   useEffect(() => {
-    const hasSessions = documents.sessions.length > 0;
+    const hasSessions = displayDocuments.sessions.length > 0;
 
     if (!hasSessions && !hadReaderSessionsRef.current) {
       return;
@@ -298,7 +389,7 @@ export function ReaderApp({
       hadReaderSessionsRef.current = true;
     }
 
-    const persistedTabs = mapSessionsToPersistedTabs(documents.sessions);
+    const persistedTabs = mapSessionsToPersistedTabs(displayDocuments.sessions);
     setSessionRestoreCount(persistedTabs.length);
 
     sessionPersistence.schedule({
@@ -306,25 +397,26 @@ export function ReaderApp({
       sidebarOpen,
       tabs: persistedTabs,
     });
-  }, [documents, activeSession, sidebarOpen, sessionPersistence]);
+  }, [displayDocuments, activeSession, sidebarOpen, sessionPersistence]);
 
   useEffect(() => {
     const flushBeforeUnload = () => {
       void sessionPersistence.flushNow();
+      for (const writer of documentPersistence.values()) void writer.flushNow();
     };
 
     window.addEventListener('beforeunload', flushBeforeUnload);
     return () => {
       window.removeEventListener('beforeunload', flushBeforeUnload);
       sessionPersistence.cancel();
-      documentPersistence.cancel();
+      for (const writer of documentPersistence.values()) writer.cancel();
     };
   }, [documentPersistence, sessionPersistence]);
 
   const syncRecentDocumentImmediately = useCallback(
     (document: PersistedDocument) => {
       setRecentDocuments((current) => upsertRecentDocument(current, document));
-      void persistence.saveDocument(document);
+      void Promise.resolve(persistence.saveDocument(document)).catch((error) => setAppError(errorMessage(error)));
     },
     [persistence],
   );
@@ -332,9 +424,15 @@ export function ReaderApp({
   const syncRecentDocumentProgress = useCallback(
     (document: PersistedDocument) => {
       setRecentDocuments((current) => upsertRecentDocument(current, document));
-      documentPersistence.schedule(document);
+      let writer = documentPersistence.get(document.documentKey);
+      if (!writer) {
+        writer = createDebouncedFlush((record: PersistedDocument) => Promise.resolve(persistence.saveDocument(record))
+          .catch((error) => setAppError(errorMessage(error))), 250);
+        documentPersistence.set(document.documentKey, writer);
+      }
+      writer.schedule(document);
     },
-    [documentPersistence],
+    [documentPersistence, persistence],
   );
 
   const handleDocumentOpened = useCallback(
@@ -353,6 +451,7 @@ export function ReaderApp({
     handleBrowserFileChange,
     handleDrop,
     openPdf,
+    openLibraryPaper,
     reopenDesktopSession,
     reopenRecentDocument,
   } = useDocumentOpening({
@@ -364,10 +463,83 @@ export function ReaderApp({
     onDocumentSessionActivated: handleDocumentSessionActivated,
     pdfByteCache,
     persistence,
+    library: research?.library,
+    onError: setAppError,
     setDocuments,
     setRecentDocuments,
     setViewerSource,
   });
+
+  const importPdfs = useCallback(async (folderId?: string, chooseDirectory = false) => {
+    if (!research || importingRef.current) return;
+    importingRef.current = true;
+    setImporting(true);
+    setImportProgress('请选择要导入的 PDF…');
+    try {
+      const paths = chooseDirectory ? await bridge.selectNativePdfFolder?.() : await bridge.selectNativePdfPaths?.();
+      let imported = 0;
+      const failures: string[] = [];
+      if (paths) {
+        for (let index = 0; index < paths.length; index += 1) {
+          setImportProgress(`正在导入并建立索引 ${index + 1} / ${paths.length}`);
+          try {
+            const opened = await bridge.readDesktopPdf(paths[index]);
+            await research.library.importPdf(opened.bytes, opened.source.name, { folderId });
+            imported += 1;
+          } catch (error) { failures.push(errorMessage(error)); }
+        }
+      } else {
+        const opened = await bridge.openNativePdf();
+        if (opened) {
+          await research.library.importPdf(opened.bytes, opened.source.name, { folderId });
+          imported = 1;
+        }
+      }
+      setImportProgress(imported ? `已导入 ${imported} 份 PDF，相同内容会自动合并。${failures.length ? ` ${failures.length} 份失败。` : ''}`
+        : chooseDirectory && paths?.length === 0 ? '所选文件夹没有 PDF，或已取消选择。' : '未导入文件。');
+      if (failures.length) setAppError(`部分文件导入失败：${[...new Set(failures)].join('；')}`);
+      if (imported && homeSidebarPage === 'home') setHomeSidebarPage('myDocuments');
+    } catch (error) {
+      setAppError(errorMessage(error));
+      setImportProgress('导入失败，可重新选择文件。');
+    } finally {
+      importingRef.current = false;
+      setImporting(false);
+    }
+  }, [bridge, homeSidebarPage, research]);
+
+  const openResearchPaper = useCallback(async (id: string, page?: number) => {
+    try {
+      const access = research?.library.captureAccess();
+      if (access === undefined || !research?.library.canAccess(id, access)) throw new Error('请先解锁文献所在的文件夹。');
+      const existing = documents.sessions.find((session) => session.documentKey === `paper:${id}`);
+      const url = existing ? blobUrlCache.getForSession(existing.id) : null;
+      if (existing && url) {
+        setDocuments((current) => {
+          if (!research.library.canAccess(id, access) || !current.sessions.some((session) => session.id === existing.id)) return current;
+          const next = page === undefined ? current : recordHardNavigation(current, existing.id, page);
+          const session = next.sessions.find((candidate) => candidate.id === existing.id)!;
+          setViewerSource({ sessionId: session.id, url, restore: { page: session.page, zoom: session.zoom } });
+          return { ...next, activeSessionId: existing.id };
+        });
+        if (activeWorkspace === 'reader' && activeSession?.id === existing.id && page !== undefined) activeViewerController.jumpToPage(page);
+        setWorkspaceOverride(null);
+        setWorkspaceReturnTarget(null);
+      } else {
+        await openLibraryPaper(id, page);
+      }
+    }
+    catch (error) { setAppError(errorMessage(error)); }
+  }, [activeSession?.id, activeViewerController, activeWorkspace, blobUrlCache, documents.sessions, openLibraryPaper, research]);
+
+  useEffect(() => {
+    const showUnhandled = (event: PromiseRejectionEvent) => {
+      event.preventDefault();
+      setAppError(errorMessage(event.reason));
+    };
+    window.addEventListener('unhandledrejection', showUnhandled);
+    return () => window.removeEventListener('unhandledrejection', showUnhandled);
+  }, []);
 
   const {
     closeActiveTab,
@@ -597,15 +769,17 @@ export function ReaderApp({
 
   // Falling back to a fresh `[]` gave these a new identity on every render,
   // which defeated memoisation all the way down into the viewer.
-  const activeBookmarks = activeSession
+  const managedActivePaper = activeSession?.source.kind === 'library'
+    ? libraryView.papers.find((paper) => `paper:${paper.id}` === activeSession.documentKey) : undefined;
+  const activeBookmarks = managedActivePaper?.bookmarks ?? (activeSession
     ? (bookmarksByDocument[activeSession.documentKey] ?? emptyBookmarks)
-    : emptyBookmarks;
-  const activeAnnotations = activeSession
+    : emptyBookmarks);
+  const activeAnnotations = managedActivePaper?.annotations ?? (activeSession
     ? (annotationsByDocument[activeSession.documentKey] ?? emptyAnnotations)
-    : emptyAnnotations;
+    : emptyAnnotations);
   const favoriteDocumentKeys = useMemo(
-    () => new Set(favoriteDocuments.map((document) => document.documentKey)),
-    [favoriteDocuments],
+    () => new Set(displayFavoriteDocuments.map((document) => document.documentKey)),
+    [displayFavoriteDocuments],
   );
   const activeSessionIsFavorite = activeSession
     ? favoriteDocumentKeys.has(activeSession.documentKey)
@@ -794,6 +968,12 @@ export function ReaderApp({
     async (result: GlobalSearchResult) => {
       setGlobalSearchOpen(false);
 
+      const paperId = result.documentKey ? paperIdFromDocumentKey(result.documentKey) : null;
+      if (research && paperId && result.source !== 'fullText') {
+        await openResearchPaper(paperId, result.page ?? undefined);
+        return;
+      }
+
       if (result.source === 'fullText' && result.query) {
         setWorkspaceOverride(null);
         setSearchText(result.query);
@@ -843,6 +1023,8 @@ export function ReaderApp({
       recentDocuments,
       reopenRecentDocument,
       runSearch,
+      research,
+      openResearchPaper,
     ],
   );
 
@@ -861,17 +1043,26 @@ export function ReaderApp({
         return false;
       }
 
+      const paperId = paperIdFromDocumentKey(documentKey);
+      if (research && paperId) return Boolean(research.library.getPaper(paperId));
+
       return (
         activeSession?.documentKey === documentKey ||
         Boolean(findRecentDocumentForRecord(documentKey, path))
       );
     },
-    [activeSession, findRecentDocumentForRecord],
+    [activeSession, findRecentDocumentForRecord, research, libraryView.papers],
   );
 
   const openRecordPage = useCallback(
     async (documentKey: string, path: string | null, page: number, missing: boolean) => {
       if (missing) {
+        return;
+      }
+
+      const paperId = paperIdFromDocumentKey(documentKey);
+      if (research && paperId) {
+        await openResearchPaper(paperId, page);
         return;
       }
 
@@ -898,7 +1089,7 @@ export function ReaderApp({
       setWorkspaceOverride(null);
       setPendingGlobalSearchJump({ documentKey, page });
     },
-    [activeSession, findRecentDocumentForRecord, jumpToActiveDocumentPage, reopenRecentDocument],
+    [activeSession, findRecentDocumentForRecord, jumpToActiveDocumentPage, reopenRecentDocument, research, openResearchPaper],
   );
 
   const openCompareDocument = useCallback(
@@ -916,6 +1107,11 @@ export function ReaderApp({
 
   const openFavoriteDocument = useCallback(
     async (document: FavoriteDocument) => {
+      const paperId = paperIdFromDocumentKey(document.documentKey);
+      if (research && paperId) {
+        try { await openLibraryPaper(paperId); return true; }
+        catch (error) { setAppError(errorMessage(error)); return false; }
+      }
       const recentDocument =
         recentDocuments.find(
           (candidate) =>
@@ -935,7 +1131,7 @@ export function ReaderApp({
 
       return opened;
     },
-    [recentDocuments, reopenRecentDocument],
+    [recentDocuments, reopenRecentDocument, research, openLibraryPaper],
   );
 
   const openImportPdf = useCallback(async () => {
@@ -1020,6 +1216,8 @@ export function ReaderApp({
   });
 
   const handleViewerProgress = useStableCallback((progress: ViewerProgress) => {
+    if (progress.sessionId !== viewerSource?.sessionId) return;
+    if (progress.totalPages !== null) setViewerReadyIdentity(`${viewerSource.sessionId}:${viewerSource.url}`);
     setDocuments((current) => {
       const next = updateSessionProgress(current, progress.sessionId, {
         page: progress.page,
@@ -1028,7 +1226,7 @@ export function ReaderApp({
       });
       const updatedSession = next.sessions.find((session) => session.id === progress.sessionId);
 
-      if (updatedSession?.source.kind === 'desktop-path') {
+      if (updatedSession?.source.kind === 'desktop-path' || updatedSession?.source.kind === 'library') {
         const existingRecentDocument = recentDocuments.find(
           (document) => document.documentKey === updatedSession.documentKey,
         );
@@ -1042,6 +1240,8 @@ export function ReaderApp({
   });
 
   const handleViewerLoadError = useStableCallback((error: ViewerLoadError) => {
+    if (!activeSession || activeSession.id !== viewerSource?.sessionId) return;
+    setViewerReadyIdentity(null);
     setDocuments((current) =>
       activeSession ? markSessionError(current, activeSession.id, error.message) : current,
     );
@@ -1052,6 +1252,7 @@ export function ReaderApp({
   });
 
   const handleDocumentInfo = useStableCallback((info: ViewerDocumentInfo) => {
+    if (info.sessionId !== activeSession?.id || info.sessionId !== viewerSource?.sessionId) return;
     setDocumentInfo(info);
   });
 
@@ -1090,6 +1291,27 @@ export function ReaderApp({
     ],
   );
 
+  const librarySearchResults = useMemo<GlobalSearchResult[]>(() => research
+    ? research.library.search(globalSearchQuery, { limit: 12 }).map((hit) => ({
+      id: `library:${hit.paperId}:${hit.page}`, source: 'library',
+      title: research.library.getPaper(hit.paperId)?.metadata.title ?? '文献',
+      subtitle: `第 ${hit.page} 页 · ${hit.snippet}`, actionLabel: '打开文献',
+      documentKey: `paper:${hit.paperId}`, path: null, page: hit.page,
+    })) : [], [globalSearchQuery, libraryView.papers, research]);
+  const libraryWorkspace = research ? <LibraryWorkspace library={research.library} ai={research.ai}
+    onOpenPaper={openResearchPaper} onImport={importPdfs} onOpenAiSettings={() => openSettingsWorkspace('ai')}
+    importing={importing} importProgress={importProgress} initialFolderView={homeSidebarPage === 'folders'} /> : null;
+  const workspaceContent = research && (homeSidebarPage === 'myDocuments' || homeSidebarPage === 'folders') ? libraryWorkspace
+    : research && homeSidebarPage === 'ai' ? <AiAssistant library={research.library} ai={research.ai}
+      onOpenPaper={openResearchPaper} onOpenSettings={() => openSettingsWorkspace('ai')} />
+    : research && homeSidebarPage === 'notes' ? <AnnotationManagerWorkspace title="笔记管理"
+      annotations={displayAnnotations.filter((annotation) => annotation.type === 'note')}
+      error={globalSearchAnnotationError} canOpenAnnotation={(annotation) => canOpenRecordPage(annotation.documentKey, annotation.documentPath, annotation.documentMissing)}
+      onClose={openHomeWorkspace} onOpenAnnotation={(annotation) => void openRecordPage(annotation.documentKey, annotation.documentPath, annotation.page, annotation.documentMissing)} />
+    : research && homeSidebarPage === 'sessionRestore' ? <SessionRestoreWorkspace sessions={displayDocuments.sessions}
+      documents={displayRecentDocuments} onSelectSession={openReaderSession} onOpenDocument={reopenRecentDocument}
+      onRestore={() => restoreSession(undefined, true)} /> : null;
+
   return (
     <main
       className={`app-shell ${activeWorkspace}-mode`}
@@ -1097,10 +1319,14 @@ export function ReaderApp({
       onDragOver={handleWorkbenchDragOver}
       onDrop={handleWorkbenchDrop}
     >
+      {appError || libraryView.error ? <div className="app-operation-error" role="alert">
+        <span>{appError ?? libraryView.error}</span>
+        <button type="button" aria-label="关闭提示" onClick={() => setAppError(null)}>关闭</button>
+      </div> : null}
       {activeWorkspace === 'home' || activeWorkspace === 'reader' ? (
         <ReaderTabs
-          sessions={documents.sessions}
-          activeSessionId={documents.activeSessionId}
+          sessions={displayDocuments.sessions}
+          activeSessionId={displayDocuments.activeSessionId}
           homeActive={activeWorkspace === 'home'}
           canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
           onOpenHome={openHomeWorkspace}
@@ -1111,6 +1337,13 @@ export function ReaderApp({
         />
       ) : null}
       <ReaderWorkspaceSwitch
+        workspaceContent={workspaceContent}
+        importContent={research ? <section className="research-import-workspace">
+          <header className="workspace-header"><h1>导入文献</h1><button type="button" onClick={closeToolWorkspace}>返回</button></header>
+          {libraryWorkspace}
+        </section> : undefined}
+        onImportFolder={research ? () => importPdfs(undefined, true) : undefined}
+        importing={importing}
         activeAnnotations={activeAnnotations}
         activeBookmarks={activeBookmarks}
         activeSession={activeSession}
@@ -1122,18 +1355,18 @@ export function ReaderApp({
         availableTags={availableTags}
         cacheStats={cacheStats}
         commandRegistry={commandRegistry}
-        documents={documents}
-        favoriteDocuments={favoriteDocuments}
+        documents={displayDocuments}
+        favoriteDocuments={displayFavoriteDocuments}
         globalSearchAnnotationError={globalSearchAnnotationError}
-        globalSearchAnnotations={globalSearchAnnotations}
-        bookmarkDashboard={bookmarkDashboard}
+        globalSearchAnnotations={displayAnnotations}
+        bookmarkDashboard={displayBookmarkDashboard}
         bookmarkDashboardError={bookmarkDashboardError}
         bookmarkDashboardLoading={bookmarkDashboardLoading}
         lastSearchCommand={lastSearchCommand}
         pageInput={pageInput}
         persistence={persistence}
         readerPreferences={readerPreferences}
-        recentDocuments={recentDocuments}
+        recentDocuments={displayRecentDocuments}
         searchState={searchState}
         searchOptions={searchOptions}
         documentInfo={documentInfo}
@@ -1167,7 +1400,7 @@ export function ReaderApp({
         handleRemoveRecentDocuments={handleRemoveRecentDocuments}
         handleClearRecentDocuments={handleClearRecentDocuments}
         handleViewerWheel={handleViewerWheel}
-        importAnnotationsForDocument={importAnnotationsForDocument}
+        importAnnotationsForDocument={(key, json) => importAnnotationsForDocument(key, json).catch((error) => setAppError(errorMessage(error)))}
         jumpToActiveDocumentPage={jumpToActiveDocumentPage}
         jumpToPage={jumpToPage}
         jumpToSearchMatch={jumpToSearchMatch}
@@ -1199,12 +1432,13 @@ export function ReaderApp({
         updateManagedBookmark={updateManagedBookmark}
       />
       <GlobalSearchPanel
+        libraryResults={librarySearchResults}
         open={globalSearchOpen}
         query={globalSearchQuery}
-        recentDocuments={recentDocuments}
-        favoriteDocuments={favoriteDocuments}
+        recentDocuments={displayRecentDocuments}
+        favoriteDocuments={displayFavoriteDocuments}
         bookmarks={globalSearchBookmarks}
-        annotations={globalSearchAnnotations}
+        annotations={displayAnnotations}
         bookmarkError={bookmarkDashboardError}
         annotationError={globalSearchAnnotationError}
         activeSession={

@@ -483,6 +483,42 @@ pub fn save_document(
 }
 
 #[tauri::command]
+pub fn get_document(
+    state: State<'_, DatabaseState>,
+    document_key: String,
+) -> Result<Option<PersistedDocument>, DbError> {
+    let connection = state.connection.lock().expect("database mutex poisoned");
+    get_document_tx(&connection, &document_key)
+}
+
+pub fn get_document_tx(
+    connection: &Connection,
+    document_key: &str,
+) -> Result<Option<PersistedDocument>, DbError> {
+    let mut statement = connection.prepare(
+        "SELECT path, display_name, file_size, modified_at, page_count, last_page,
+                progress, missing, last_opened_at FROM documents WHERE document_key = ?1",
+    )?;
+    let mut rows = statement.query([document_key])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    Ok(Some(PersistedDocument {
+        document_key: document_key.to_string(),
+        path: row.get(0)?,
+        display_name: row.get(1)?,
+        file_size: row.get(2)?,
+        modified_at: row.get(3)?,
+        page_count: row.get(4)?,
+        last_page: row.get(5)?,
+        progress: row.get(6)?,
+        missing: row.get::<_, i64>(7)? == 1,
+        last_opened_at: row.get(8)?,
+        tag_ids: list_document_tag_ids_tx(connection, document_key)?,
+    }))
+}
+
+#[tauri::command]
 pub fn list_recent_documents(
     state: State<'_, DatabaseState>,
 ) -> Result<Vec<PersistedDocument>, DbError> {
@@ -2352,6 +2388,27 @@ mod tests {
         assert_eq!(documents[0].display_name, document.display_name);
         assert!(documents[0].last_opened_at.is_some());
         assert!(documents[0].tag_ids.is_empty());
+    }
+
+    #[test]
+    fn finds_existing_documents_even_when_hidden_from_recent_files() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        apply_migrations(&connection).expect("schema applies");
+        let mut document = test_document("desktop:/tmp/older.pdf", "older.pdf");
+        document.last_page = 7;
+        document.page_count = Some(20);
+        upsert_document(&connection, &document).expect("save older record");
+        remove_recent_document_tx(&connection, &document.document_key).expect("hide recent record");
+        assert!(list_documents(&connection).expect("recent list").is_empty());
+        let found = get_document_tx(&connection, &document.document_key)
+            .expect("lookup")
+            .expect("existing record");
+        assert_eq!(found.document_key, document.document_key);
+        assert_eq!(found.last_page, 7);
+        assert_eq!(found.page_count, Some(20));
+        assert!(get_document_tx(&connection, "desktop:/tmp/unknown.pdf")
+            .expect("unknown lookup")
+            .is_none());
     }
 
     fn test_document(key: &str, name: &str) -> PersistedDocument {

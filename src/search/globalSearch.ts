@@ -5,7 +5,7 @@ import type {
 } from '../persistence/persistenceApi';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 
-export type GlobalSearchSource = 'file' | 'bookmark' | 'annotation' | 'fullText';
+export type GlobalSearchSource = 'file' | 'bookmark' | 'annotation' | 'fullText' | 'library';
 
 export type GlobalSearchActiveSession = {
   documentKey: string;
@@ -107,7 +107,7 @@ function buildFileResults(
       id: `file:${document.documentKey}`,
       source: 'file',
       title: document.displayName,
-      subtitle: document.path ?? '浏览器选择的本地文件',
+      subtitle: document.path ?? (document.documentKey.startsWith('paper:') ? '本地文献库' : '浏览器选择的本地文件'),
       actionLabel: document.missing ? '文件缺失' : '打开文件',
       documentKey: document.documentKey,
       path: document.path,

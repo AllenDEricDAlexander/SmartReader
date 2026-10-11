@@ -84,6 +84,34 @@ button:disabled,
   background: var(--sr-bg);
 }
 
+.app-operation-error {
+  position: fixed;
+  top: 44px;
+  right: 18px;
+  z-index: 1800;
+  max-width: min(660px, 85vw);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid #fecaca;
+  border-radius: 9px;
+  background: #fff7f7;
+  color: #b91c1c;
+  box-shadow: 0 8px 24px #0f172a12;
+  font-size: 13px;
+}
+
+.app-operation-error span { overflow-wrap: anywhere; }
+.app-operation-error button { flex-shrink: 0; padding: 0 10px; }
+.home-content.home-research-content { display: block; grid-row: 1 / -1; height: 100%; padding: 0; min-height: 0; overflow: hidden; }
+.research-import-workspace { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+.research-import-workspace > .workspace-header { padding: 12px 20px; }
+.research-session-workspace { height: 100%; overflow: auto; padding: 20px; border-radius: 0; }
+.research-session-workspace h2 { font-size: 15px; margin-top: 24px; }
+.reader-right-panel > .paper-preview { height: auto; max-height: none; min-height: 0; flex-shrink: 0; }
+.reader-right-panel > .paper-preview .paper-preview-body { overflow: visible; }
+
 .home-mode {
   display: grid;
   grid-template-rows: 38px minmax(0, 1fr);

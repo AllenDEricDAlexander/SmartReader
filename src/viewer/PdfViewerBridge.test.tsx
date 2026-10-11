@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PdfViewerBridge, type PdfRenderer } from './PdfViewerBridge';
 import { ViewerController } from './viewerController';
+import { emptySearchState } from './viewerTypes';
 
 const pdfViewerCoreMock = vi.hoisted(() => ({
   mode: 'ready' as 'ready' | 'error' | 'password',
@@ -120,6 +121,60 @@ vi.mock('@react-pdf-viewer/highlight', async () => {
 });
 
 describe('PdfViewerBridge', () => {
+  it('ignores renderer callbacks from a replaced URL even when the session id is reused', () => {
+    let old!: Parameters<PdfRenderer>[0];
+    const renderer: PdfRenderer = (props) => {
+      if (props.fileUrl === 'blob:private') old = props;
+      return <div>{props.fileUrl}</div>;
+    };
+    const onProgressChange = vi.fn();
+    const onLoadError = vi.fn();
+    const onSearchStateChange = vi.fn();
+    const onHighlightSelection = vi.fn();
+    const callbacks = { onProgressChange, onLoadError, onSearchStateChange, onHighlightSelection };
+    const { rerender } = render(<PdfViewerBridge source={{ sessionId: 'same', url: 'blob:private' }} renderer={renderer} {...callbacks} />);
+    rerender(<PdfViewerBridge source={{ sessionId: 'same', url: 'blob:reopened' }} renderer={renderer} {...callbacks} />);
+    act(() => {
+      old.onPageChange(9, 10);
+      old.onSearchStateChange?.({ ...emptySearchState, keyword: 'private excerpt' });
+      old.onLoadError?.({ status: 'error', message: 'old failure' });
+      old.onHighlightSelection?.({ page: 1, selectedText: 'private excerpt', areas: [], kind: 'note', color: '#fff' });
+    });
+    expect(onProgressChange).not.toHaveBeenCalled();
+    expect(onLoadError).not.toHaveBeenCalled();
+    expect(onSearchStateChange).not.toHaveBeenCalled();
+    expect(onHighlightSelection).not.toHaveBeenCalled();
+    expect(screen.getByText('blob:reopened')).toBeInTheDocument();
+  });
+
+  it('does not publish late metadata from a previous document', async () => {
+    let finish!: (value: { info: { Title: string } }) => void;
+    const metadata = new Promise<{ info: { Title: string } }>((resolve) => { finish = resolve; });
+    const onDocumentInfo = vi.fn();
+    const props = { onProgressChange: vi.fn(), onDocumentInfo };
+    const { rerender } = render(<PdfViewerBridge source={{ sessionId: 'a', url: 'blob:a' }} {...props} />);
+    const load = pdfViewerCoreMock.lastViewerProps?.onDocumentLoad as (event: { doc: { numPages: number; getMetadata(): Promise<unknown> } }) => void;
+    act(() => load({ doc: { numPages: 2, getMetadata: () => metadata } }));
+    rerender(<PdfViewerBridge source={{ sessionId: 'b', url: 'blob:b' }} {...props} />);
+    await act(async () => { finish({ info: { Title: 'Private title' } }); await metadata; });
+    expect(onDocumentInfo).not.toHaveBeenCalled();
+  });
+
+  it('keeps the latest search when earlier searches finish out of order', async () => {
+    let first!: (value: never[]) => void;
+    let second!: (value: never[]) => void;
+    pdfViewerSearchMock.highlight.mockImplementationOnce(() => new Promise((resolve) => { first = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { second = resolve; }));
+    const controller = new ViewerController();
+    const onSearchStateChange = vi.fn();
+    render(<PdfViewerBridge source={{ sessionId: 'a', url: 'blob:a' }} controller={controller}
+      onProgressChange={vi.fn()} onSearchStateChange={onSearchStateChange} />);
+    act(() => { controller.search('first'); controller.search('second'); });
+    await act(async () => { second([]); });
+    await act(async () => { first([]); });
+    expect(onSearchStateChange).toHaveBeenCalledTimes(1);
+    expect(onSearchStateChange).toHaveBeenCalledWith(expect.objectContaining({ keyword: 'second' }));
+  });
   afterEach(() => {
     pdfViewerSearchMock.highlight.mockClear();
     pdfViewerCoreMock.mode = 'ready';

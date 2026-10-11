@@ -110,6 +110,7 @@ export type CacheStats = {
 };
 
 export type CorePersistenceApi = {
+  getDocument?(documentKey: string): Promise<PersistedDocument | null>;
   saveDocument(document: PersistedDocument): Promise<void>;
   listRecentDocuments(): Promise<PersistedDocument[]>;
   removeRecentDocument(documentKey: string): Promise<void>;
@@ -149,6 +150,9 @@ export type PersistenceApi = CorePersistenceApi & FavoritesTagsPersistenceApi;
 
 export function createPersistenceApi(invoke: Invoke = tauriInvoke): PersistenceApi {
   return {
+    getDocument(documentKey) {
+      return invoke<PersistedDocument | null>('get_document', { documentKey });
+    },
     saveDocument(document) {
       return invoke<void>('save_document', { document });
     },

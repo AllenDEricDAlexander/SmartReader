@@ -44,10 +44,14 @@ export function ReaderViewerContent({
       <ReaderErrorState
         title={activeSession.title}
         message={activeSession.errorMessage}
-        canRetry={activeSession.source.kind === 'desktop-path'}
+        canRetry={activeSession.source.kind === 'desktop-path' || activeSession.source.kind === 'library'}
         onRetry={() => onRetry(activeSession.id)}
       />
     );
+  }
+
+  if (!viewerSource || viewerSource.sessionId !== activeSession.id) {
+    return <div className="viewer-loading" role="status">正在载入所选文献…</div>;
   }
 
   return (

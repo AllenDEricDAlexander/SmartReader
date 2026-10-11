@@ -112,10 +112,12 @@ export function restoreDocumentSessions(
     restoredSession.tabs.map((tab) => [tab.documentKey, tab]),
   );
   const sessions = documents
-    .filter((document) => document.path && tabsByDocumentKey.has(document.documentKey))
+    .filter((document) => (document.path || document.documentKey.startsWith('paper:')) && tabsByDocumentKey.has(document.documentKey))
     .map((document) => {
       const restoredTab = tabsByDocumentKey.get(document.documentKey);
-      const source: FileSource = {
+      const source: FileSource = document.documentKey.startsWith('paper:') ? {
+        kind: 'library', paperId: document.documentKey.slice('paper:'.length), name: document.displayName,
+      } : {
         kind: 'desktop-path',
         path: document.path!,
         name: document.displayName,

@@ -164,9 +164,9 @@ export function HomeRecentFiles({
                     <td
                       className="path-cell"
                       data-label="路径"
-                      title={document.path ?? '本地浏览器文件'}
+                      title={document.path ?? (document.documentKey.startsWith('paper:') ? '本地文献库' : '本地浏览器文件')}
                     >
-                      {getDirectoryPath(document.path)}
+                      {getDirectoryPath(document.path, document.documentKey)}
                     </td>
                     <td data-label="上次打开">{formatDateTime(document.modifiedAt)}</td>
                     <td data-label="阅读进度">

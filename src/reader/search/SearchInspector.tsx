@@ -68,6 +68,7 @@ export function SearchInspector({
         </button>
       </div>
 
+      {searchState.error ? <p role="alert" className="muted-copy">{searchState.error}</p> : null}
       {hasSearched ? (
         <div className="search-current-match" aria-live="polite">
           <span>当前匹配</span>

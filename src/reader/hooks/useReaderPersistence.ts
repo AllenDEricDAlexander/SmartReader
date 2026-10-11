@@ -5,6 +5,8 @@ import {
   type PersistenceApi,
 } from '../../persistence/persistenceApi';
 import { createTauriBridge, type TauriBridge } from '../../platform/tauriBridge';
+import { useResearch } from '../../app/ResearchContext';
+import { createLibraryPersistence } from '../../library/libraryPersistence';
 
 type UseReaderPersistenceInput = {
   bridge?: TauriBridge;
@@ -17,8 +19,11 @@ export function useReaderPersistence({
 }: UseReaderPersistenceInput) {
   const defaultBridge = useMemo(() => createTauriBridge(), []);
   const defaultPersistence = useMemo(() => createPersistenceApi(), []);
+  const research = useResearch();
   const bridge = providedBridge ?? defaultBridge;
-  const persistence = providedPersistence ?? defaultPersistence;
+  const basePersistence = providedPersistence ?? defaultPersistence;
+  const persistence = useMemo(() => research
+    ? createLibraryPersistence(basePersistence, research.library) : basePersistence, [basePersistence, research]);
   const sessionPersistence = useMemo(
     () => createDebouncedFlush(persistence.saveReaderSession, 250),
     [persistence],
