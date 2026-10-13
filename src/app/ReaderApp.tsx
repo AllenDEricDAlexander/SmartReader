@@ -471,7 +471,8 @@ export function ReaderApp({
   });
 
   const importPdfs = useCallback(async (folderId?: string, chooseDirectory = false) => {
-    if (!research || importingRef.current) return;
+    if (!research || importingRef.current) return [];
+    const importedIds: string[] = [];
     importingRef.current = true;
     setImporting(true);
     setImportProgress('请选择要导入的 PDF…');
@@ -484,14 +485,16 @@ export function ReaderApp({
           setImportProgress(`正在导入并建立索引 ${index + 1} / ${paths.length}`);
           try {
             const opened = await bridge.readDesktopPdf(paths[index]);
-            await research.library.importPdf(opened.bytes, opened.source.name, { folderId });
+            const paper = await research.library.importPdf(opened.bytes, opened.source.name, { folderId });
+            importedIds.push(paper.id);
             imported += 1;
           } catch (error) { failures.push(errorMessage(error)); }
         }
       } else {
         const opened = await bridge.openNativePdf();
         if (opened) {
-          await research.library.importPdf(opened.bytes, opened.source.name, { folderId });
+          const paper = await research.library.importPdf(opened.bytes, opened.source.name, { folderId });
+          importedIds.push(paper.id);
           imported = 1;
         }
       }
@@ -506,6 +509,7 @@ export function ReaderApp({
       importingRef.current = false;
       setImporting(false);
     }
+    return [...new Set(importedIds)];
   }, [bridge, homeSidebarPage, research]);
 
   const openResearchPaper = useCallback(async (id: string, page?: number) => {
@@ -1299,11 +1303,11 @@ export function ReaderApp({
       documentKey: `paper:${hit.paperId}`, path: null, page: hit.page,
     })) : [], [globalSearchQuery, libraryView.papers, research]);
   const libraryWorkspace = research ? <LibraryWorkspace library={research.library} ai={research.ai}
-    onOpenPaper={openResearchPaper} onImport={importPdfs} onOpenAiSettings={() => openSettingsWorkspace('ai')}
+    onOpenPaper={openResearchPaper} onImport={async (folderId) => { await importPdfs(folderId); }} onOpenAiSettings={() => openSettingsWorkspace('ai')}
     importing={importing} importProgress={importProgress} initialFolderView={homeSidebarPage === 'folders'} /> : null;
   const workspaceContent = research && (homeSidebarPage === 'myDocuments' || homeSidebarPage === 'folders') ? libraryWorkspace
     : research && homeSidebarPage === 'ai' ? <AiAssistant library={research.library} ai={research.ai}
-      onOpenPaper={openResearchPaper} onOpenSettings={() => openSettingsWorkspace('ai')} />
+      onOpenPaper={openResearchPaper} onAddPdfs={() => importPdfs()} onOpenSettings={() => openSettingsWorkspace('ai')} />
     : research && homeSidebarPage === 'notes' ? <AnnotationManagerWorkspace title="笔记管理"
       annotations={displayAnnotations.filter((annotation) => annotation.type === 'note')}
       error={globalSearchAnnotationError} canOpenAnnotation={(annotation) => canOpenRecordPage(annotation.documentKey, annotation.documentPath, annotation.documentMissing)}
@@ -1342,7 +1346,7 @@ export function ReaderApp({
           <header className="workspace-header"><h1>导入文献</h1><button type="button" onClick={closeToolWorkspace}>返回</button></header>
           {libraryWorkspace}
         </section> : undefined}
-        onImportFolder={research ? () => importPdfs(undefined, true) : undefined}
+        onImportFolder={research ? async () => { await importPdfs(undefined, true); } : undefined}
         importing={importing}
         activeAnnotations={activeAnnotations}
         activeBookmarks={activeBookmarks}

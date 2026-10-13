@@ -290,6 +290,17 @@
   max-width: 460px;
 }
 
+.ai-knowledge-files { min-width: 0; padding: 14px; margin: 0; border: 1px solid var(--sr-border); border-radius: 8px; display: grid; gap: 12px; }
+.ai-knowledge-files legend { padding: 0 5px; font-size: 13px; font-weight: 600; }
+.ai-knowledge-actions, .ai-knowledge-scope { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.ai-knowledge-actions button { padding: 7px 11px; }
+.ai-knowledge-scope label, .ai-assistant .ai-knowledge-file { display: flex; align-items: flex-start; gap: 9px; }
+.ai-knowledge-files input[type="search"] { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--sr-border); border-radius: 7px; background: var(--sr-surface); color: var(--sr-text); }
+.ai-knowledge-list { max-height: 240px; overflow: auto; display: grid; gap: 9px; }
+.ai-knowledge-file { padding: 9px; border-radius: 6px; background: var(--sr-surface-muted); }
+.ai-knowledge-file input { flex-shrink: 0; margin-top: 3px; accent-color: var(--sr-primary); }
+.ai-knowledge-file span { min-width: 0; display: grid; gap: 4px; overflow-wrap: anywhere; }
+
 .ai-assistant textarea {
   min-height: 116px;
   resize: vertical;

@@ -167,6 +167,24 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('desktop research App integration', () => {
+  it('imports a local PDF into an empty knowledge library from the AI assistant and answers using that selected file', async () => {
+    const app = fixture();
+    await app.ai.saveProvider({ name: 'Aliyun compatible', baseUrl: 'https://api.example.org/v1', model: 'chat-model' }, 'test-key');
+    app.completion.mockResolvedValue('Selected knowledge evidence [S1]');
+    render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);
+    fireEvent.click(screen.getByRole('button', { name: 'AI 科研助手' }));
+    await screen.findByText(/知识库还没有文件/);
+    fireEvent.click(screen.getByRole('button', { name: '添加本地 PDF' }));
+    const checkbox = await screen.findByRole('checkbox', { name: `选择知识库文件 ${title}` });
+    await waitFor(() => expect(checkbox).toBeChecked());
+    expect(app.bridge.openNativePdf).toHaveBeenCalledOnce();
+    expect(app.snapshot()?.papers).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: contentToken } });
+    fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
+    await screen.findByText('Selected knowledge evidence [S1]');
+    expect(screen.getByRole('button', { name: new RegExp(`S1 ${title} 第 4 页`) })).toBeInTheDocument();
+    app.ai.dispose();
+  });
   it('imports a native PDF into the managed reader and persists bookmarks, editable notes and favorites only in the library', async () => {
     const app = fixture();
     render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);

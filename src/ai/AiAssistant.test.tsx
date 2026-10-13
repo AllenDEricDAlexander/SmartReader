@@ -42,7 +42,8 @@ describe('AI research assistant', () => {
     const onOpenPaper = vi.fn();
     const askSpy = vi.spyOn(ai, 'ask');
     render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={onOpenPaper} />);
-    expect(screen.getByLabelText('问答范围')).toHaveValue(paper.id);
+    expect(screen.getByRole('radio', { name: '指定文件（可多选）' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' })).toBeChecked();
     ask();
     await screen.findByText('注意力可以改善记忆。[S1]');
     expect(askSpy).toHaveBeenCalledWith('注意力的结论是什么？', [paper.id]);
@@ -86,7 +87,8 @@ describe('AI research assistant', () => {
     await act(async () => { await library.lockVault(vault.id); });
     expect(screen.queryByText('注意力可以改善记忆。[S1]')).not.toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('');
-    expect(screen.getByLabelText('问答范围')).toHaveValue('');
+    expect(screen.queryByRole('checkbox', { name: '选择知识库文件 认知神经论文' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '检索并提问' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: /S1/ })).not.toBeInTheDocument();
     ai.dispose();
   });
@@ -132,6 +134,51 @@ describe('AI research assistant', () => {
     await waitFor(() => expect(ai.ask).toHaveBeenCalled());
     rendered.unmount();
     expect(cancel).toHaveBeenCalledOnce();
+    ai.dispose();
+  });
+
+  it('adds local PDFs directly to knowledge and keeps the imported selection after library changes', async () => {
+    const { library, ai, paper } = await setup();
+    const onAddPdfs = vi.fn(async () => [paper.id, paper.id]);
+    const askSpy = vi.spyOn(ai, 'ask');
+    render(<AiAssistant library={library} ai={ai} onAddPdfs={onAddPdfs} onOpenPaper={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '添加本地 PDF' }));
+    await screen.findByText(/已添加 1 份知识库文件/);
+    await act(async () => { await library.updatePaper(paper.id, { favorite: true }); });
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' })).toBeChecked();
+    ask();
+    await screen.findByText('注意力可以改善记忆。[S1]');
+    expect(askSpy).toHaveBeenCalledWith('注意力的结论是什么？', [paper.id]);
+    ai.dispose();
+  });
+
+  it('restricts answers to multiple selected files and never expands an empty selection to the whole library', async () => {
+    const { library, ai, paper, completion } = await setup();
+    const second = await library.importPdf(new TextEncoder().encode('%PDF-1.7\nsecond'), 'second.pdf');
+    await library.editMetadata(second.id, { title: '教育论文' });
+    const third = await library.importPdf(new TextEncoder().encode('%PDF-1.7\nthird'), 'third.pdf');
+    await library.editMetadata(third.id, { title: '未选择的论文' });
+    render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择知识库文件 教育论文' }));
+    ask('Summarize the findings');
+    await screen.findByText('注意力可以改善记忆。[S1]');
+    const payload = JSON.parse(completion.mock.calls.at(-1)![2][1].content);
+    expect(new Set(payload.sources.map((source: { paperId: string }) => source.paperId))).toEqual(new Set([paper.id, second.id]));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择知识库文件 教育论文' }));
+    expect(screen.getByRole('button', { name: '检索并提问' })).toBeDisabled();
+    expect(screen.queryByText('注意力可以改善记忆。[S1]')).not.toBeInTheDocument();
+    ai.dispose();
+  });
+
+  it('marks PDFs without text as unavailable knowledge instead of submitting an unusable question', async () => {
+    const { library, ai, paper } = await setup();
+    await library.editMetadata(paper.id, { abstract: '' });
+    vi.spyOn(library, 'getView').mockReturnValue({ ...library.getView(), papers: [{ ...paper, pages: [], indexStatus: 'empty' }] });
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' })).toBeDisabled();
+    ask();
+    expect(screen.getByRole('button', { name: '检索并提问' })).toBeDisabled();
     ai.dispose();
   });
 });
