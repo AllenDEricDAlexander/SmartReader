@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "postinstall": "mkdir -p public && cp node_modules/pdfjs-dist/build/pdf.worker.min.js public/pdf.worker.min.js",
+    "postinstall": "mkdir -p public/cmaps public/standard_fonts && cp node_modules/pdfjs-dist/build/pdf.worker.min.js public/pdf.worker.min.js && cp node_modules/pdfjs-dist/cmaps/* public/cmaps/ && cp node_modules/pdfjs-dist/standard_fonts/* public/standard_fonts/",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",

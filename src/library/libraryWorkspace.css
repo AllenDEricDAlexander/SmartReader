@@ -16,6 +16,9 @@
 .library-location-bar > strong { display: flex; min-width: 0; align-items: center; gap: 6px; font-size: 13px; overflow-wrap: anywhere; }
 .library-location-bar > strong > span { font-size: 11px; color: var(--sr-text-muted); font-weight: 400; margin-left: 3px; white-space: nowrap; }
 .library-location-bar select { max-width: 130px; }
+.library-folder-menu-wrap { position: relative; }
+.library-folder-menu { position: absolute; top: calc(100% + 5px); right: 0; z-index: 40; display: grid; gap: 3px; min-width: 148px; padding: 6px; border: 1px solid var(--sr-border); border-radius: 8px; background: var(--sr-surface); box-shadow: 0 8px 24px rgba(15, 23, 42, .12); }
+.library-folder-menu button { justify-content: flex-start; width: 100%; min-height: 31px; border: 0; background: transparent; }
 .library-vault-scope { color: var(--sr-text-muted); font-size: 11px; margin: 0; line-height: 1.6; }
 .library-batch-toolbar { padding: 9px 10px; background: #eff6ff; border: 1px solid #dbeafe; border-radius: 8px; }
 .library-batch-toolbar strong { font-size: 12px; margin-right: 3px; }

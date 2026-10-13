@@ -14,6 +14,10 @@ target/
 .worktrees/
 *.tsbuildinfo
 
+# PDF.js assets copied from installed dependencies
+/public/cmaps/
+/public/standard_fonts/
+
 # Environment files
 .env
 .env.*

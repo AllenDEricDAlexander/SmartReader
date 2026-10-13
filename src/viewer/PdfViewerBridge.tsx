@@ -17,6 +17,7 @@ import '@react-pdf-viewer/toolbar/lib/styles/index.css';
 import '@react-pdf-viewer/zoom/lib/styles/index.css';
 import { PdfPasswordPrompt } from './PdfPasswordPrompt';
 import { createRenderRange } from './renderRange';
+import { pdfDocumentAssets } from '../platform/pdfAssets';
 import type { ViewerController } from './viewerController';
 import {
   defaultSearchOptions,
@@ -50,7 +51,7 @@ type PdfDocumentProxy = {
 };
 
 // Imported files must not enable PDF.js generated font-code evaluation.
-const safePdfOptions = (options: PdfJs.GetDocumentParams) => ({ ...options, isEvalSupported: false });
+const safePdfOptions = (options: PdfJs.GetDocumentParams) => ({ ...options, ...pdfDocumentAssets, isEvalSupported: false });
 
 export type PdfRendererProps = {
   fileUrl: string;
@@ -152,7 +153,7 @@ function ActivePdfViewerBridge({
   }, []);
   const currentPageRef = useRef(1);
   const totalPageCountRef = useRef<number | null>(null);
-  const currentZoomRef = useRef(1);
+  const currentZoomRef = useRef(source.restore?.zoom ?? 1);
   const hasReportedLoadRef = useRef(false);
   const onLoadErrorRef = useRef(onLoadError);
   const onProgressChangeRef = useRef(onProgressChange);
@@ -166,7 +167,7 @@ function ActivePdfViewerBridge({
   useLayoutEffect(() => {
     currentPageRef.current = 1;
     totalPageCountRef.current = null;
-    currentZoomRef.current = 1;
+    currentZoomRef.current = source.restore?.zoom ?? 1;
     hasReportedLoadRef.current = false;
     setLoadError(null);
   }, [source.sessionId, source.url]);
@@ -355,7 +356,8 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
     },
     [onDocumentInfo, sessionId],
   );
-  const scaleRef = useRef(1);
+  // The viewer does not emit onZoom for its initial defaultScale.
+  const scaleRef = useRef(restore?.zoom ?? 1);
   const searchStateRef = useRef<ViewerSearchState>(emptySearchState);
   const onSearchStateChangeRef = useRef(onSearchStateChange);
   const onHighlightSelectionRef = useRef(onHighlightSelection);

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { BookOpen, FileText, Folder, FolderPlus, LockKeyhole, PanelLeft, Pin, RefreshCw, Search, Settings2, Sparkles, Star, Trash2, Upload, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
+import { BookOpen, ChevronDown, FileText, Folder, FolderPlus, LockKeyhole, PanelLeft, Pin, RefreshCw, Search, Settings2, Sparkles, Star, Trash2, Upload, X } from 'lucide-react';
 import type { AiService } from '../ai/aiService';
 import { formatFileSize } from '../home/homeDisplayUtils';
 import { LibraryActionDialog, type LibraryAction } from './LibraryActionDialog';
@@ -34,6 +34,10 @@ export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiS
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [action, setAction] = useState<LibraryAction | null>(null);
+  const [folderMenuOpen, setFolderMenuOpen] = useState(false);
+  const folderMenuRef = useRef<HTMLDivElement>(null);
+  const folderMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const folderMenuInitialFocus = useRef<'first' | 'last'>('first');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,6 +65,7 @@ export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiS
       setEditingId(null);
       setSelected(new Set());
       setAction(null);
+      setFolderMenuOpen(false);
       setQuery('');
       setError(null);
       setNotice(null);
@@ -164,8 +169,26 @@ export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiS
   const disabled = busy || action !== null || editingPaper !== undefined;
   const displayedError = error ?? view.error;
 
+  useEffect(() => {
+    if (disabled || !selectedFolder) setFolderMenuOpen(false);
+  }, [disabled, selectedFolder]);
+
+  useEffect(() => {
+    if (!folderMenuOpen) return;
+    const items = folderMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)');
+    (folderMenuInitialFocus.current === 'last' ? items?.[items.length - 1] : items?.[0])?.focus();
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !folderMenuRef.current?.contains(event.target)) {
+        setFolderMenuOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', closeOutside);
+    return () => { window.removeEventListener('pointerdown', closeOutside); };
+  }, [folderMenuOpen]);
+
   const selectFolder = (id: string | null) => {
     setFolderId(id);
+    setFolderMenuOpen(false);
     setSelected(new Set());
     if (mode === 'hover') setPreviewId(null);
   };
@@ -175,6 +198,35 @@ export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiS
     else if (value === 'decryptVault' && activeVaultId) setAction({ kind: 'decryptVault', vaultId: activeVaultId });
     else if (['renameFolder', 'moveFolder', 'mergeFolder', 'deleteFolder', 'encryptFolder'].includes(value)) {
       setAction({ kind: value as 'renameFolder' | 'moveFolder' | 'mergeFolder' | 'deleteFolder' | 'encryptFolder', folderId: selectedFolder.id });
+    }
+  };
+  const closeFolderMenu = () => {
+    setFolderMenuOpen(false);
+    folderMenuTriggerRef.current?.focus();
+  };
+  const activateFolderAction = (value: string) => {
+    // The dialog restores this persistent trigger instead of a removed menu item.
+    closeFolderMenu();
+    folderAction(value);
+  };
+  const handleFolderMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const items = [...(folderMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+    const index = items.findIndex((item) => item === document.activeElement);
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      closeFolderMenu();
+      return;
+    }
+    if (!items.length) return;
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter', ' '].includes(event.key)) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === 'Home') items[0].focus();
+      else if (event.key === 'End') items[items.length - 1].focus();
+      else if (event.key === 'ArrowDown') items[(index + 1) % items.length].focus();
+      else if (event.key === 'ArrowUp') items[(Math.max(index, 0) - 1 + items.length) % items.length].focus();
+      else if (index >= 0) items[index].click();
     }
   };
 
@@ -204,10 +256,38 @@ export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiS
         <strong><Folder size={15} />{selectedFolder?.name ?? '全部文献'}<span>{papers.length} 篇可访问</span></strong>
         <div>
           <button type="button" disabled={disabled} aria-label="新建分类" onClick={() => setAction({ kind: 'createFolder', parentId: null })}><FolderPlus size={14} />新建分类</button>
-          {selectedFolder ? <select aria-label="当前分类操作" value="" disabled={disabled} onChange={(event) => folderAction(event.target.value)}>
-            <option value="" disabled>分类操作</option><option value="createChild">新建子分类</option><option value="renameFolder">重命名</option><option value="moveFolder" disabled={activeVaultId !== null}>移动分类</option><option value="mergeFolder" disabled={activeVaultId !== null}>合并分类</option><option value="deleteFolder" disabled={activeVaultId !== null}>删除分类</option>
-            {activeVaultId ? <option value="decryptVault" disabled={!vaultUnlocked}>解除加密</option> : <option value="encryptFolder">加密文件夹</option>}
-          </select> : null}
+          {selectedFolder ? (
+            <div className="library-folder-menu-wrap" ref={folderMenuRef}>
+              <button
+                ref={folderMenuTriggerRef} type="button" aria-label="当前分类操作"
+                aria-haspopup="menu" aria-expanded={folderMenuOpen} disabled={disabled}
+                onClick={() => { folderMenuInitialFocus.current = 'first'; setFolderMenuOpen((open) => !open); }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  folderMenuInitialFocus.current = event.key === 'ArrowUp' ? 'last' : 'first';
+                  setFolderMenuOpen(true);
+                }}
+              >
+                分类操作<ChevronDown size={13} aria-hidden="true" />
+              </button>
+              {folderMenuOpen && !disabled ? (
+                <div className="library-folder-menu" role="menu" aria-label="当前分类操作菜单" onKeyDown={handleFolderMenuKeyDown}>
+                  <button type="button" role="menuitem" onClick={() => activateFolderAction('createChild')}>新建子分类</button>
+                  <button type="button" role="menuitem" onClick={() => activateFolderAction('renameFolder')}>重命名</button>
+                  <button type="button" role="menuitem" disabled={activeVaultId !== null} onClick={() => activateFolderAction('moveFolder')}>移动分类</button>
+                  <button type="button" role="menuitem" disabled={activeVaultId !== null} onClick={() => activateFolderAction('mergeFolder')}>合并分类</button>
+                  <button type="button" role="menuitem" disabled={activeVaultId !== null} onClick={() => activateFolderAction('deleteFolder')}>删除分类</button>
+                  {activeVaultId ? (
+                    <button type="button" role="menuitem" disabled={!vaultUnlocked} onClick={() => activateFolderAction('decryptVault')}>解除加密</button>
+                  ) : (
+                    <button type="button" role="menuitem" onClick={() => activateFolderAction('encryptFolder')}>加密文件夹</button>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {activeVaultId ? <button type="button" disabled={disabled} onClick={() => vaultUnlocked ? void perform(() => library.lockVault(activeVaultId), '文件夹已锁定。') : setAction({ kind: 'unlockVault', vaultId: activeVaultId })}><LockKeyhole size={14} />{vaultUnlocked ? '锁定文件夹' : '解锁文件夹'}</button> : null}
         </div>
       </div>

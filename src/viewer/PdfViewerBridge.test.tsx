@@ -63,6 +63,8 @@ const pdfViewerSearchMock = vi.hoisted(() => ({
   jumpToPreviousMatch: vi.fn(),
 }));
 
+const pdfViewerZoomMock = vi.hoisted(() => ({ zoomTo: vi.fn() }));
+
 vi.mock('@react-pdf-viewer/toolbar', async () => {
   const React = await import('react');
   const Button = ({ label }: { label: string }) =>
@@ -75,7 +77,7 @@ vi.mock('@react-pdf-viewer/toolbar', async () => {
       return {
         pageNavigationPluginInstance: { jumpToPage: vi.fn() },
         searchPluginInstance: pdfViewerSearchMock,
-        zoomPluginInstance: { zoomTo: vi.fn() },
+        zoomPluginInstance: pdfViewerZoomMock,
         Toolbar: ({ children }: { children(slots: Record<string, unknown>): React.ReactNode }) =>
           React.createElement(
             'div',
@@ -177,6 +179,7 @@ describe('PdfViewerBridge', () => {
   });
   afterEach(() => {
     pdfViewerSearchMock.highlight.mockClear();
+    pdfViewerZoomMock.zoomTo.mockClear();
     pdfViewerCoreMock.mode = 'ready';
     pdfViewerCoreMock.errorMessage = 'Mock PDF failure';
   });
@@ -541,6 +544,41 @@ describe('PdfViewerBridge', () => {
     // initialPage is zero-based in react-pdf-viewer.
     expect(pdfViewerCoreMock.lastViewerProps?.initialPage).toBe(41);
     expect(pdfViewerCoreMock.lastViewerProps?.defaultScale).toBe(1.5);
+  });
+
+  it('reports restored zoom on the first document load and increments from that scale before any zoom event', async () => {
+    const controller = new ViewerController();
+    const onProgressChange = vi.fn();
+    render(<PdfViewerBridge source={{ sessionId: 'restored', url: 'blob:restored', restore: { page: 2, zoom: 1.1 } }}
+      controller={controller} onProgressChange={onProgressChange} />);
+    const loaded = pdfViewerCoreMock.lastViewerProps?.onDocumentLoad as (event: { doc: unknown }) => void;
+    await act(async () => {
+      loaded({ doc: { numPages: 6, getMetadata: async () => ({ info: {} }) } });
+    });
+    expect(onProgressChange).toHaveBeenLastCalledWith({ sessionId: 'restored', page: 2, totalPages: 6, zoom: 1.1 });
+    act(() => { controller.zoomIn(); });
+    expect(pdfViewerZoomMock.zoomTo.mock.calls.at(-1)?.[0]).toBeCloseTo(1.2);
+
+    const zoomed = pdfViewerCoreMock.lastViewerProps?.onZoom as (event: { scale: number }) => void;
+    act(() => { zoomed({ scale: 1.2 }); controller.zoomOut(); });
+    expect(onProgressChange).toHaveBeenLastCalledWith(expect.objectContaining({ zoom: 1.2 }));
+    expect(pdfViewerZoomMock.zoomTo.mock.calls.at(-1)?.[0]).toBeCloseTo(1.1);
+  });
+
+  it('initializes zoom from the replacement source rather than the previous document scale', async () => {
+    const controller = new ViewerController();
+    const onProgressChange = vi.fn();
+    const view = render(<PdfViewerBridge source={{ sessionId: 'same', url: 'blob:first', restore: { page: 2, zoom: 1.5 } }}
+      controller={controller} onProgressChange={onProgressChange} />);
+    const zoomed = pdfViewerCoreMock.lastViewerProps?.onZoom as (event: { scale: number }) => void;
+    act(() => { zoomed({ scale: 2 }); });
+    view.rerender(<PdfViewerBridge source={{ sessionId: 'same', url: 'blob:second', restore: { page: 3, zoom: 0.8 } }}
+      controller={controller} onProgressChange={onProgressChange} />);
+    const loaded = pdfViewerCoreMock.lastViewerProps?.onDocumentLoad as (event: { doc: unknown }) => void;
+    await act(async () => { loaded({ doc: { numPages: 6, getMetadata: async () => ({ info: {} }) } }); });
+    expect(onProgressChange).toHaveBeenLastCalledWith({ sessionId: 'same', page: 3, totalPages: 6, zoom: 0.8 });
+    act(() => { controller.zoomOut(); });
+    expect(pdfViewerZoomMock.zoomTo.mock.calls.at(-1)?.[0]).toBeCloseTo(0.7);
   });
 
   it('passes the ten-page dynamic render window to the real viewer', () => {

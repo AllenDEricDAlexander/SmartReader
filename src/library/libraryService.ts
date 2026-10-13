@@ -227,6 +227,7 @@ export class LibraryService {
         indexError: hasText ? null : '未发现可提取文本，可能是扫描 PDF；可手工填写信息，全文检索需要 OCR。',
       };
       classifyPaper(tx.snapshot, paper);
+      pruneEmptyAutomaticFolders(tx.snapshot);
       await this.putPaper(tx, paper);
     });
     for (const listener of this.indexedListeners) listener(id);
@@ -258,6 +259,7 @@ export class LibraryService {
         manualFields: [...new Set([...paper.manualFields, ...Object.keys(normalized) as MetadataField[]])],
       };
       classifyPaper(tx.snapshot, next);
+      pruneEmptyAutomaticFolders(tx.snapshot);
       await this.putPaper(tx, next);
     });
   }
@@ -270,6 +272,7 @@ export class LibraryService {
         ...paper, metadata: mergeMetadata(paper, safeUpdates), aiStatus: 'ready', aiError: null,
       };
       classifyPaper(tx.snapshot, next);
+      pruneEmptyAutomaticFolders(tx.snapshot);
       await this.putPaper(tx, next);
     });
   }
@@ -465,6 +468,7 @@ export class LibraryService {
             id: record.id, kind: 'plain', paper,
           };
           classifyPaper(tx.snapshot, paper);
+          pruneEmptyAutomaticFolders(tx.snapshot);
           tx.decrypted.delete(record.id);
         }
         tx.snapshot.vaults = tx.snapshot.vaults.filter((vault) => vault.id !== vaultId);

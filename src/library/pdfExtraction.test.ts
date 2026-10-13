@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolve } from 'node:path';
 import { getDocument } from 'pdfjs-dist';
+import type { DocumentInitParameters } from 'pdfjs-dist/types/src/display/api';
 import { extractPdf } from './pdfExtraction';
 
 vi.mock('pdfjs-dist', () => ({
@@ -163,6 +164,7 @@ describe('PDF extraction', () => {
     const result = await extractPdf(input, { password: 'document-password' });
     const options = vi.mocked(getDocument).mock.calls[0][0] as { data: Uint8Array; password: string };
     expect(options.password).toBe('document-password');
+    expect(options).toMatchObject({ cMapUrl: '/cmaps/', cMapPacked: true, standardFontDataUrl: '/standard_fonts/', isEvalSupported: false });
     expect(options.data).not.toBe(input);
     options.data.fill(0);
     expect(input).toEqual(pdfBytes);
@@ -225,9 +227,7 @@ describe('PDF extraction', () => {
   });
 
   it('extracts metadata and searchable text from an actual minimal PDF with the installed PDF.js', async () => {
-    const actual = await vi.importActual<typeof import('pdfjs-dist')>('pdfjs-dist');
-    actual.GlobalWorkerOptions.workerSrc = resolve('node_modules/pdfjs-dist/build/pdf.worker.js');
-    vi.mocked(getDocument).mockImplementation(actual.getDocument);
+    await useInstalledPdfJs();
 
     const result = await extractPdf(minimalPdf());
 
@@ -241,9 +241,7 @@ describe('PDF extraction', () => {
     ['/pUbLiCaTiOnDaTe (2023-09-12)', '2023'],
     ['/PublicationDate (D:20220912000000Z)', '2022'],
   ])('extracts real PDF.js Custom Info DOI/Journal and explicit publication year from %s', async (publicationInfo, year) => {
-    const actual = await vi.importActual<typeof import('pdfjs-dist')>('pdfjs-dist');
-    actual.GlobalWorkerOptions.workerSrc = resolve('node_modules/pdfjs-dist/build/pdf.worker.js');
-    vi.mocked(getDocument).mockImplementation(actual.getDocument);
+    const actual = await useInstalledPdfJs();
     const bytes = minimalPdf(`/dOi (10.1234/custom.2024) /jOuRnAl (Journal of Real Fixtures) ${publicationInfo} /CreationDate (D:20261011000000Z) /Subject (Cognitive neuroscience)`);
     const task = actual.getDocument({ data: bytes.slice(), isEvalSupported: false });
     try {
@@ -261,18 +259,49 @@ describe('PDF extraction', () => {
       researchTopics: ['Cognitive neuroscience'], indexingStatus: '未知',
     });
   });
+
+  it('extracts actual Chinese text using a predefined Type0 CMap without an embedded ToUnicode map', async () => {
+    await useInstalledPdfJs();
+    const result = await extractPdf(minimalPdf('', '海马体记忆巩固'));
+    expect(result.pageCount).toBe(1);
+    expect(result.pages[0].text).toContain('海马体记忆巩固');
+  });
 });
 
-function minimalPdf(extraInfo = ''): Uint8Array {
-  const stream = 'BT /F1 12 Tf 72 700 Td (Searchable cognition evidence) Tj ET';
+async function useInstalledPdfJs() {
+  const actual = await vi.importActual<typeof import('pdfjs-dist')>('pdfjs-dist');
+  actual.GlobalWorkerOptions.workerSrc = resolve('node_modules/pdfjs-dist/build/pdf.worker.js');
+  vi.mocked(getDocument).mockImplementation((source) => {
+    const options = source as DocumentInitParameters;
+    // Node reads installed files directly; production URLs remain local webview assets.
+    return actual.getDocument({
+      ...options,
+      cMapUrl: options.cMapUrl ? `${resolve('node_modules/pdfjs-dist', options.cMapUrl.slice(1))}/` : undefined,
+      standardFontDataUrl: options.standardFontDataUrl ? `${resolve('node_modules/pdfjs-dist', options.standardFontDataUrl.slice(1))}/` : undefined,
+    });
+  });
+  return actual;
+}
+
+function minimalPdf(extraInfo = '', chineseText?: string): Uint8Array {
+  const text = chineseText ? `<${Array.from(chineseText).map((character) => character.charCodeAt(0).toString(16).padStart(4, '0')).join('')}>` : '(Searchable cognition evidence)';
+  const stream = `BT /F1 12 Tf 72 700 Td ${text} Tj ET`;
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
-    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    chineseText
+      ? '<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UCS2-H /DescendantFonts [7 0 R] >>'
+      : '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
     `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
     `<< /Title (A real PDF fixture) /Author (Ada Researcher) ${extraInfo} >>`,
   ];
+  if (chineseText) {
+    objects.push(
+      '<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 4 >> /FontDescriptor 8 0 R /DW 1000 >>',
+      '<< /Type /FontDescriptor /FontName /STSong-Light /Flags 6 /FontBBox [-250 -143 600 857] /ItalicAngle 0 /Ascent 857 /Descent -143 /CapHeight 857 /StemV 80 >>',
+    );
+  }
   let content = '%PDF-1.4\n';
   const offsets = objects.map((object, index) => {
     const offset = content.length;

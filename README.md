@@ -96,7 +96,7 @@ src-tauri/src/
 bun install
 ```
 
-`postinstall` 会把 `pdfjs-dist` 的 worker 复制到 `public/pdf.worker.min.js`。
+`postinstall` 会把 `pdfjs-dist` 的 worker、CMap 和标准字体复制到 `public/`，索引与阅读器均使用这些本地资源，支持离线读取采用标准中文字符映射的 PDF。已有依赖目录的工作区更新后，可运行 `bun run postinstall` 补齐资源再构建。
 
 ```bash
 # 前端开发服务器（仅开发壳，不提供浏览器端本地文献库）

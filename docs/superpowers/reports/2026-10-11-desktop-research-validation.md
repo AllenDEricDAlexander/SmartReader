@@ -1,151 +1,115 @@
 # 桌面科研文献库与 AI 验收记录
 
-日期：2026-10-11（Asia/Shanghai）。状态：**自动化与无界面业务验证完成；桌面交互验收 waiting-unlock**。
+桌面验收日期：2026-10-11（Asia/Shanghai）；交付复核日期：2026-10-13。状态：**实现、自动化验证与原生桌面主流程验收完成**。
 
-本记录对应用户要求的桌面本地文献库完善、TypeScript 索引与多厂商 AI、论文信息预览、分类及加密。用户已授权启动服务和桌面 UI 测试，明确暂不实现浏览器持久化或移动端；云端仅预留接口。
+范围对应用户要求：桌面本地文献库、TypeScript 导入索引、多厂商 OpenAI 兼容 API、完整论文信息、个性化预览、多级分类、批量操作、多分类归属与文件夹加密。浏览器存储、移动端和云同步按用户要求暂不实现；云端预留存储接口。
 
 ## 版本与范围
 
-| 步骤 | 提交 | 已实现范围 |
+| 步骤 | 提交 | 范围 |
 | --- | --- | --- |
-| Step 1 | `98aee76` | SQLite 文献库状态、PDF BLOB、原子提交、revision 校验、TypeScript 存储 Adapter |
-| Step 2 | `54cf943` | PDF 提取、逐页索引、分类、加密、受管文献服务 |
-| Step 3 | `59a685d` | 多厂商兼容协议、凭据管理、元数据补全、问答、桌面 HTTP 传输 |
-| Step 4 | `011695f` | 桌面文献库/预览/分类/AI 设置 UI、Reader 与既有数据集成、并发与锁定回归 |
-| Step 5 | 本报告与 QA 脚本所在提交 | 二进制 IPC 写入与按文献隔离访问代次的收尾修正、自动化及无界面业务验证完成；原生应用已构建并曾启动，验证进程现已停止；GUI 保留 waiting-unlock 门禁 |
+| 1 | `98aee76` | SQLite 状态/PDF BLOB、原子事务、revision 校验、TypeScript 存储 Adapter |
+| 2 | `54cf943` | PDF 元数据、逐页索引、分类、加密与文献服务 |
+| 3 | `59a685d` | 多厂商兼容协议、凭据管理、信息补全、检索问答、原生 HTTP |
+| 4 | `011695f` | 桌面文献库、预览、分类、AI 设置与既有 Reader 集成 |
+| 5 | `7aa8112` | 二进制 IPC、访问代次修正、QA 夹具、无界面验证与初始验收记录 |
+| 6 | 本报告更新所在提交 | 原生桌面验收发现问题的修正：空自动分类、恢复缩放、分类动作菜单、离线中文 PDF 资源 |
 
-实施计划：[2026-10-11-research-library-ai.md](../plans/2026-10-11-research-library-ai.md)。以下“自动化覆盖”列说明测试入口和已覆盖行为；桌面实测列须由实际操作结果补充，不据此推定通过。
-
-工作区原有两份未跟踪的 `reader-progress-render-window` Spec/Plan 保持原样，未纳入本次提交；既有 001–006 SQL 迁移未修改。
+实施计划：[2026-10-11-research-library-ai.md](../plans/2026-10-11-research-library-ai.md)。原有两份未跟踪的 reader-progress-render-window Spec/Plan 未纳入本次提交；既有 001–006 迁移保持原样，仅新增 007。
 
 ## 用户要求与证据映射
 
-| 用户要求 | 实现与自动化证据 | 桌面实测 |
+| 用户要求 | 实现与自动化证据 | 原生桌面证据 |
 | --- | --- | --- |
-| 打通现有阅读、书签、批注、收藏与会话恢复 | `ResearchApp.test.tsx`、`libraryPersistence.test.ts`：受管文献保存到同一库记录；旧 `desktop:` 记录保留原身份和批注；旧书签跳页；跨 App/服务实例恢复进度 | 待执行 QA-03、QA-08、QA-09 |
-| 双 PDF 真实并排阅读 | `LibraryCompareWorkspace.test.tsx` 8 项覆盖独立页码/缩放、只读批注、错误重试、Blob 生命周期、锁定和迟到读取保护 | 待执行 QA-13 |
-| 导入后以 TypeScript 自动建立索引 | `libraryService.test.ts`、`pdfExtraction.test.ts`、`librarySearch.test.ts`：内容去重、逐页提取、索引失败保留文件及重试、中英文检索、命中页码与上下文；无界面实测真实 4 PDF → 3 文献及第 2 页命中 | GUI 待执行 QA-02、QA-03 |
-| 完整科研信息预览 | `PaperPreview.test.tsx`：标题、作者、期刊、年份、DOI、摘要、关键词、主题、收录状态、文件大小、实际/估算阅读时间、收藏与批注跳页 | 待执行 QA-04 |
-| 标准 PDF 自动识别，非标准论文手动补录且长期保留 | `pdfExtraction.test.ts`：真实 PDF.js 解析 Info/XMP/Custom DOI、Journal、PublicationYear/Date，保守识别 Subject，不推断收录状态或将 CreationDate 当发表年；`PaperMetadataEditor.test.tsx`、`libraryService.test.ts`：仅提交人工变更字段，重索引/AI 不覆盖，跨实例保留 | 待执行 QA-02、QA-05、QA-08 |
-| 轻量预览，悬停、固定、关闭且不遮挡列表 | `LibraryWorkspace.test.tsx`、`PaperPreview.test.tsx`：固定对象不随悬停/排序变化，关闭后可重开；局部容器布局支持桌面侧栏与窄窗口 | 待执行 QA-01、QA-04 |
-| 记忆个人高频信息项 | `PaperPreview.test.tsx`：显式展开才计数，初次显示/重渲染/收起不计数，按持久化 `fieldUsage` 排序 | 待执行 QA-04、QA-08 |
-| AI 五维自动分类 | `aiService.test.ts`、`libraryFolders.test.ts`：研究领域、学科方向、发表年份、期刊类型、论文主题；显式开启导入后补全；无界面真实 HTTP 实测五项归属和人工年份保持 | GUI 待执行 QA-10 |
-| 自定义多级分类的创建、重命名、移动、合并、删除 | `libraryFolders.test.ts`、`LibraryWorkspace.test.tsx`：最多 8 层，拒绝循环及冲突，递归合并同名子分类，删除分类保留论文 | 待执行 QA-06 |
-| 批量移动/归类/置顶/收藏/删除 | `libraryService.test.ts`、`LibraryWorkspace.test.tsx`：批量事务更新，移动与追加语义区分，删除确认仅库内副本，错误可见且保存禁重复 | 待执行 QA-06 |
-| 一篇论文多分类且不重复存文件 | `libraryService.test.ts`、`libraryFolders.test.ts`、`LibraryWorkspace.test.tsx`：SHA-256 文献 ID、多对多关联、重复导入和合并不复制 PDF | 待执行 QA-02、QA-06 |
-| 文件夹整体加密 | `libraryCrypto.test.ts`、`libraryService.test.ts`、`libraryPersistence.test.ts`：真实 AES-GCM 密文、随机盐/IV、密码/篡改校验、PDF 与文献状态原子切换、所有分类入口共同锁定、迟到请求不泄漏、标签补偿与锁定协调 | 待执行 QA-07、QA-08、QA-12 |
-| 多厂商 API Key + Base URL + model | `openAiClient.test.ts`、`aiTransport.test.ts`、`aiService.test.ts`、`AiSettings.test.tsx`，以及 Rust `ai_http.rs` 本地 HTTP 测试；无界面实测两个兼容端点、配置切换、加密密钥解锁 | GUI 待执行 QA-10；真实厂商未调用 |
-| AI 问答可追溯，锁定资料不参与 | `aiService.test.ts`、`AiAssistant.test.tsx`：检索相关页、引用标签校验、自然语言召回、来源跳转、取消和锁定代次屏蔽晚结果 | 待执行 QA-11、QA-12 |
-| 桌面本地运行并预留云扩展 | `libraryStorage.test.ts`、Rust `library_storage.rs`：存储接口注入、SQLite CAS/事务与迁移，不存在浏览器持久化实现；`main.tsx` 仅在 Tauri 环境创建科研服务 | 原生构建和进程启动已完成；UI 仍等待解锁 |
+| 导入后自动建立索引 | `pdfExtraction`、`libraryService`、`librarySearch`：逐页提取、内容去重、失败重试、中英文检索 | 原生目录选择器导入 4 PDF 后仅 3 篇唯一文献；检索短语命中第 2 页；标准中文 CMap PDF 也可索引与检索 |
+| 全部论文信息及个人状态 | `PaperPreview`：标题、作者、期刊、年份、DOI、摘要、关键词、主题、收录状态、大小、实际/预计阅读时间、收藏、批注、书签 | 实际预览显示标准论文与缺失字段；阅读器笔记、收藏和阅读时间回到同一文献记录 |
+| 自动识别与人工补录永久保留 | `pdfExtraction`：Info/XMP/Custom；`PaperMetadataEditor`、`libraryService`：人工字段优先 | 预印本补录标题、作者、期刊、2024 年及 DOI；重索引、再次 AI 补全、退出重启和加密解锁均保留人工值 |
+| 轻量预览、固定和关闭 | `LibraryWorkspace`、`PaperPreview`：悬停切换、固定对象稳定、关闭重开 | 预览独立占据列表旁空间；固定论文后排序仍保持对象；关闭与重新打开均成功 |
+| 高频信息项记忆 | `PaperPreview`：显式展开计数、持久化 fieldUsage、按频次排序 | 展开摘要后摘要移到前列；切换论文及退出重启后仍优先显示 |
+| AI 五维分类 | `aiService`、`libraryFolders`：研究领域、学科方向、年份、期刊类型、主题 | 配置厂商并启用导入后补全，目录实际出现五维归属；人工年份保持；更新分类后清理无引用自动主题 |
+| 自定义多级分类 | `libraryFolders`、`LibraryWorkspace`：层级、循环/冲突校验、合并与删除 | 创建 QA Project/QA Child，重命名子分类、移到顶层、合并回主分类；删除分类保留论文 |
+| 批量管理 | `libraryService`、`LibraryWorkspace`：移动/追加、置顶、收藏、确认删除及事务 | 实际三篇批量置顶、收藏、追加两个分类、移动到单一目标、删除库内副本；删除获用户单独确认 |
+| 同一论文多分类且只存一份文件 | SHA-256 ID 与多对多 memberships | 两个手工分类均包含相同三篇论文；原生 SQLite 文件行数仍为 3，合并和移动不复制 PDF |
+| 文件夹整体加密 | `libraryCrypto`、`libraryService`、`libraryPersistence`：AES-GCM/PBKDF2、密码/篡改验证、原子切换、锁定和迟到请求保护 | 三篇记录/PDF 实际变成密文；数据库文件无测试标题、笔记、密钥明文；交叉分类无法绕过锁定；错误密码失败、正确密码恢复；解除加密字节与原 PDF 相等 |
+| 多厂商 API Key/Base URL/model | `openAiClient`、`aiTransport`、`aiService`、`AiSettings`、Rust HTTP 测试 | GUI 配置 /v1 与 /alt/v1 两个模拟兼容端点并切换；原生请求成功；401/429 提示正确；保存密钥重启后需密码解锁 |
+| 有来源的 AI 问答 | `aiService`、`AiAssistant`：本地召回、引用校验、来源定位、取消和锁定保护 | 模拟回答含 [S1]，点击来源进入第 2 页；取消 5 秒延迟请求后没有晚结果；锁定后问答范围只含公开中文文献 |
+| 既有功能与旧记录兼容 | `ResearchApp`、`libraryPersistence`：旧 desktop: 身份、会话、批注与书签 | 独立旧格式夹具的页 2 书签与笔记仍可打开；切换旧文献和受管文献没有串记录；原生退出重启恢复状态 |
+| 双文档阅读 | `LibraryCompareWorkspace`、`PdfViewerBridge`：独立控制器、只读批注、锁定/迟到结果清理 | 实际左右 PDF 渲染、独立页码/缩放与只读笔记；恢复左侧 110% 后首次放大正确为 120%，右侧仍 100%；锁定后受保护论文不在可选列表 |
+| 本地存储及云扩展边界 | `LibraryStorage` Adapter、原生 SQLite 事务/CAS | 实际 GUI 经 Tauri 写入独立 SQLite 并跨进程恢复；本次没有浏览器持久化实现 |
 
-## 已有自动化与构建记录
+## 原生桌面场景记录
 
-| 检查 | 最近已执行结果 | 说明 |
-| --- | --- | --- |
-| `bun run test` | 70 个文件、634/634 项通过 | 已核对本轮日志 `/tmp/smartreader-final-verified-tests.log` |
-| PDF 元数据聚焦测试 | `pdfExtraction.test.ts` 23/23 通过 | 包括真实最小 PDF 的 Custom Info 解析与 Subject 回归 |
-| `bun run typecheck` | 已执行通过 | 主代理提供的本轮最终检查结果 |
-| `cargo test --manifest-path src-tauri/Cargo.toml` | 60/60 项通过 | 已核对 `/tmp/smartreader-final-verified-rust.log`；包含 SQLite 原子性和兼容 HTTP 本地服务测试 |
-| `cargo fmt --manifest-path src-tauri/Cargo.toml --check` | 已执行通过 | 主代理确认本轮格式检查完成 |
-| `git diff --check` | 已执行通过 | 本次文档检查也已执行 |
-| `bun run build` | 已执行通过 | 保留 PDF.js `eval` 与较大 chunk 警告，尚未宣称消除这些警告 |
-| 独立 QA 标识的 Tauri debug 构建 | 已完成 | `tauri build --debug --no-bundle --config '{"identifier":"com.smartreader.qa20261011","productName":"SmartReader QA"}'` |
-| QA macOS `.app` 构建 | 已完成 | `src-tauri/target/debug/bundle/macos/SmartReader QA.app`；独立标识，未安装到 `/Applications` |
-| QA 桌面进程 | 曾成功启动，现已停止 | `./src-tauri/target/debug/smartreader`；启动不等于已验证界面和业务操作 |
-| 原生 QA 数据库初始化 | 已核对 | 独立数据库可读、已应用 7 个迁移、文献数为 0；没有把无界面夹具数据当作已通过 GUI 导入 |
-| 本地兼容 API fixture 服务 | 已完成 8 次无界面验证请求，现已停止 | 回环地址端口 17861；这些请求由 TS smoke 发起，不代表桌面 GUI 已完成请求链路 |
-| `bun scripts/qa/verify-workflow.ts` | PASS | 真实 PDF、实际 TS 服务、真实 loopback HTTP；注入内存存储，边界见下节 |
+| 编号 | 已执行结果 |
+| --- | --- |
+| QA-01 | 默认 1180×780（Retina 截图 2360×1560）与最小 860×560（1720×1120）均检查。窄窗口使用图标侧栏及分类选择器；列表、预览、菜单和对话框可操作；阅读工具栏可横向滚动。 |
+| QA-02 | 原生文件夹选择器导入 4 份 PDF，去重为 3 篇，均建立索引；期刊/DOI/年份自动提取，缺失字段保持未填写。另导入中文 Type0/CMap PDF，全文检索成功。 |
+| QA-03 | 全局搜索 hippocampal consolidation 命中第 2 页并打开真实 PDF；书签跳页、阅读历史回退、翻页、缩放、收藏和笔记保存均执行。 |
+| QA-04 | 查看完整字段、固定预览、按标题排序、关闭重开；展开摘要后优先排序；实际阅读秒数累计，切换到管理/问答页面期间未继续计时。悬停切换由组件测试补充覆盖。 |
+| QA-05 | 将预印本改为 QA Manual Preprint / Manual Author / QA Archive / 2024 / 10.5555/qa.manual；重索引、AI 补全和真实重启后保持。 |
+| QA-06 | 层级创建、重命名、移动、合并、分类删除、批量追加/移动、置顶/收藏和批准后的批量删除均实际执行。文件数量与原始文件哈希同时核对。 |
+| QA-07 | 加密 QA Project 的三篇文献；QA Cross 交叉入口显示 0 篇可访问；原生全局搜索不返回受保护全文/批注；错误密码被拒绝；正确密码恢复；解除加密后原字节相等。 |
+| QA-08 | 从原生应用菜单退出并确认进程停止，再启动：人工信息、分类、收藏、批注、书签与进度保留；保险库重新锁定、API Key 重新锁定；正确密码可恢复。 |
+| QA-09 | 独立 QA 数据库追加一个合成 desktop: 旧记录和页 2 书签/笔记；旧书签跳到页 2，旧笔记显示正确；切回受管论文显示其自身笔记。 |
+| QA-10 | 两个模拟厂商端点验证、当前配置切换、导入后五维补全、401/429 错误展示；假密钥加密保存、错误密码解锁失败、正确解锁后原生连接成功。 |
+| QA-11 | 原生问答经本地 HTTP fixture 返回模拟回答；[S1] 来源按钮进入目标论文第 2 页。无效引用由响应校验测试覆盖，未把模拟回答当成模型质量证明。 |
+| QA-12 | qa-slow 请求显示进行中后取消，等待超过 5 秒后没有回答回填；锁定文献从搜索和 AI 范围排除。锁定过程中迟到索引/读取/AI 回调的竞态由服务及组件回归测试覆盖。 |
+| QA-13 | 左右 PDF 实际绘制；右侧独立跳页、左侧缩放、已有笔记只读展示。初始缩放问题修复后实测 110%→120%；锁定后打开对比仅可选择公开文献。实时锁定清空某一侧的回调由组件测试覆盖。 |
 
-PDF 写入已改为原生二进制 IPC（SRL1 帧），不再把文件字节展开为 JSON 数字数组；新增 UTF-8、长度/容量、空文件、删除与事务回滚覆盖。锁定无关文献不再打断公开论文的信息补全。
+以上为实际桌面操作与对应断言；表中明确标明由自动化补充的并发/输入边界，没有将每一种竞态均声称为 GUI 手工验证。
 
-本轮自动化日志及实际验证脚本已核对。临时日志保存在验证机器的 `/tmp`，不随仓库分发。若后续 GUI 验收发现问题并修改代码，应对修改后的版本重新执行受影响的检查并更新记录。
+## 本轮发现与修正
 
-## 无界面业务串联实测（已执行，非 GUI）
+1. **AI 更新主题留下空自动目录。** 索引、人工编辑、AI 补全和解除加密后，在同一事务内复用现有清理逻辑；共享目录仍有引用时保留，手工空目录和保险库根保留，提交失败不发布清理。新增回归先失败后通过。
+2. **恢复缩放显示及首次放大不一致。** PDF bridge 的两个缩放引用改为从 restore.zoom 初始化。真实桌面复测左侧初始 110%，第一次放大 120%，右侧保持 100%；切换源 URL 的回归也通过。
+3. **分类动作入口改为项目已有按钮菜单。** 保留原 folderAction 与对话框；点击、方向键、Enter/Space/Escape、禁用项跳过及焦点恢复可用。普通表单选择器继续使用原生 select。
+4. **标准中文 CMap PDF 被识别为空文本。** 对照实验使用 /UniGB-UCS2-H 的真实中文 PDF，原提取器无全文；补齐已安装 PDF.js 的本地 CMap/标准字体后恢复。提取器与 Viewer 共用资源路径，现有 postinstall 复制资源。169 个 CMap 资源文件、16 个标准字体资源文件在依赖、public、dist 中逐文件一致，LICENSE 随资产打包。
 
-执行入口为 `scripts/qa/verify-workflow.ts`：使用合成 PDF 文件、安装版 PDF.js、真实 `LibraryService`/`AiService`/兼容客户端与 Web Crypto，并通过真实 HTTP 访问回环地址 fixture，共 8 次请求。
+桌面自动化曾观察到后台 WebView 的文本层已就绪而 canvas 等待绘制。原生 Window → SmartReader（makeKeyAndOrderFront）激活后，中英文和双 PDF 均正常绘制。PDF.js 的 rAF 暂停/恢复控制实验复现相同行为；本次未放开 isEvalSupported:false，也未据系统字体回退警告更改安全配置。
 
-已核对的断言和操作包括：
+这些修正复用现有服务/组件与存储 Adapter，没有新增依赖或数据库迁移。最终只读 diff 审查未发现需修复的 P1/P2 问题。
 
-- 4 份 PDF 归并为 3 篇唯一文献；真实提取 DOI、期刊；`hippocampal consolidation` 命中第 2 页。
-- 自动 AI 补全后具有五维分类；人工年份 `2024` 在再次补全后保持，人工标题在重新建立服务实例后保持。
-- 创建主/子分类、多个分类归属、批量收藏与置顶；写入笔记、书签和 30 秒阅读记录。
-- 问答来源为第 2 页，模拟回答带 `[S1]`；两个 Base URL 路径与两套模型配置都完成连接验证。
-- 加密后保存状态不含测试私密标题、批注或假 API Key，PDF 密文不再以 `%PDF-` 开头；锁定后文献不可读且全文无命中。
-- 使用同一份内存存储重新创建服务实例，错误密码被拒绝，正确密码恢复标题、30 秒阅读记录、第 2 页及原 PDF 字节；保存的 API Key 需重新解锁才能连接。
+## 自动化与构建
 
-**此脚本注入的是内存 `LibraryStorage` 和基于 `fetch` 的测试传输。** 服务实例重建不是操作系统进程重启；它没有通过 Tauri IPC 操作原生 SQLite，也没有操作 GUI。原生 SQLite、二进制帧与 HTTP 由 60 项 Rust 测试独立验证，真实桌面及退出重启仍保留下列门禁。
+| 检查 | 结果 |
+| --- | --- |
+| 完整前端测试 | 70 个文件，644/644 通过 |
+| TypeScript 类型检查 | 通过 |
+| Rust 测试 | 60/60 通过，包含 SQLite 原子性、二进制帧与原生 HTTP |
+| Rust 格式检查、git diff --check | 通过 |
+| 前端 build | 通过；保留上游 PDF.js eval 与较大 chunk 警告；Viewer 使用 isEvalSupported:false |
+| QA macOS debug .app | 2026-10-11 构建完成并实际操作；最后使用 860×560 覆盖配置，正式配置仍为默认 1180×780、最小 860×560 |
+| 无界面业务脚本 | verify-workflow.ts 曾通过真实 PDF.js、Web Crypto 与本机 HTTP 共 8 次请求；注入内存存储，不能代替原生 GUI/SQLite 证据 |
 
-无界面 PDF.js 执行记录包含标准字体路径警告；文本及元数据断言通过，但这不证明真实桌面中的字体渲染结果。
+2026-10-13 对最终代码重新执行完整测试、typecheck、build、Rust 测试与格式检查。日志为 /tmp/smartreader-delivery-tests.log、/tmp/smartreader-delivery-rust.log、/tmp/smartreader-delivery-build.log；临时日志不随仓库分发。
 
-## 桌面运行环境与当前阻碍
+## 数据与进程收尾
 
-- QA 使用独立标识 `com.smartreader.qa20261011`、名称 `SmartReader QA`，与正式应用的数据目录隔离。
-- 已构建并实际启动过 Tauri 桌面进程；本地兼容接口完成了 headless 请求。本轮收尾时两者均已停止，没有保留后台运行进程。
-- 独立 debug `.app` 已构建成功且未安装到 `/Applications`；QA SQLite 已应用 7 个迁移且文献数为 0。上述 headless 数据保存在内存夹具中，未写入此原生文献库。
-- **当前状态为 `waiting-unlock`（GUI Blocked）**：桌面自动化工具报告 Mac 已锁定，无法自行解锁。已请求用户手动解锁；本轮没有成功执行任何 GUI 操作，全部 GUI 场景保持待完成。
-- 保留 `/tmp/smartreader-qa-papers` 合成资料、独立空 QA 数据库和 QA 应用包用于续测；续测时按 README 重新启动 fixture 和 QA 应用。
-- 不把窗口无法交互时的进程存活、成功构建、组件测试或 HTTP fixture 启动当作桌面验收通过。
-
-## 桌面实测记录（待补）
-
-| 编号 | 场景与检查点 | 结果与证据 |
-| --- | --- | --- |
-| QA-01 | 默认 1180×780 和最小 860×560 桌面布局；目录、列表、预览、模态框和滚动均可用 | 未执行：等待 Mac 解锁；待记录实际窗口尺寸与截图/操作结果 |
-| QA-02 | 导入 4 份合成 PDF，确认仅 3 篇唯一文献；标准与缺失元数据文件状态准确；目录导入可用 | 无界面已验证真实 PDF 提取及 4→3 去重；原生选择器、目录导入和 GUI 列表尚未执行 |
-| QA-03 | 搜索 `hippocampal consolidation` 打开命中页；阅读、前后导航、缩放、书签、批注和收藏 | 无界面已验证第 2 页命中并执行书签/批注/收藏写入；PDF 实际渲染、导航和界面操作尚未执行 |
-| QA-04 | 预览全部信息、悬停、固定、排序后仍固定、关闭重开；展开字段后的顺序/频次；阅读计时 | 未执行：待记录界面及字段变化，后台时间不得计入实际阅读 |
-| QA-05 | 补录预印本缺失字段；再索引和 AI 补全后人工值保持；原始 PDF 未被改写 | 无界面已验证人工标题/年份与再次 AI 补全；GUI 补录、重索引操作和原始文件对照尚未执行 |
-| QA-06 | 建立层级目录、重命名/移动/合并/删除；多分类追加；批量置顶/收藏/移动/删除 | 无界面已执行主/子分类、多归属移动和批量置顶/收藏；完整 GUI 操作仍待执行 |
-| QA-07 | 加密目录，验证多个分类入口共同锁定；错误密码失败、正确密码解锁、解除加密 | 无界面已验证密文、锁定拒绝读取/检索、错误密码及正确解锁；原生 GUI 与解除加密操作尚未执行 |
-| QA-08 | 退出并重启 QA 应用：库内文献、人工字段、收藏、分类、批注、阅读位置保留；加密目录与保存密钥需重新解锁 | 已验证同一内存存储中新建服务实例恢复记录/文件与解锁密钥；真实桌面退出、进程重启和 SQLite 恢复尚未执行 |
-| QA-09 | 既有路径文献及旧书签/批注仍以 `desktop:` 身份打开；新导入文献走受管库；会话切换不会串文档 | 未执行：使用独立 QA 数据中的合成 legacy 记录，待记录结果 |
-| QA-10 | 本地 fixture 两个厂商配置/路径切换、连接验证、自动五维分类、401/429 错误展示 | 无界面真实 HTTP 已验证双端点和自动分类；401/429 有自动化覆盖，桌面设置及错误展示尚未执行 |
-| QA-11 | 基于本地检索问答，回答来源点击进入对应论文及页码，错误引用不被接受 | 无界面已取得第 2 页来源及 `[S1]` 模拟回答；实际点击跳转和 GUI 展示尚未执行 |
-| QA-12 | `qa-slow` 请求期间取消或锁定文献；晚返回不回填回答、搜索结果或旧预览 | 未执行：待记录取消/锁定后等待超过 fixture 延迟的结果 |
-| QA-13 | 两份受管 PDF 左右独立渲染、跳页、缩放，已有批注只读展示；锁定时清空对应侧 | 8 项组件测试通过；实际双 PDF 桌面渲染尚未执行 |
+- QA 标识为 com.smartreader.qa20261011，与正式应用目录隔离，未安装到 /Applications。
+- GUI 请求经 Tauri 原生传输到 127.0.0.1:17861。两个兼容路径分别为 /v1/chat/completions 与 /alt/v1/chat/completions；本次未读取或使用真实厂商凭据。
+- 原生加密时验证：3 篇加密记录、3 个 PDF 密文 BLOB，数据库逻辑状态与 SQLite 文件字节均不含测试标题、笔记和假密钥明文。手工分类名称、外层配置与原磁盘 PDF 按设计保持可见。
+- 解除加密后，库内字节与原始文件逐字节相同。
+- 用户确认后删除指定 3 篇合成文献及手工测试分类；最终原生库仅保留中文测试文献。旧格式文献/书签/笔记各 1 条仍在，4 个原始 PDF 的 SHA-256 均未变化，SQLite integrity_check 为 ok，迁移数为 7。
+- 2026-10-11 收尾时从原生菜单退出 QA，确认 isRunning=false；本地模拟服务正常退出，端口 17861 无监听。
+- /tmp 中的原始合成夹具与日志是临时资料，可能被系统清理；复测时按下列命令重新生成。
 
 ## 可复现的本地夹具
 
-生成文件：
-
 ```bash
 python3 scripts/qa/create-papers.py /tmp/smartreader-qa-papers
-```
-
-- `attention-study.pdf`：3 页，有明确期刊、DOI、年份和可检索短语。
-- `attention-copy.pdf`：与前者内容完全相同，用于去重。
-- `education-study.pdf`：2 页，另一研究主题。
-- `preprint-study.pdf`：1 页，缺失作者、期刊、年份、DOI，供手动补录。
-
-这些论文、作者、期刊、DOI 和结论均为合成测试数据，不能用于学术论证。
-
-启动兼容服务：
-
-```bash
 bun scripts/qa/mock-ai.mjs
 ```
 
-服务启动后，在另一个终端执行：
+另一个终端可执行：
 
 ```bash
 bun scripts/qa/verify-workflow.ts /tmp/smartreader-qa-papers
 ```
 
-默认只监听 `127.0.0.1:17861`，使用固定假凭据 `qa-only-key`。可配置 `/v1` + `qa-primary` 与 `/alt/v1` + `qa-secondary`；`qa-rate-limit` 返回 429；`qa-slow` 延迟 5 秒，用于取消与晚结果检查。可用 `SMARTREADER_QA_PORT` 改端口。
+模拟配置使用固定假凭据 qa-only-key；/v1 + qa-primary、/alt/v1 + qa-secondary 验证多个兼容配置；qa-rate-limit 返回 429，qa-slow 延迟 5 秒。所有论文、作者、DOI、结果和回答均为合成数据。
 
-该服务用于验证协议、业务回填和桌面链路；本轮已执行无界面流程，桌面链路仍待解锁后验证。它不验证真实模型的回答质量、供应商可用性、模型权限或账户额度。**本轮未读取、申请或使用真实厂商凭据，也未进行真实厂商调用。**
+## 能力边界
 
-## 数据边界与未覆盖能力
-
-- 加密保护库内 PDF、元数据、全文索引、阅读状态、批注与书签；原始磁盘 PDF 不改变，手工分类名称和外层目录/配置仍可见。
-- 加密时保留手工关联与保险库归属，清除加密范围外的自动推断关联并清理无引用自动分类；不会声称整个 SQLite 数据库或所有分类名称都已加密。
-- 没有 OCR。扫描 PDF 的空文本状态和可手工补录不等同于完成全文识别。
-- 云端目前只有 `LibraryStorage` 扩展边界；未实现云同步、浏览器存储或移动端 UI。
-- 真实桌面交互、应用退出后重启，以及桌面 UI → Tauri → fixture 链路仍须在 Mac 解锁后填写；在此之前，不作“所有功能已完成真实桌面验收”的结论。
-
-## 收尾待办
-
-- [ ] 用户解锁 Mac 后完成上述桌面场景，并记录失败、修复与复测。
-- [x] 更新本轮 634 项前端/60 项 Rust 测试、类型检查、格式检查、构建和对应实现版本。
-- [x] 记录 headless 真实 HTTP 与内存存储边界，Step 5 以本报告/QA 脚本所在提交为准；真实厂商调用保持未执行。
-- [x] 已关闭 QA 程序和本地 fixture 服务；保留合成 PDF、QA 应用包和独立空 QA 数据库用于后续桌面验证。
+- 真实厂商可用性、账户权限/额度及模型回答质量尚未验证；本轮验证了兼容协议和完整桌面链路。
+- 加密范围为库内 PDF、元数据、索引、阅读状态、批注和书签，未将整个 SQLite 数据库或所有分类名称称为加密。
+- 没有 OCR；扫描 PDF 的空文本提示与手工补录不等同于完成全文识别。
+- 云端只有 LibraryStorage 扩展边界，本次不包含同步、浏览器持久化或移动端。

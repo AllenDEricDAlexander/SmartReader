@@ -17,6 +17,11 @@ async function setup(papers = [paperFixture(), { ...paperFixture('paper-2', '教
   return { ...fixture, onOpenPaper, onImport };
 }
 
+function chooseFolderAction(name: string) {
+  fireEvent.click(screen.getByRole('button', { name: '当前分类操作' }));
+  fireEvent.click(screen.getByRole('menuitem', { name }));
+}
+
 describe('library workspace', () => {
   it('searches indexed pages and opens the matching page directly', async () => {
     const props = await setup();
@@ -38,18 +43,76 @@ describe('library workspace', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     const parent = props.library.getView().snapshot.folders.find((folder) => folder.name === '毕业论文')!;
     fireEvent.change(screen.getByLabelText('文献分类筛选'), { target: { value: parent.id } });
-    fireEvent.change(screen.getByLabelText('当前分类操作'), { target: { value: 'createChild' } });
+    chooseFolderAction('新建子分类');
     dialog = screen.getByRole('dialog', { name: '新建分类' });
     expect(within(dialog).getByLabelText('上级分类')).toHaveValue(parent.id);
     fireEvent.change(within(dialog).getByLabelText('分类名称'), { target: { value: '文献综述' } });
     fireEvent.click(within(dialog).getByRole('button', { name: '创建分类' }));
     await waitFor(() => expect(props.library.getView().snapshot.folders.some((folder) => folder.name === '文献综述' && folder.parentId === parent.id)).toBe(true));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('当前分类操作'), { target: { value: 'renameFolder' } });
+    chooseFolderAction('重命名');
     dialog = screen.getByRole('dialog', { name: '重命名分类' });
     fireEvent.change(within(dialog).getByLabelText('分类名称'), { target: { value: '课题资料' } });
     fireEvent.click(within(dialog).getByRole('button', { name: '保存名称' }));
     await waitFor(() => expect(props.library.getView().snapshot.folders.find((folder) => folder.id === parent.id)?.name).toBe('课题资料'));
+  });
+
+  it('opens folder actions with keyboard navigation and restores focus after dialog and menu dismissal', async () => {
+    const props = await setup();
+    const folder = await props.library.createFolder('键盘分类');
+    render(<LibraryWorkspace {...props} />);
+    fireEvent.change(screen.getByLabelText('文献分类筛选'), { target: { value: folder.id } });
+    const trigger = screen.getByRole('button', { name: '当前分类操作' });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    expect(screen.getByRole('menu', { name: '当前分类操作菜单' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: '新建子分类' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    expect(screen.getByRole('menuitem', { name: '重命名' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'Enter' });
+    const dialog = screen.getByRole('dialog', { name: '重命名分类' });
+    expect(within(dialog).getByLabelText('分类名称')).toHaveFocus();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    fireEvent.keyDown(within(dialog).getByLabelText('分类名称'), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    fireEvent.click(trigger);
+    fireEvent.keyDown(document.activeElement!, { key: 'End' });
+    expect(screen.getByRole('menuitem', { name: '加密文件夹' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'Home' });
+    expect(screen.getByRole('menuitem', { name: '新建子分类' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    fireEvent.keyDown(document.activeElement!, { key: ' ' });
+    expect(screen.getByRole('dialog', { name: '重命名分类' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '关闭重命名分类' }));
+    expect(trigger).toHaveFocus();
+    fireEvent.keyDown(trigger, { key: 'ArrowUp' });
+    expect(screen.getByRole('menuitem', { name: '加密文件夹' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(props.library.getView().snapshot.folders.find((item) => item.id === folder.id)?.name).toBe('键盘分类');
+  });
+
+  it('skips disabled encrypted-folder actions and closes the menu on an outside interaction', async () => {
+    const props = await setup();
+    const folder = await props.library.createFolder('加密分类');
+    const vault = await props.library.encryptFolder(folder.id, 'vault password');
+    await props.library.lockVault(vault.id);
+    render(<LibraryWorkspace {...props} />);
+    fireEvent.change(screen.getByLabelText('文献分类筛选'), { target: { value: folder.id } });
+    const trigger = screen.getByRole('button', { name: '当前分类操作' });
+    fireEvent.click(trigger);
+    for (const name of ['移动分类', '合并分类', '删除分类', '解除加密']) {
+      expect(screen.getByRole('menuitem', { name })).toBeDisabled();
+    }
+    fireEvent.keyDown(document.activeElement!, { key: 'End' });
+    expect(screen.getByRole('menuitem', { name: '重命名' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    expect(screen.getByRole('menuitem', { name: '新建子分类' })).toHaveFocus();
+    fireEvent.pointerDown(screen.getByRole('searchbox', { name: '搜索文献' }));
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('favorites a selection and adds each paper to multiple folders without duplicating its file', async () => {
@@ -77,7 +140,7 @@ describe('library workspace', () => {
     await props.library.categorize(['paper-1'], [folder.id], 'add');
     render(<LibraryWorkspace {...props} />);
     fireEvent.change(screen.getByLabelText('文献分类筛选'), { target: { value: folder.id } });
-    fireEvent.change(screen.getByLabelText('当前分类操作'), { target: { value: 'deleteFolder' } });
+    chooseFolderAction('删除分类');
     let dialog = screen.getByRole('dialog', { name: '删除分类' });
     expect(within(dialog).getByText(/保留所有论文/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: '确认删除分类' }));
@@ -142,14 +205,14 @@ describe('library workspace', () => {
     await props.library.categorize(['paper-2'], [first.id], 'add');
     render(<LibraryWorkspace {...props} />);
     fireEvent.change(screen.getByLabelText('文献分类筛选'), { target: { value: child.id } });
-    fireEvent.change(screen.getByLabelText('当前分类操作'), { target: { value: 'moveFolder' } });
+    chooseFolderAction('移动分类');
     let dialog = screen.getByRole('dialog', { name: '移动分类' });
     fireEvent.change(within(dialog).getByLabelText('上级分类'), { target: { value: second.id } });
     fireEvent.click(within(dialog).getByRole('button', { name: '确认移动' }));
     await waitFor(() => expect(props.library.getView().snapshot.folders.find((folder) => folder.id === child.id)?.parentId).toBe(second.id));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     fireEvent.change(screen.getByLabelText('文献分类筛选'), { target: { value: first.id } });
-    fireEvent.change(screen.getByLabelText('当前分类操作'), { target: { value: 'mergeFolder' } });
+    chooseFolderAction('合并分类');
     dialog = screen.getByRole('dialog', { name: '合并分类' });
     expect(within(dialog).getByText(/保留所有论文/)).toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText('目标分类'), { target: { value: second.id } });
@@ -165,7 +228,7 @@ describe('library workspace', () => {
     await props.library.categorize(['paper-1'], [folder.id], 'add');
     render(<LibraryWorkspace {...props} />);
     fireEvent.change(screen.getByLabelText('文献分类筛选'), { target: { value: folder.id } });
-    fireEvent.change(screen.getByLabelText('当前分类操作'), { target: { value: 'encryptFolder' } });
+    chooseFolderAction('加密文件夹');
     let dialog = screen.getByRole('dialog', { name: '加密文件夹' });
     const password = within(dialog).getByLabelText('文件夹密码');
     expect(password).toHaveAttribute('type', 'password');
@@ -190,7 +253,7 @@ describe('library workspace', () => {
     fireEvent.change(within(dialog).getByLabelText('文件夹密码'), { target: { value: 'vault password' } });
     fireEvent.click(within(dialog).getByRole('button', { name: '解锁' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('当前分类操作'), { target: { value: 'decryptVault' } });
+    chooseFolderAction('解除加密');
     dialog = screen.getByRole('dialog', { name: '解除文件夹加密' });
     expect(within(dialog).getByText(/以明文保存/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: '确认解除加密' }));

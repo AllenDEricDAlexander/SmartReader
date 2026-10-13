@@ -77,6 +77,84 @@ describe('desktop library workflows', () => {
     expect(reopened.getPaper(paper.id)?.manualFields).toEqual(expect.arrayContaining(['title', 'year', 'abstract']));
   });
 
+  it('prunes obsolete automatic topics only after their last paper receives new AI metadata', async () => {
+    const backend = memoryStorage();
+    const library = new LibraryService(backend.storage, async () => extracted());
+    const first = await library.importPdf(pdf(), 'first.pdf');
+    const second = await library.importPdf(new TextEncoder().encode('%PDF-1.7\nsecond paper'), 'second.pdf');
+    const originalTopic = library.getView().snapshot.folders.find((folder) => folder.name === '机器学习')!;
+    const manual = await library.createFolder('手工空分类');
+
+    await library.applyAiMetadata(first.id, { researchTopics: ['注意力与记忆'] });
+    expect(library.getView().snapshot.folders.some((folder) => folder.id === originalTopic.id)).toBe(true);
+    expect(library.getView().snapshot.memberships[second.id]).toContain(originalTopic.id);
+    await library.applyAiMetadata(second.id, { researchTopics: ['注意力与记忆'] });
+
+    const snapshot = library.getView().snapshot;
+    expect(snapshot.folders.some((folder) => folder.id === originalTopic.id)).toBe(false);
+    expect(snapshot.folders.some((folder) => folder.id === manual.id)).toBe(true);
+    const replacement = snapshot.folders.find((folder) => folder.name === '注意力与记忆')!;
+    expect(snapshot.folders.some((folder) => folder.id === replacement.parentId && folder.name === '论文主题')).toBe(true);
+    expect(snapshot.memberships[first.id]).toContain(replacement.id);
+    expect(snapshot.memberships[second.id]).toContain(replacement.id);
+    expect(backend.snapshot()?.folders).toEqual(snapshot.folders);
+    await library.applyAiMetadata(second.id, { researchTopics: ['注意力与记忆'] });
+    expect(library.getView().snapshot.folders).toEqual(snapshot.folders);
+  });
+
+  it.each(['reindex', 'manual edit'] as const)('prunes unused automatic folders after %s updates', async (operation) => {
+    const backend = memoryStorage();
+    const extract = vi.fn(async () => extracted());
+    const library = new LibraryService(backend.storage, extract);
+    const paper = await library.importPdf(pdf(), 'paper.pdf');
+    const oldTopic = library.getView().snapshot.folders.find((folder) => folder.name === '机器学习')!;
+    if (operation === 'reindex') {
+      extract.mockResolvedValueOnce({ ...extracted(), metadata: { ...extracted().metadata, researchTopics: ['重新识别的主题'] } });
+      await library.retryIndex(paper.id);
+      expect(library.getView().snapshot.folders.some((folder) => folder.name === '重新识别的主题')).toBe(true);
+    } else {
+      await library.editMetadata(paper.id, { researchTopics: [] });
+      expect(library.getView().snapshot.folders.some((folder) => folder.id === oldTopic.parentId)).toBe(false);
+    }
+    expect(library.getView().snapshot.folders.some((folder) => folder.id === oldTopic.id)).toBe(false);
+  });
+
+  it('keeps empty automatic vault roots and manual folders during subsequent classification cleanup', async () => {
+    const backend = memoryStorage();
+    const extract = vi.fn(async () => extracted());
+    const library = new LibraryService(backend.storage, extract);
+    const privatePaper = await library.importPdf(pdf(), 'private.pdf');
+    const vaultFolder = library.getView().snapshot.folders.find((folder) => folder.name === '机器学习')!;
+    const vault = await library.encryptFolder(vaultFolder.id, 'strong password');
+    await library.deletePapers([privatePaper.id]);
+    const manual = await library.createFolder('手工空分类');
+    extract.mockResolvedValueOnce({ ...extracted(), metadata: { ...extracted().metadata, researchTopics: ['公开主题'] } });
+    const publicPaper = await library.importPdf(new TextEncoder().encode('%PDF-1.7\npublic paper'), 'public.pdf');
+
+    const snapshot = library.getView().snapshot;
+    expect(snapshot.folders).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: vaultFolder.id, automatic: true }),
+      expect.objectContaining({ id: manual.id, automatic: false }),
+    ]));
+    expect(snapshot.vaults).toEqual([vault]);
+    expect(snapshot.folders.some((folder) => folder.id === vaultFolder.parentId)).toBe(true);
+    expect(snapshot.memberships[publicPaper.id]).not.toContain(vaultFolder.id);
+  });
+
+  it('does not publish automatic folder cleanup when its metadata transaction fails', async () => {
+    const backend = memoryStorage();
+    const library = new LibraryService(backend.storage, async () => extracted());
+    const paper = await library.importPdf(pdf(), 'paper.pdf');
+    const previous = structuredClone(library.getView().snapshot);
+    vi.mocked(backend.storage.commit).mockRejectedValueOnce(new Error('disk full'));
+
+    await expect(library.applyAiMetadata(paper.id, { researchTopics: ['待保存的新主题'] })).rejects.toThrow('disk full');
+    const attempted = vi.mocked(backend.storage.commit).mock.calls.at(-1)![1];
+    expect(attempted.folders.some((folder) => folder.name === '机器学习')).toBe(false);
+    expect(library.getView().snapshot).toEqual(previous);
+    expect(backend.snapshot()).toEqual(previous);
+  });
+
   it('keeps an imported file when extraction fails and supports a later successful retry', async () => {
     const backend = memoryStorage();
     const extract = vi.fn().mockRejectedValueOnce(new Error('PDF 需要密码')).mockResolvedValue(extracted());

@@ -25,5 +25,14 @@
 | 3 | `src/ai` 中客户端、配置/密钥、结构化补全与问答；Rust HTTP transport | 兼容 URL、错误/超时、响应校验、不覆盖人工值、提示词不可信边界 | feat(ai): support configurable OpenAI-compatible providers |
 | 4 | 文献库/预览/分类/批量 UI、设置、现有 Reader 和入口适配 | 组件测试、完整 TS 测试、构建、Rust 回归 | feat(desktop): connect research library and AI workflows |
 | 5 | 桌面运行验证与必要修复、README 和验收记录 | Tauri UI 导入/阅读/编辑/目录/收藏/批量/锁定/重启；本地兼容 API 测试；记录未跑的真实厂商调用 | test(desktop): verify research workflows and document delivery |
+| 6 | 解锁后的原生桌面验收与发现问题的修正：分类清理、恢复缩放、分类操作菜单、离线中文 PDF 资源 | 真实 Tauri UI、SQLite 重启恢复、双端点模拟 API、中文 PDF 索引与渲染、最小窗口；针对发现的问题补回归 | fix(desktop): address native research workflow findings |
+
+## 原生验收后的修正决策
+
+- AI 更新主题后遗留空自动分类：在现有分类事务内复用 `pruneEmptyAutomaticFolders`，保留手工目录、仍有引用的目录及加密根目录。
+- 保存的缩放与首次显示不一致：让 PDF bridge 的初始缩放引用与 `restore.zoom` 一致，验证首次放大及切换文档，不另建缩放状态层。
+- 分类操作使用项目已有的按钮菜单交互，保留现有动作与对话框，提供键盘导航和焦点恢复；普通表单选择器保持现状。
+- 标准中文 CMap PDF 的文本提取已实证失败：随现有 PDF.js 安装资源打包本地 CMap 与标准字体，索引和阅读器共享资源路径，避免联网获取。
+- 这些修正继续使用现有服务、组件和存储 Adapter；直接复用既有逻辑即可，不增加设计模式、依赖或数据库迁移。
 
 每步在验证后精确路径暂存并提交；不得纳入原有两份未跟踪 reader-progress 文档。步骤内部允许并行处理互不覆盖的文件。完整审核以用户原始要求为准，发现缺口继续修复，真实厂商调用需配置有效凭据后验证。

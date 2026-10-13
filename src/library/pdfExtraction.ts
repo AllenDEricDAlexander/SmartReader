@@ -1,4 +1,5 @@
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from 'pdfjs-dist';
+import { pdfDocumentAssets } from '../platform/pdfAssets';
 import { emptyMetadata, type IndexedPage, type PaperMetadata } from './libraryModels';
 
 export type PdfExtraction = {
@@ -20,7 +21,7 @@ export async function extractPdf(
   }
 
   // PDF.js transfers its input buffer to the worker; the library still owns its copy.
-  const task = getDocument({ data: bytes.slice(), password, isEvalSupported: false });
+  const task = getDocument({ data: bytes.slice(), password, ...pdfDocumentAssets, isEvalSupported: false });
   let destruction: Promise<void> | undefined;
   const destroy = () => (destruction ??= task.destroy());
   let rejectAborted: (error: Error) => void = () => undefined;
