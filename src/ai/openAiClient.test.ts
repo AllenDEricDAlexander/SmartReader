@@ -23,6 +23,13 @@ function response(content = 'A supported conclusion.'): AiHttpResponse {
 }
 
 describe('OpenAI-compatible client', () => {
+  it('disables default thinking for Alibaba Qwen3.8-27B synchronous calls without adding vendor fields to other hosts', async () => {
+    const transport = vi.fn(async (_request: AiHttpRequest) => ({ status: 200, body: '{"choices":[{"message":{"content":"answer"}}]}' }));
+    await requestCompletion({ ...provider, baseUrl: 'https://llm-test.cn-beijing.maas.aliyuncs.com/v1', model: 'qwen3.8-27b' }, apiKey, messages, { transport });
+    expect(transport.mock.calls[0][0].body).toMatchObject({ stream: false, enable_thinking: false });
+    await requestCompletion({ ...provider, model: 'qwen3.8-27b' }, apiKey, messages, { transport });
+    expect(transport.mock.calls[1][0].body).not.toHaveProperty('enable_thinking');
+  });
   it.each([
     ['https://provider.example/v1', 'https://provider.example/v1/chat/completions'],
     ['https://provider.example/custom/prefix/', 'https://provider.example/custom/prefix/chat/completions'],

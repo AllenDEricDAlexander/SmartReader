@@ -6,12 +6,13 @@ import { errorMessage, type LibraryService } from '../library/libraryService';
 import '../ai/aiWorkspace.css';
 
 type AiSettingsProps = { library: LibraryService; ai: AiService };
-type ProviderDraft = { id?: string; name: string; baseUrl: string; model: string };
+type ProviderDraft = { id?: string; name: string; baseUrl: string; model: string; embeddingModel: string; embeddingBaseUrl: string };
 
 function providerDraft(provider?: AiProviderProfile): ProviderDraft {
   return provider
-    ? { id: provider.id, name: provider.name, baseUrl: provider.baseUrl, model: provider.model }
-    : { name: '', baseUrl: '', model: '' };
+    ? { id: provider.id, name: provider.name, baseUrl: provider.baseUrl, model: provider.model,
+      embeddingModel: provider.embeddingModel ?? (/阿里云|aliyun/i.test(provider.name) ? 'text-embedding-v4' : ''), embeddingBaseUrl: provider.embeddingBaseUrl ?? '' }
+    : { name: '', baseUrl: '', model: '', embeddingModel: '', embeddingBaseUrl: '' };
 }
 
 export function AiSettings({ library, ai }: AiSettingsProps) {
@@ -25,6 +26,8 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
   const [rememberKey, setRememberKey] = useState(false);
   const [savePassword, setSavePassword] = useState('');
   const [unlockPassword, setUnlockPassword] = useState('');
+  const [knowledgeDraft, setKnowledgeDraft] = useState(settings.knowledge ?? { backend: 'local' as 'local' | 'milvus', milvusUrl: '' });
+  const [milvusToken, setMilvusToken] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -36,7 +39,8 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
   const active = settings.providers.find((provider) => provider.id === settings.activeProviderId);
   const activeReady = Boolean(active && activity.keyProviderIds.includes(active.id));
   const dirty = !selected || draft.name !== selected.name || draft.baseUrl !== selected.baseUrl
-    || draft.model !== selected.model || Boolean(apiKey) || rememberKey;
+    || draft.model !== selected.model || draft.embeddingModel !== (selected.embeddingModel ?? '')
+    || draft.embeddingBaseUrl !== (selected.embeddingBaseUrl ?? '') || Boolean(apiKey) || rememberKey;
 
   useEffect(() => {
     mounted.current = true;
@@ -50,6 +54,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
     if (libraryView.loaded && !selectedInitially.current) {
       selectedInitially.current = true;
       setDraft(providerDraft(settings.providers.find((provider) => provider.id === settings.activeProviderId)));
+      setKnowledgeDraft(settings.knowledge ?? { backend: 'local', milvusUrl: '' });
     }
   }, [libraryView.loaded, settings]);
 
@@ -75,7 +80,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
     } catch (failure) {
       if (mounted.current && generation === operation.current) {
         let message = errorMessage(failure);
-        for (const secret of [apiKey, savePassword, unlockPassword]) {
+        for (const secret of [apiKey, savePassword, unlockPassword, milvusToken]) {
           if (secret) message = message.replaceAll(secret, '••••');
         }
         setError(message);
@@ -152,6 +157,19 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
                 placeholder="填写厂商提供的模型名称"
                 onChange={(event) => setDraft({ ...draft, model: event.target.value })}
               />
+            </label>
+            <label className="ai-full-width">
+              <span>Embedding 模型</span>
+              <input aria-label="Embedding 模型" value={draft.embeddingModel} maxLength={200}
+                placeholder="阿里云可填写 text-embedding-v4"
+                onChange={(event) => setDraft({ ...draft, embeddingModel: event.target.value })} />
+              <small className="ai-field-help">向量模型与聊天模型分别配置，共用此厂商的 Base URL 和 API Key。配置后，新增文献会自动生成向量。</small>
+            </label>
+            <label className="ai-full-width">
+              <span>Embedding Base URL（可选）</span>
+              <input aria-label="Embedding Base URL" type="url" value={draft.embeddingBaseUrl}
+                placeholder="留空复用聊天服务地址" onChange={(event) => setDraft({ ...draft, embeddingBaseUrl: event.target.value })} />
+              <small className="ai-field-help">独立部署的聊天模型地址可能不提供向量模型，可指定 embedding 服务地址。共用此厂商 API Key；更换地址需重新输入密钥。</small>
             </label>
             <label className="ai-full-width">
               <span>Base URL</span>
@@ -249,6 +267,10 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
             >
               {busy === 'test' ? '正在验证…' : '验证连接'}
             </button>
+            <button type="button" disabled={Boolean(busy) || dirty || !hasKey || !selected.embeddingModel}
+              onClick={() => void runAction('embedding', () => ai.testEmbeddingConnection(selected.id), (dimension) => setNotice(`向量模型验证成功，维度 ${dimension}。`))}>
+              {busy === 'embedding' ? '验证向量中…' : '验证向量模型'}
+            </button>
             {hasKey || selected.savedKey ? (
               <button
                 type="button" disabled={Boolean(busy)}
@@ -267,6 +289,33 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
           {dirty ? <p className="ai-field-help">请先保存配置，再验证连接。</p> : null}
         </div>
       ) : null}
+      <form className="ai-key-panel" aria-label="知识库检索设置" onSubmit={(event) => {
+        event.preventDefault();
+        void runAction('knowledge', () => ai.saveKnowledgeSettings(knowledgeDraft.backend, knowledgeDraft.milvusUrl, milvusToken || undefined), () => {
+          setKnowledgeDraft(library.getView().snapshot.ai.knowledge!);
+          setMilvusToken('');
+          setNotice('知识库检索设置已保存。');
+        });
+      }}>
+        <h3>知识库检索</h3>
+        <label><span>向量检索位置</span>
+          <select aria-label="向量检索位置" value={knowledgeDraft.backend} disabled={Boolean(busy) || !libraryView.loaded}
+            onChange={(event) => setKnowledgeDraft({ ...knowledgeDraft, backend: event.target.value as 'local' | 'milvus' })}>
+            <option value="local">本地 · SQLite + sqlite-vec</option><option value="milvus">云端 · Milvus</option>
+          </select>
+        </label>
+        <p className="ai-field-help">原文和向量缓存保存于本地 SQLite。本地检索在内存中运行，向量生成仍使用所选 embedding 厂商。</p>
+        {knowledgeDraft.backend === 'milvus' ? <>
+          <label><span>Milvus 服务地址</span><input aria-label="Milvus 服务地址" type="url" required value={knowledgeDraft.milvusUrl}
+            placeholder="https://your-milvus-endpoint" disabled={Boolean(busy)}
+            onChange={(event) => { setKnowledgeDraft({ ...knowledgeDraft, milvusUrl: event.target.value }); setMilvusToken(''); }} /></label>
+          <label><span>Milvus 访问令牌（仅本次会话）</span><input aria-label="Milvus 访问令牌" type="password" autoComplete="off" value={milvusToken}
+            placeholder={activity.milvusReady ? '留空保留当前地址的令牌' : '输入 Milvus / Zilliz 令牌'} disabled={Boolean(busy)}
+            onChange={(event) => setMilvusToken(event.target.value)} /></label>
+          <p className="ai-field-help">仅上传未加密文件的向量，原文不上传至 Milvus。问答使用独立临时集合，结束后清理；加密文献请使用本地检索。令牌重启后需重新输入。</p>
+        </> : null}
+        <button type="submit" disabled={Boolean(busy) || !libraryView.loaded}>保存检索设置</button>
+      </form>
       <div className="ai-auto-section">
         <label className="ai-checkbox">
           <input

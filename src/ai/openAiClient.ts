@@ -53,6 +53,28 @@ export async function requestCompletion(
     !['system', 'user', 'assistant'].includes(message.role) || typeof message.content !== 'string')) {
     throw new Error('AI 请求必须包含有效的文本消息。');
   }
+  // Alibaba's hybrid-thinking Qwen3.8-27B defaults to thinking mode. This
+  // synchronous reader requests its supported non-thinking text response.
+  const aliyunQwen = /(?:^|\.)(?:maas|dashscope)\.aliyuncs\.com$/i.test(new URL(url).hostname)
+    && /^qwen3\.8-27b(?:-|$)/i.test(model);
+  const parsed = await requestAiJson(url, apiKey, { model, messages: messages.map(({ role, content }) => ({ role, content })), stream: false,
+    ...(aliyunQwen ? { enable_thinking: false } : {}) }, options);
+  const choices = isRecord(parsed) && Array.isArray(parsed.choices) ? parsed.choices : [];
+  const message = isRecord(choices[0]) && isRecord(choices[0].message) ? choices[0].message : null;
+  if (typeof message?.content !== 'string' || !message.content.trim()) {
+    throw new Error('AI 服务未返回可用文本，请确认模型支持 Chat Completions 文本输出。');
+  }
+  return message.content.split(apiKey).join('[已隐藏 API Key]');
+}
+
+/** Shared bounded native HTTP path for chat, embeddings and Milvus REST requests. */
+export async function requestAiJson(
+  url: string, key: string, body: Record<string, unknown>,
+  options: { signal?: AbortSignal; transport?: AiTransport; timeoutMs?: number } = {},
+): Promise<unknown> {
+  const apiKey = key.trim();
+  if (!apiKey || /[\u0000-\u001f\u007f]/.test(apiKey)) throw new Error('请填写有效的 API Key 或服务令牌。');
+  if (options.signal?.aborted) throw normalizeAiTransportError('AI_HTTP_CANCELLED');
   const timeoutMs = options.timeoutMs ?? 60_000;
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 120_000) {
     throw new Error('AI 请求超时必须在 1000 至 120000 毫秒之间。');
@@ -76,7 +98,7 @@ export async function requestCompletion(
       (options.transport ?? createAiTransport())({
         url,
         apiKey,
-        body: { model, messages: messages.map(({ role, content }) => ({ role, content })), stream: false },
+        body,
         timeoutMs,
         requestId: crypto.randomUUID(),
       }, controller.signal),
@@ -104,12 +126,7 @@ export async function requestCompletion(
   } catch {
     throw new Error('AI 服务返回的内容不是有效的 JSON 响应。');
   }
-  const choices = isRecord(parsed) && Array.isArray(parsed.choices) ? parsed.choices : [];
-  const message = isRecord(choices[0]) && isRecord(choices[0].message) ? choices[0].message : null;
-  if (typeof message?.content !== 'string' || !message.content.trim()) {
-    throw new Error('AI 服务未返回可用文本，请确认模型支持 Chat Completions 文本输出。');
-  }
-  return message.content.split(apiKey).join('[已隐藏 API Key]');
+  return parsed;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

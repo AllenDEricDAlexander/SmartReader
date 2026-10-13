@@ -308,6 +308,15 @@ fn write_snapshot(
         "UPDATE research_library_state SET revision = ?1, data_json = ?2 WHERE id = 1",
         params![next_revision, data_json],
     )?;
+    // Vector caches belong only to public papers. Encryption and deletion remove
+    // their old vectors in the same transaction as the library state transition.
+    transaction.execute(
+        "DELETE FROM knowledge_vector_cache WHERE paper_id NOT IN (
+            SELECT json_extract(value, '$.id') FROM json_each(?1, '$.papers')
+            WHERE json_extract(value, '$.kind') = 'plain'
+        )",
+        [&data_json],
+    )?;
     transaction.commit()?;
     Ok(next_revision)
 }
@@ -381,6 +390,226 @@ mod tests {
         let connection = Connection::open_in_memory().expect("in-memory database");
         apply_migrations(&connection).expect("migrations apply");
         connection
+    }
+
+    #[test]
+    #[ignore = "started only by scripts/qa/verify-knowledge.ts"]
+    fn native_knowledge_qa_bridge() {
+        use crate::knowledge_vectors::{read_cache, save_cache, search};
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::path::PathBuf;
+        use std::time::Duration;
+
+        let path = PathBuf::from(std::env::var("SMARTREADER_KNOWLEDGE_QA_DB").unwrap());
+        assert_eq!(path.file_name().unwrap(), "qa.sqlite");
+        let parent = path.parent().unwrap().canonicalize().unwrap();
+        assert!(parent
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("smartreader-knowledge-"));
+        assert_eq!(
+            parent.parent().unwrap().canonicalize().unwrap(),
+            std::env::temp_dir().canonicalize().unwrap()
+        );
+        assert!(
+            !path.exists(),
+            "QA bridge only creates its own new temporary database"
+        );
+        let mut connection = Connection::open(&path).unwrap();
+        apply_migrations(&connection).unwrap();
+        let port = std::env::var("SMARTREADER_KNOWLEDGE_QA_PORT")
+            .unwrap()
+            .parse::<u16>()
+            .unwrap();
+        let listener = TcpListener::bind(("127.0.0.1", port)).unwrap();
+        println!("KNOWLEDGE_QA_READY");
+        std::io::stdout().flush().unwrap();
+        loop {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut packet = Vec::new();
+            let mut buffer = [0u8; 8192];
+            let body_start;
+            loop {
+                let length = stream.read(&mut buffer).unwrap();
+                assert!(length > 0);
+                packet.extend_from_slice(&buffer[..length]);
+                assert!(packet.len() <= 16 * 1024 * 1024);
+                if let Some(end) = packet.windows(4).position(|part| part == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&packet[..end]);
+                    let length = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.split_once(':').and_then(|(name, value)| {
+                                name.eq_ignore_ascii_case("content-length")
+                                    .then(|| value.trim().parse::<usize>().unwrap())
+                            })
+                        })
+                        .unwrap();
+                    if packet.len() >= end + 4 + length {
+                        body_start = end + 4;
+                        break;
+                    }
+                }
+            }
+            let request: Value = serde_json::from_slice(&packet[body_start..]).unwrap();
+            let command = request["command"].as_str().unwrap();
+            let args = &request["args"];
+            let result: Result<Value, String> = (|| {
+                let value = match command {
+                    "read_library_storage" => {
+                        serde_json::to_value(read_snapshot(&connection).map_err(|e| e.to_string())?)
+                    }
+                    "write_library_storage_binary" => {
+                        let bytes = serde_json::from_value::<Vec<u8>>(args["frame"].clone())
+                            .map_err(|e| e.to_string())?;
+                        serde_json::to_value(
+                            write_binary_frame(&mut connection, tauri::ipc::InvokeBody::Raw(bytes))
+                                .map_err(|e| e.to_string())?,
+                        )
+                    }
+                    "read_library_file" => serde_json::to_value(
+                        read_file(&connection, args["id"].as_str().unwrap())
+                            .map_err(|e| e.to_string())?,
+                    ),
+                    "read_knowledge_cache" => serde_json::to_value(
+                        read_cache(
+                            &connection,
+                            serde_json::from_value(args["key"].clone()).unwrap(),
+                        )
+                        .map_err(|e| e.to_string())?,
+                    ),
+                    "write_knowledge_cache" => {
+                        save_cache(
+                            &mut connection,
+                            serde_json::from_value(args["cache"].clone()).unwrap(),
+                        )
+                        .map_err(|e| e.to_string())?;
+                        Ok(Value::Null)
+                    }
+                    "search_knowledge_vectors" => serde_json::to_value(
+                        search(
+                            serde_json::from_value(args["entries"].clone()).unwrap(),
+                            serde_json::from_value(args["query"].clone()).unwrap(),
+                            args["limit"].as_u64().unwrap() as usize,
+                        )
+                        .map_err(|e| e.to_string())?,
+                    ),
+                    "_qa_reopen" => {
+                        let previous = std::mem::replace(
+                            &mut connection,
+                            Connection::open_in_memory().unwrap(),
+                        );
+                        drop(previous);
+                        connection = Connection::open(&path).unwrap();
+                        apply_migrations(&connection).unwrap();
+                        Ok(Value::Null)
+                    }
+                    "_qa_counts" => Ok(json!({
+                        "caches": connection.query_row("SELECT count(*) FROM knowledge_vector_cache", [], |row| row.get::<_, i64>(0)).unwrap(),
+                        "migrations": connection.query_row("SELECT count(*) FROM schema_migrations", [], |row| row.get::<_, i64>(0)).unwrap(),
+                    })),
+                    "_qa_close" => Ok(Value::Null),
+                    _ => return Err("Unsupported QA command".into()),
+                };
+                value.map_err(|e| e.to_string())
+            })();
+            let body = serde_json::to_string(&match result {
+                Ok(value) => json!({"data":value}),
+                Err(error) => json!({"error":error}),
+            })
+            .unwrap();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            if command == "_qa_close" {
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn encryption_and_deletion_remove_vector_caches_atomically() {
+        use crate::knowledge_vectors::{save_cache, CacheKey, VectorCache};
+        let mut connection = test_connection();
+        let id = "a".repeat(64);
+        write_snapshot(
+            &mut connection,
+            0,
+            json!({"papers":[{"id":id,"kind":"plain"}]}),
+            vec![blob(&id, Some(b"PDF"))],
+        )
+        .unwrap();
+        save_cache(
+            &mut connection,
+            VectorCache {
+                key: CacheKey {
+                    paper_id: id.clone(),
+                    model_key: "b".repeat(64),
+                    content_key: "c".repeat(64),
+                },
+                vectors: vec![vec![1.0, 0.0]],
+            },
+        )
+        .unwrap();
+        let encrypted = json!({"papers":[{"id":id,"kind":"encrypted"}]});
+        assert!(write_snapshot(&mut connection, 99, encrypted.clone(), vec![]).is_err());
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM knowledge_vector_cache", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        write_snapshot(
+            &mut connection,
+            1,
+            encrypted,
+            vec![blob(&id, Some(b"CIPHER"))],
+        )
+        .unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM knowledge_vector_cache", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        write_snapshot(
+            &mut connection,
+            2,
+            json!({"papers":[{"id":id,"kind":"plain"}]}),
+            vec![],
+        )
+        .unwrap();
+        save_cache(
+            &mut connection,
+            VectorCache {
+                key: CacheKey {
+                    paper_id: id.clone(),
+                    model_key: "b".repeat(64),
+                    content_key: "c".repeat(64),
+                },
+                vectors: vec![vec![1.0, 0.0]],
+            },
+        )
+        .unwrap();
+        write_snapshot(
+            &mut connection,
+            3,
+            json!({"papers":[]}),
+            vec![blob(&id, None)],
+        )
+        .unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM knowledge_vector_cache", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
 
     fn blob(id: &str, bytes: Option<&[u8]>) -> LibraryBlobMutation {

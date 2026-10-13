@@ -36,12 +36,23 @@ SmartReader 是一款本地优先的桌面科研文献阅读器，基于 Tauri�
 在“设置 → AI 厂商”中添加厂商名称、Base URL、模型名称和自己的 API Key，再选择当前厂商。客户端使用 OpenAI-compatible `POST /chat/completions` 协议，保留自定义路径前缀；通常填写厂商提供的含 `/v1` 的 Base URL，也接受完整的 `/chat/completions` 地址，不会重复追加路径。
 
 - 支持保存和切换多套厂商配置，以及 HTTP/HTTPS 地址；模型名称由用户填写，不固定到某一家厂商或模型。
-- API Key 默认仅在当前会话使用。需要跨重启保存时，使用至少 8 个字符的密码加密保存，重启后需解锁；改变 Base URL 会清除旧凭据，避免将其带到新的地址。
+- API Key 默认仅在当前会话使用。需要跨重启保存时，使用至少 8 个字符的密码加密保存，重启后需解锁；改变聊天或 embedding 服务地址会清除旧凭据，避免将其带到新的地址。
 - 文件导入、本地索引和阅读无需 AI。用户可手动补全文献信息，也可显式启用“导入后自动 AI 补全与分类”。
-- 文献问答基于可访问文献的本地检索结果，提供来源标签和页码跳转。相关摘录、文献信息和问题会发送至所选厂商；锁定的文献不参与检索。
+- 问答页面可直接“添加本地 PDF”，按文件名筛选，并选择全部可检索文献或多份指定文件；选择为空时不会扩大到全库。回答提供来源标签和页码跳转。
 - AI 失败不会删除本地文件或索引。支持重试、取消、超时和明确的鉴权/权限/限额错误；不会自动重试可能计费的请求，也不会将服务端原始错误或密钥写入错误提示。
 
 真实厂商的模型效果、账号权限和额度需要用户配置有效凭据后验证。仓库提供本地兼容接口用于功能复测，不附带真实厂商凭据。
+
+### 知识库与语义检索
+
+在 AI 厂商配置中填写独立的“Embedding 模型”。已有阿里云配置的编辑表单建议 `text-embedding-v4`，需保存后生效；点击“验证向量模型”可检查模型权限和返回维度。默认复用聊天地址与 API Key，也可填写独立的“Embedding Base URL”（接受完整 `/embeddings` 地址）。专用聊天部署可能没有 embedding 接口，此时需填写账号实际可用的 embedding 服务地址，并重新输入密钥。未配置 embedding 时保留已有全文检索，并在问答页面明确显示当前方式。
+
+- 本地模式默认使用 SQLite 持久化公开文献向量缓存，使用静态链接的 sqlite-vec 在内存中建立当前请求范围的余弦检索索引，无需额外 Python 或数据库服务。文献按页分块，内容、模型或地址变化后重新生成向量；可手动重建或取消构建。
+- 云端模式使用 Milvus REST v2，需配置自己的服务地址和仅在当前会话保存的访问令牌。每次检索创建独立临时集合，写入当前范围的向量和分块 ID，检索后删除自己的集合；不会操作既有集合。服务需允许创建、插入、检索和删除集合。此模式不是文献云同步。
+- 配置 embedding 后，问答先向量检索，再把匹配摘录交给聊天模型；语义检索失败或没有相关段落时显示错误，不退回首页摘录来生成回答。
+- “本地”指向量保存和检索的位置。复用阿里云 embedding 时，分块文本与问题仍发送至阿里云；生成回答时相关摘录和文献信息也发送至聊天厂商。加密文献仅在解锁会话内保留向量，不进入持久化向量缓存或 Milvus；本地模式下用户问答仍会调用所配置的 embedding 和聊天服务。
+
+单次检索上限为 20,000 个分块及 8,388,608 个向量值；超过容量时请缩小文件范围。暂不支持扫描件 OCR。
 
 ## 数据和加密边界
 
@@ -51,6 +62,7 @@ SmartReader 是一款本地优先的桌面科研文献阅读器，基于 Tauri�
 - 文件夹加密使用 Web Crypto 的 PBKDF2-SHA-256 和 AES-256-GCM，保护库内 PDF、论文元数据、全文索引、阅读状态、批注和书签；不是对整个 SQLite 数据库进行加密。
 - 手工分类名称、目录结构、厂商地址/模型等外层配置仍可见，磁盘原始 PDF 不会被修改或加密。加密时保留手工分类与保险库归属，移除加密范围外的自动推断分类关联，并清理无引用的自动分类。
 - 同一论文从所有分类入口共用加密状态。锁定会关闭相关标签页、撤销 Blob URL、清除相应字节缓存和界面内容，并丢弃迟到的读取、索引或 AI 结果。解锁密钥仅在当前会话保留。
+- 文献加密或删除时，同一 SQLite 事务清除对应公开向量缓存；私有向量仅驻留解锁会话，锁定后清除。
 - 一篇文献不能同时加入两个独立加密文件夹。加密目录的移动、合并或删除，以及将文献移出原加密范围，需要先解除相应加密；不会静默把文件降为明文。
 - `LibraryStorage` 仅预留可替换的存储接口、稳定文献 ID 和 revision 边界。当前未实现云同步、浏览器持久化或移动端界面。
 - 当前不包含 OCR、PDF 内容编辑/写回、文本或图片导出和打印。批注 JSON 导出不等同于修改或导出 PDF 内容。
@@ -58,7 +70,7 @@ SmartReader 是一款本地优先的桌面科研文献阅读器，基于 Tauri�
 ## 技术栈与结构
 
 - Bun、Vite、React 18、TypeScript、Vitest。
-- Tauri v2、Rust、rusqlite/SQLite；桌面 AI HTTP 传输使用 reqwest/Tokio。
+- Tauri v2、Rust、rusqlite/SQLite、sqlite-vec；桌面 AI HTTP 传输使用 reqwest/Tokio。
 - `@react-pdf-viewer` 与 PDF.js 负责 PDF 阅读渲染；TypeScript 负责文献模型、索引、分类、加密和 AI 业务。
 
 ```text
@@ -83,9 +95,10 @@ src-tauri/src/
   db.rs              SQLite 初始化、既有数据与迁移
   library_storage.rs 文献库状态、PDF BLOB、原子提交和 revision 校验
   ai_http.rs         桌面兼容 HTTP 请求、取消、限额和安全错误
+  knowledge_vectors.rs 公开向量缓存、范围隔离与 sqlite-vec 内存检索
   file_commands.rs   PDF 读取、目录扫描和文件检查
   lib.rs             命令注册与桌面集成
-  migrations/        不可变的 001–006 迁移及新增 007_research_library.sql
+  migrations/        不可变的 001–007 迁移及新增 008_knowledge_vectors.sql
 ```
 
 ## 开发环境
@@ -156,6 +169,14 @@ open "src-tauri/target/debug/bundle/macos/SmartReader QA.app"
 
 `verify-workflow.ts` 使用真实 PDF.js、文献/AI 服务、加密及本机 HTTP，但存储是内存中的 `LibraryStorage`。它核对导入去重、分类、人工值、检索引用、加密和重建服务实例后的恢复；原生 SQLite/HTTP 另有 Rust 测试。这些结果不能替代真实桌面 UI 操作和应用退出后的重启验收。
 
+知识库另有独立联合复测，无需启动应用：
+
+```bash
+bun scripts/qa/verify-knowledge.ts
+```
+
+脚本创建自己的临时 PDF 和 SQLite 文件，调用 Rust 测试桥中的实际原生存储与 sqlite-vec，验证无关键词匹配问题的第 2 页语义命中、指定文件隔离、关闭连接后的持久化恢复、加密缓存清除和锁定/解锁。聊天、embedding 与 Milvus 使用本机协议夹具；脚本结束后关闭自己的服务并删除临时目录。它不证明真实阿里云、真实 Milvus 或 Tauri GUI 已通过验收。
+
 在 QA 程序的 AI 设置中使用以下测试配置；`qa-only-key` 是脚本内固定的假凭据，仅供本机复测。
 
 | 配置 | Base URL | 模型 | API Key |
@@ -175,6 +196,8 @@ open "src-tauri/target/debug/bundle/macos/SmartReader QA.app"
 
 - [桌面文献库与 AI 实施计划](docs/superpowers/plans/2026-10-11-research-library-ai.md)
 - [桌面科研功能验收记录](docs/superpowers/reports/2026-10-11-desktop-research-validation.md)
+- [知识库语义检索实施计划](docs/superpowers/plans/2026-10-13-knowledge-vectors.md)
+- [知识库验证记录](docs/superpowers/reports/2026-10-13-knowledge-validation.md)
 - [原始 PDF 阅读器设计](docs/superpowers/specs/2026-06-15-smartreader-pdf-reader-design.md)
 - [原始实施计划](docs/superpowers/plans/2026-06-15-smartreader-pdf-reader.md)
 - [PDF 核心补全计划](docs/superpowers/plans/2026-06-16-smartreader-pdf-core-completion.md)

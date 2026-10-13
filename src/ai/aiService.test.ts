@@ -37,6 +37,15 @@ const profile = { name: '兼容厂商', baseUrl: 'https://example.org/v1', model
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 
 describe('research AI service', () => {
+  it('clears the shared credential when the optional embedding endpoint changes', async () => {
+    const { ai } = setup();
+    const provider = await ai.saveProvider({ name: '阿里云', baseUrl: 'https://chat.example.test/v1', model: 'qwen-chat', embeddingModel: 'text-embedding-v4' }, 'test-secret');
+    expect(ai.hasApiKey(provider.id)).toBe(true);
+    await ai.saveProvider({ ...provider, embeddingBaseUrl: 'https://vectors.example.test/v1' });
+    expect(ai.hasApiKey(provider.id)).toBe(false);
+    await expect(ai.testEmbeddingConnection()).rejects.toThrow('API Key');
+    ai.dispose();
+  });
   it('stores only encrypted keys, supports session-only keys and requires unlock after restart', async () => {
     const { ai, library, completion, persisted } = setup();
     const provider = await ai.saveProvider(profile, 'private-key-value', 'my password');

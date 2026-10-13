@@ -21,6 +21,8 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   const [selectedPaperIds, setSelectedPaperIds] = useState<string[]>(initialPaperId ? [initialPaperId] : []);
   const [fileQuery, setFileQuery] = useState('');
   const [addingFiles, setAddingFiles] = useState(false);
+  const [buildingIndex, setBuildingIndex] = useState(false);
+  const ownsBuild = useRef<string[] | null>(null);
   const initialSelection = useRef<{ library: LibraryService; id?: string } | null>(null);
   const [question, setQuestion] = useState({ text: '', epoch: activity.answerEpoch });
   const [answer, setAnswer] = useState<{ value: AiAnswer; epoch: number } | null>(null);
@@ -32,8 +34,12 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   const mounted = useRef(true);
   const provider = libraryView.snapshot.ai.providers.find((item) => item.id === libraryView.snapshot.ai.activeProviderId);
   const configured = Boolean(provider && activity.keyProviderIds.includes(provider.id));
-  const busy = pending || activity.asking || addingFiles;
-  const usablePapers = libraryView.papers.filter(hasKnowledgeText);
+  const busy = pending || activity.asking || addingFiles || buildingIndex;
+  const cloudKnowledge = libraryView.snapshot.ai.knowledge?.backend === 'milvus';
+  const encryptedIds = new Set(libraryView.snapshot.papers.filter((paper) => paper.kind === 'encrypted').map((paper) => paper.id));
+  const usablePapers = libraryView.papers.filter((paper) => hasKnowledgeText(paper) && (!cloudKnowledge || !encryptedIds.has(paper.id)));
+  const vectorConfigured = Boolean(provider?.embeddingModel && configured);
+  const questionReady = configured && (!cloudKnowledge || (vectorConfigured && activity.milvusReady));
   const selectedIds = selectedPaperIds.filter((id) => usablePapers.some((paper) => paper.id === id));
   const scopedCount = scope === 'all' ? usablePapers.length : selectedIds.length;
   const matchingPapers = libraryView.papers.filter((paper) =>
@@ -53,6 +59,8 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
       setQuestion({ text: '', epoch: ai.getView().answerEpoch });
       setSelectedPaperIds((selected) => selected.filter((id) => !ids.includes(id)));
       setPending(false);
+      setBuildingIndex(false);
+      ownsBuild.current = null;
       setError(null);
       setNotice('文献访问状态已变化，问题和回答已清除。');
     });
@@ -60,6 +68,7 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
       mounted.current = false;
       requestGeneration.current += 1;
       if (ownsRequest.current) ai.cancelAnswer();
+      if (ownsBuild.current) ai.cancelKnowledge(ownsBuild.current);
       ownsRequest.current = false;
       stopLocked();
     };
@@ -94,9 +103,27 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
     }
   }
 
+  async function buildIndex() {
+    if (busy || !vectorConfigured || !scopedCount) return;
+    const generation = ++requestGeneration.current;
+    const ids = scope === 'selected' ? selectedIds : usablePapers.map((paper) => paper.id);
+    ownsBuild.current = ids;
+    setBuildingIndex(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await ai.buildKnowledge(ids);
+      if (mounted.current && generation === requestGeneration.current) setNotice('知识库向量索引已建立。');
+    } catch (failure) {
+      if (mounted.current && generation === requestGeneration.current) setError(errorMessage(failure));
+    } finally {
+      if (mounted.current && generation === requestGeneration.current) { ownsBuild.current = null; setBuildingIndex(false); }
+    }
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (busy || !configured || !visibleQuestion.trim() || !scopedCount) return;
+    if (busy || !questionReady || !visibleQuestion.trim() || !scopedCount) return;
     const generation = ++requestGeneration.current;
     const epoch = ai.getView().answerEpoch;
     ownsRequest.current = true;
@@ -128,6 +155,14 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
     setPending(false);
     setError(null);
     setNotice('回答已取消。');
+  }
+
+  function cancelIndex() {
+    requestGeneration.current += 1;
+    ai.cancelKnowledge(ownsBuild.current ?? []);
+    ownsBuild.current = null;
+    setBuildingIndex(false);
+    setNotice('向量构建已取消。');
   }
 
   async function openSource(source: AiSource) {
@@ -164,13 +199,17 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
               {onOpenSettings ? <button type="button" onClick={onOpenSettings}>打开 AI 设置</button> : null}
             </div>
           ) : null}
+          {configured && cloudKnowledge && !activity.milvusReady ? <p className="settings-error" role="alert">云端检索需要在 AI 设置中输入 Milvus 地址和访问令牌。</p> : null}
           <form onSubmit={(event) => void submit(event)}>
             <fieldset className="ai-knowledge-files" disabled={busy || !libraryView.loaded}>
               <legend>知识库文件</legend>
               <div className="ai-knowledge-actions">
                 {onAddPdfs ? <button type="button" onClick={() => void addPdfs()}><Plus size={14} />{addingFiles ? '添加并索引中…' : '添加本地 PDF'}</button> : null}
+                <button type="button" disabled={!vectorConfigured || !scopedCount} onClick={() => void buildIndex()}>重建向量索引</button>
                 <span className="ai-muted">{usablePapers.length} 份可检索 · 已选范围 {scopedCount} 份</span>
               </div>
+              <p className="ai-muted">{provider?.embeddingModel ? `${cloudKnowledge ? '云端 Milvus' : '本地 SQLite + sqlite-vec'} · ${provider.embeddingModel}` : '当前使用本地全文检索；配置 embedding 模型后启用语义向量检索。'}</p>
+              {cloudKnowledge ? <p className="ai-muted">加密文献不加入云端检索；需要时请切换本地模式。</p> : null}
               {!libraryView.papers.length ? <p className="ai-muted">知识库还没有文件。添加 PDF 后会保存到本地文献库并建立索引；仅打开阅读的文件不会自动加入。</p> : <>
                 <div className="ai-knowledge-scope" role="group" aria-label="问答范围">
                   <label><input type="radio" name="knowledge-scope" checked={scope === 'all'} onChange={() => { setScope('all'); setAnswer(null); }} />全部可检索文献</label>
@@ -180,8 +219,8 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
                 <div className="ai-knowledge-list">
                   {matchingPapers.map((paper) => <label className="ai-knowledge-file" key={paper.id}>
                     <input type="checkbox" aria-label={`选择知识库文件 ${paper.metadata.title || paper.fileName}`}
-                      checked={scope === 'all' ? hasKnowledgeText(paper) : selectedPaperIds.includes(paper.id)}
-                      disabled={!hasKnowledgeText(paper)} onChange={(event) => {
+                      checked={scope === 'all' ? usablePapers.some((item) => item.id === paper.id) : selectedIds.includes(paper.id)}
+                      disabled={!hasKnowledgeText(paper) || (cloudKnowledge && encryptedIds.has(paper.id))} onChange={(event) => {
                         const checked = event.target.checked;
                         setSelectedPaperIds((ids) => {
                           const previous = scope === 'all' ? usablePapers.map((item) => item.id) : ids;
@@ -190,7 +229,10 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
                         setScope('selected');
                         setAnswer(null);
                       }} />
-                    <span><strong>{paper.metadata.title || paper.fileName}</strong><small>{paper.fileName} · {paper.pageCount} 页 · {hasKnowledgeText(paper) ? '文本可检索' : paper.indexStatus === 'pending' ? '正在建立索引' : '没有可检索文本，请重新索引或补充摘要'}</small></span>
+                    <span><strong>{paper.metadata.title || paper.fileName}</strong><small>{paper.fileName} · {paper.pageCount} 页 · {hasKnowledgeText(paper) ? '文本可检索' : paper.indexStatus === 'pending' ? '正在建立索引' : '没有可检索文本，请重新索引或补充摘要'}</small>
+                      {activity.indexingPaperIds?.includes(paper.id) ? <small>正在生成向量…</small> : activity.indexedPaperIds?.includes(paper.id) ? <small>向量已建立</small> : null}
+                      {activity.knowledgeErrors?.[paper.id] ? <small className="settings-error">{activity.knowledgeErrors[paper.id]}</small> : null}
+                    </span>
                   </label>)}
                   {!matchingPapers.length ? <p className="ai-muted">没有匹配的知识库文件。</p> : null}
                 </div>
@@ -216,13 +258,14 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
                 <button
                   type="submit"
                   className="primary-action"
-                  disabled={!configured || busy || !visibleQuestion.trim() || !scopedCount}
+                  disabled={!questionReady || busy || !visibleQuestion.trim() || !scopedCount}
                 >
                   <Send size={15} />检索并提问
                 </button>
               </div>
             </div>
           </form>
+          {buildingIndex ? <div className="ai-knowledge-actions"><span role="status">正在构建知识库向量…</span><button type="button" onClick={cancelIndex}>取消向量构建</button></div> : null}
           <p className="ai-assistant-privacy">
             <ShieldCheck size={15} />相关摘录和问题会发送给所选厂商。锁定的文献不参与检索。
           </p>
@@ -239,7 +282,7 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
         {visibleAnswer ? (
           <div className="ai-answer-layout">
             <section className="ai-answer-panel" aria-label="AI 回答">
-              <div className="ai-section-heading"><h2>回答</h2><small>{visibleAnswer.providerName}</small></div>
+              <div className="ai-section-heading"><h2>回答</h2><small>{visibleAnswer.providerName} · {visibleAnswer.retrieval === 'milvus-vector' ? 'Milvus 向量检索' : visibleAnswer.retrieval === 'local-vector' ? '本地向量检索' : '本地全文检索'}</small></div>
               <div className="ai-answer-text">{visibleAnswer.text}</div>
               <p className="ai-field-help">可点击来源核对原文和上下文。</p>
             </section>

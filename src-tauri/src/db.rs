@@ -34,6 +34,10 @@ const MIGRATIONS: &[Migration] = &[
         version: "007_research_library",
         sql: include_str!("migrations/007_research_library.sql"),
     },
+    Migration {
+        version: "008_knowledge_vectors",
+        sql: include_str!("migrations/008_knowledge_vectors.sql"),
+    },
 ];
 const READER_PREFERENCES_KEY: &str = "reader_preferences";
 pub const DEFAULT_CACHE_TOTAL_BYTES: i64 = 5 * 1024 * 1024 * 1024;

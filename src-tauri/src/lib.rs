@@ -1,6 +1,7 @@
 mod ai_http;
 mod db;
 mod file_commands;
+mod knowledge_vectors;
 mod library_storage;
 
 use tauri::{Emitter, Manager};
@@ -77,6 +78,9 @@ pub fn run() {
             library_storage::read_library_file,
             ai_http::ai_http_request,
             ai_http::cancel_ai_request,
+            knowledge_vectors::read_knowledge_cache,
+            knowledge_vectors::write_knowledge_cache,
+            knowledge_vectors::search_knowledge_vectors,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SmartReader");

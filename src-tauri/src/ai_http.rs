@@ -244,7 +244,16 @@ fn validate_request(request: AiHttpRequest) -> Result<ValidatedRequest, AiHttpEr
         || raw_authority.contains('@')
         || url.query().is_some()
         || url.fragment().is_some()
-        || !url.path().ends_with("/chat/completions")
+        || !(url.path().ends_with("/chat/completions")
+            || url.path().ends_with("/embeddings")
+            || [
+                "/v2/vectordb/collections/create",
+                "/v2/vectordb/collections/drop",
+                "/v2/vectordb/entities/insert",
+                "/v2/vectordb/entities/search",
+            ]
+            .iter()
+            .any(|path| url.path().ends_with(path)))
     {
         return Err(AiHttpError::InvalidRequest);
     }
@@ -389,6 +398,11 @@ mod tests {
         for url in [
             "http://localhost:9999/chat/completions",
             "https://10.0.0.1/private/chat/completions",
+            "https://example.test/compatible-mode/v1/embeddings",
+            "https://example.test/v2/vectordb/collections/create",
+            "https://example.test/v2/vectordb/collections/drop",
+            "https://example.test/v2/vectordb/entities/insert",
+            "https://example.test/v2/vectordb/entities/search",
         ] {
             assert!(validate_request(request(url.to_string(), "allowed")).is_ok());
         }
@@ -442,6 +456,43 @@ mod tests {
             "local-model"
         );
         assert!(state.requests.lock().unwrap().active.is_empty());
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn forwards_embedding_inputs_and_returns_float_vectors() {
+        let (captured_tx, captured_rx) = mpsc::channel();
+        let (url, worker) = server(move |mut stream| {
+            captured_tx.send(read_request(&mut stream)).unwrap();
+            let body = r#"{"data":[{"index":0,"embedding":[0.5,-0.5]}]}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        let mut input = request(
+            url.replace("/chat/completions", "/embeddings"),
+            "embeddings",
+        );
+        input.body = json!({"model":"qa-embedding","input":["论文摘录"],"encoding_format":"float"});
+        let response = tauri::async_runtime::block_on(test_state().request(input)).unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(
+            serde_json::from_str::<Value>(&response.body).unwrap()["data"][0]["embedding"],
+            json!([0.5, -0.5])
+        );
+        let sent = captured_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (headers, body) = sent.split_once("\r\n\r\n").unwrap();
+        assert!(headers.starts_with("POST /custom/v1/embeddings HTTP/1.1"));
+        assert!(headers
+            .to_ascii_lowercase()
+            .contains("authorization: bearer local-test-secret"));
+        assert_eq!(
+            serde_json::from_str::<Value>(body).unwrap()["input"],
+            json!(["论文摘录"])
+        );
         worker.join().unwrap();
     }
 

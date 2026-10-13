@@ -30,6 +30,36 @@ function fillProvider() {
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 
 describe('AI settings', () => {
+  it('persists a separate embedding model and verifies its vector dimension', async () => {
+    const { library, ai } = await setup();
+    render(<AiSettings library={library} ai={ai} />);
+    fillProvider();
+    fireEvent.change(screen.getByLabelText('Embedding 模型'), { target: { value: 'text-embedding-v4' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存厂商配置' }));
+    await screen.findByText('厂商配置已保存。');
+    expect(library.getView().snapshot.ai.providers[0]).toMatchObject({ model: 'user-selected-model', embeddingModel: 'text-embedding-v4' });
+    vi.spyOn(ai, 'testEmbeddingConnection').mockResolvedValueOnce(1024);
+    fireEvent.click(screen.getByRole('button', { name: '验证向量模型' }));
+    await screen.findByText('向量模型验证成功，维度 1024。');
+    ai.dispose();
+  });
+
+  it('configures cloud vector retrieval without persisting its token and forgets the token on endpoint change', async () => {
+    const { library, ai } = await setup();
+    render(<AiSettings library={library} ai={ai} />);
+    fireEvent.change(screen.getByLabelText('向量检索位置'), { target: { value: 'milvus' } });
+    fireEvent.change(screen.getByLabelText('Milvus 服务地址'), { target: { value: 'https://milvus.example.test/' } });
+    fireEvent.change(screen.getByLabelText('Milvus 访问令牌'), { target: { value: 'private-vector-token' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存检索设置' }));
+    await screen.findByText('知识库检索设置已保存。');
+    expect(library.getView().snapshot.ai.knowledge).toEqual({ backend: 'milvus', milvusUrl: 'https://milvus.example.test' });
+    expect(JSON.stringify(library.getView().snapshot)).not.toContain('private-vector-token');
+    expect(ai.getView().milvusReady).toBe(true);
+    fireEvent.change(screen.getByLabelText('Milvus 服务地址'), { target: { value: 'https://other-milvus.example.test/' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存检索设置' }));
+    await waitFor(() => expect(ai.getView().milvusReady).toBe(false));
+    ai.dispose();
+  });
   it('saves provider settings and keeps the default session key masked and out of persistence', async () => {
     const { library, ai } = await setup();
     render(<AiSettings library={library} ai={ai} />);

@@ -77,6 +77,8 @@ export type AiProviderProfile = {
   name: string;
   baseUrl: string;
   model: string;
+  embeddingModel?: string;
+  embeddingBaseUrl?: string;
   savedKey: EncryptedSecret | null;
 };
 
@@ -84,6 +86,7 @@ export type AiSettings = {
   providers: AiProviderProfile[];
   activeProviderId: string | null;
   autoEnrich: boolean;
+  knowledge?: { backend: 'local' | 'milvus'; milvusUrl: string };
 };
 
 export type LibraryPreferences = {
