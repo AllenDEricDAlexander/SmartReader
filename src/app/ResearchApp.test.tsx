@@ -105,8 +105,15 @@ function fixture() {
     };
   });
   const library = new LibraryService(storage, extract);
-  const completion = vi.fn(async () => 'No live AI request in integration tests.');
-  const ai = new AiService(library, completion);
+  const completion = vi.fn(async (..._args: unknown[]) => 'No live AI request in integration tests.');
+  // The assistant streams, and no native transport exists under jsdom, so the
+  // streaming dependency replays the completion mock through its delta callback.
+  const streaming = vi.fn(async (provider: never, key: never, messages: never, options: { onDelta?(text: string): void }) => {
+    const text = await completion(provider, key, messages, options);
+    options.onDelta?.(text);
+    return text;
+  });
+  const ai = new AiService(library, completion, {}, streaming as never);
   const persistence = basePersistence();
   const opened: OpenedDesktopPdf = {
     source: { kind: 'desktop-path', path: '/research/cognition.pdf', name: 'cognition.pdf' },
@@ -117,7 +124,7 @@ function fixture() {
     openNativePdf: vi.fn(async () => opened),
     readDesktopPdf: vi.fn(async () => { throw new Error('Managed papers must open from library storage'); }),
   };
-  return { library, ai, research: { library, ai }, persistence, bridge, opened, storage, extract, completion,
+  return { library, ai, research: { library, ai }, persistence, bridge, opened, storage, extract, completion, streaming,
     snapshot: () => structuredClone(data) };
 }
 
@@ -183,6 +190,22 @@ describe('desktop research App integration', () => {
     fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
     await screen.findByText('Selected knowledge evidence [S1]');
     expect(screen.getByRole('button', { name: new RegExp(`S1 ${title} 第 4 页`) })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: 'A follow-up after reading the citation' } });
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`S1 ${title} 第 4 页`) }));
+    await screen.findByLabelText('测试 PDF 视图');
+    fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));
+    fireEvent.click(screen.getByRole('button', { name: 'AI 科研助手' }));
+    expect(screen.getByText('Selected knowledge evidence [S1]')).toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('A follow-up after reading the citation');
+    expect(screen.getByRole('checkbox', { name: `选择知识库文件 ${title}` })).toBeChecked();
+    app.completion.mockResolvedValue('Follow-up keeps the cited context [S1]');
+    fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
+    await screen.findByText('Follow-up keeps the cited context [S1]');
+    const messages = app.completion.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
+    expect(messages.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user']);
+    expect(messages[1].content).toBe(contentToken);
+    expect(JSON.stringify(app.snapshot())).not.toContain('Selected knowledge evidence');
+    expect(JSON.stringify(app.snapshot())).not.toContain('A follow-up after reading the citation');
     app.ai.dispose();
   });
   it('imports a native PDF into the managed reader and persists bookmarks, editable notes and favorites only in the library', async () => {

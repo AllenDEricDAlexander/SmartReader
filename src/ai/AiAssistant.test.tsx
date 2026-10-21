@@ -23,10 +23,17 @@ async function setup(configured = true) {
     pages: [{ page: 1, text: 'Attention improves memory and learning.' }], pageCount: 1,
   }));
   const completion = vi.fn().mockResolvedValue('注意力可以改善记忆。[S1]');
-  const ai = new AiService(library, completion);
+  // The panel always asks for deltas, so streaming is stubbed to the same answer
+  // the synchronous mock returns unless a test drives it itself.
+  const streaming = vi.fn(async (_provider: unknown, _key: unknown, messages: unknown, options: { onDelta?(text: string): void }) => {
+    const text = await completion(_provider, _key, messages, options) as string;
+    options.onDelta?.(text);
+    return text;
+  });
+  const ai = new AiService(library, completion, {}, streaming as never);
   if (configured) await ai.saveProvider({ name: '研究服务', baseUrl: 'https://api.example.com/v1', model: 'selected-model' }, 'session-key');
   const paper = await library.importPdf(new TextEncoder().encode('%PDF-1.7\nassistant fixture'), 'paper.pdf');
-  return { library, ai, paper, completion };
+  return { library, ai, paper, completion, streaming };
 }
 
 function ask(question = '注意力的结论是什么？') {
@@ -46,7 +53,7 @@ describe('AI research assistant', () => {
     expect(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' })).toBeChecked();
     ask();
     await screen.findByText('注意力可以改善记忆。[S1]');
-    expect(askSpy).toHaveBeenCalledWith('注意力的结论是什么？', [paper.id]);
+    expect(askSpy).toHaveBeenCalledWith('注意力的结论是什么？', expect.objectContaining({ paperIds: [paper.id], grounding: 'library' }));
     fireEvent.click(screen.getByRole('button', { name: /S1.*认知神经论文.*第 1 页/ }));
     expect(onOpenPaper).toHaveBeenCalledWith(paper.id, 1);
     ai.dispose();
@@ -73,6 +80,19 @@ describe('AI research assistant', () => {
     completion.mockRejectedValueOnce(new Error('请求被限流，请稍后重试。'));
     ask('第二个问题');
     expect(await screen.findByRole('alert')).toHaveTextContent('限流');
+    ai.dispose();
+  });
+
+  it('shows cloud cleanup failures without blocking local questions', async () => {
+    const { library, ai, completion } = await setup();
+    const warning = '当前没有 Milvus 访问令牌，未能清理此前上传的云端向量，请在 Milvus 中确认并删除。';
+    vi.spyOn(ai, 'getView').mockReturnValue({ ...ai.getView(), knowledgeCleanupError: warning });
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    expect(screen.getByRole('alert')).toHaveTextContent(warning);
+    ask();
+    await screen.findByText('注意力可以改善记忆。[S1]');
+    expect(completion).toHaveBeenCalledOnce();
+    expect(screen.getByRole('alert')).toHaveTextContent(warning);
     ai.dispose();
   });
 
@@ -148,7 +168,44 @@ describe('AI research assistant', () => {
     expect(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' })).toBeChecked();
     ask();
     await screen.findByText('注意力可以改善记忆。[S1]');
-    expect(askSpy).toHaveBeenCalledWith('注意力的结论是什么？', [paper.id]);
+    expect(askSpy).toHaveBeenCalledWith('注意力的结论是什么？', expect.objectContaining({ paperIds: [paper.id] }));
+    ai.dispose();
+  });
+
+  it('allows the first PDF to be added while an empty library defaults to direct chat', async () => {
+    const { library, ai, paper } = await setup();
+    await library.deletePapers([paper.id]);
+    const onAddPdfs = vi.fn(async () => {
+      const imported = await library.importPdf(new TextEncoder().encode('%PDF-1.7\nfirst knowledge file'), 'first.pdf');
+      return [imported.id];
+    });
+    render(<AiAssistant library={library} ai={ai} onAddPdfs={onAddPdfs} onOpenPaper={vi.fn()} />);
+    expect(screen.getByRole('radio', { name: '直接与模型对话' })).toBeChecked();
+    const add = screen.getByRole('button', { name: '添加本地 PDF' });
+    expect(add).toBeEnabled();
+    fireEvent.click(add);
+    await screen.findByText(/已添加 1 份知识库文件/);
+    expect(onAddPdfs).toHaveBeenCalledOnce();
+    expect(screen.getByRole('radio', { name: '检索本地文献并附来源' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' })).toBeChecked();
+    ai.dispose();
+  });
+
+  it('allows adding PDFs in direct chat while keeping retrieval controls disabled', async () => {
+    const { library, ai, paper } = await setup();
+    const onAddPdfs = vi.fn(async () => [paper.id]);
+    render(<AiAssistant library={library} ai={ai} onAddPdfs={onAddPdfs} onOpenPaper={vi.fn()} />);
+    fireEvent.click(screen.getByRole('radio', { name: '直接与模型对话' }));
+    expect(screen.getByRole('button', { name: '添加本地 PDF' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '重建向量索引' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: '全部可检索文献' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: '指定文件（可多选）' })).toBeDisabled();
+    expect(screen.getByLabelText('搜索知识库文件')).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '添加本地 PDF' }));
+    await screen.findByText(/已添加 1 份知识库文件/);
+    expect(screen.getByRole('radio', { name: '指定文件（可多选）' })).toBeEnabled();
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' })).toBeChecked();
     ai.dispose();
   });
 
@@ -167,18 +224,240 @@ describe('AI research assistant', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' }));
     fireEvent.click(screen.getByRole('checkbox', { name: '选择知识库文件 教育论文' }));
     expect(screen.getByRole('button', { name: '检索并提问' })).toBeDisabled();
-    expect(screen.queryByText('注意力可以改善记忆。[S1]')).not.toBeInTheDocument();
+    // The transcript is the conversation, so narrowing the scope to nothing
+    // blocks the next question without erasing the answers already given.
+    expect(screen.getByText('注意力可以改善记忆。[S1]')).toBeInTheDocument();
     ai.dispose();
   });
 
-  it('marks PDFs without text as unavailable knowledge instead of submitting an unusable question', async () => {
-    const { library, ai, paper } = await setup();
+  it('marks PDFs without text as unavailable knowledge and says the answer is not grounded', async () => {
+    const { library, ai, paper, completion } = await setup();
+    completion.mockResolvedValue('没有文献依据的概述。');
     await library.editMetadata(paper.id, { abstract: '' });
     vi.spyOn(library, 'getView').mockReturnValue({ ...library.getView(), papers: [{ ...paper, pages: [], indexStatus: 'empty' }] });
     render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
     expect(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: '检索本地文献并附来源' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: '直接与模型对话' })).toBeChecked();
+    expect(screen.getByText(/知识库还没有可检索的文件/)).toBeInTheDocument();
     ask();
-    expect(screen.getByRole('button', { name: '检索并提问' })).toBeDisabled();
+    await screen.findByText('没有文献依据的概述。');
+    expect(screen.getByText(/未检索文献/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^S1/ })).not.toBeInTheDocument();
+    ai.dispose();
+  });
+
+  it('keeps earlier turns and sends them as history on a follow-up', async () => {
+    const { library, ai, paper, completion, streaming } = await setup();
+    render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    ask('第一个问题');
+    await screen.findByText('注意力可以改善记忆。[S1]');
+    completion.mockResolvedValue('追问的回答。[S1]');
+    ask('那第二点呢？');
+    await screen.findByText('追问的回答。[S1]');
+    expect(screen.getByText('第一个问题')).toBeInTheDocument();
+    expect(screen.getByText('注意力可以改善记忆。[S1]')).toBeInTheDocument();
+    const messages = streaming.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
+    expect(messages.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user']);
+    expect(messages[1].content).toBe('第一个问题');
+    fireEvent.click(screen.getByRole('button', { name: '新建对话' }));
+    expect(screen.queryByText('第一个问题')).not.toBeInTheDocument();
+    ai.dispose();
+  });
+
+  it('restores completed turns, draft and multi-file scope after navigation without mixing direct-chat history', async () => {
+    const { library, ai, paper, completion, streaming } = await setup();
+    const second = await library.importPdf(new TextEncoder().encode('%PDF-1.7\nnavigation second'), 'second.pdf');
+    await library.editMetadata(second.id, { title: '另一份论文' });
+    const first = render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择知识库文件 另一份论文' }));
+    ask('保存的文献问题');
+    await screen.findByText('注意力可以改善记忆。[S1]');
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '未发送的追问' } });
+    fireEvent.change(screen.getByLabelText('搜索知识库文件'), { target: { value: '论文' } });
+    first.unmount();
+    const restored = render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    expect(screen.getByText('保存的文献问题')).toBeInTheDocument();
+    expect(screen.getByText('注意力可以改善记忆。[S1]')).toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('未发送的追问');
+    expect(screen.getByLabelText('搜索知识库文件')).toHaveValue('论文');
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 另一份论文' })).toBeChecked();
+    completion.mockResolvedValueOnce('导航后的追问回答。[S1]');
+    fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
+    await screen.findByText('导航后的追问回答。[S1]');
+    const followup = streaming.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
+    expect(followup.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user']);
+    expect(followup[1].content).toBe('保存的文献问题');
+    fireEvent.click(screen.getByRole('radio', { name: '直接与模型对话' }));
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '普通对话草稿' } });
+    restored.unmount();
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    expect(screen.getByRole('radio', { name: '直接与模型对话' })).toBeChecked();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('普通对话草稿');
+    completion.mockResolvedValueOnce('普通对话回答');
+    fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
+    await screen.findByText('普通对话回答');
+    const direct = streaming.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
+    expect(direct.map((message) => message.role)).toEqual(['system', 'user']);
+    expect(JSON.stringify(direct)).not.toContain('保存的文献问题');
+    ai.dispose();
+  });
+
+  it('respects a different incoming paper scope and keeps a new conversation empty after navigation', async () => {
+    const { library, ai, paper, completion, streaming } = await setup();
+    const second = await library.importPdf(new TextEncoder().encode('%PDF-1.7\nnew scope'), 'second.pdf');
+    await library.editMetadata(second.id, { title: '新范围论文' });
+    const first = render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    ask('旧论文问题');
+    await screen.findByText('注意力可以改善记忆。[S1]');
+    fireEvent.click(screen.getByRole('radio', { name: '直接与模型对话' }));
+    first.unmount();
+    const next = render(<AiAssistant library={library} ai={ai} initialPaperId={second.id} onOpenPaper={vi.fn()} />);
+    expect(screen.getByRole('radio', { name: '检索本地文献并附来源' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 新范围论文' })).toBeChecked();
+    completion.mockResolvedValueOnce('新论文回答。[S1]');
+    ask('新论文问题');
+    await screen.findByText('新论文回答。[S1]');
+    const request = streaming.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
+    expect(request.map((message) => message.role)).toEqual(['system', 'user']);
+    expect(JSON.parse(request[1].content).sources.every((source: { paperId: string }) => source.paperId === second.id)).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '新建对话' }));
+    next.unmount();
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    expect(screen.queryByText('旧论文问题')).not.toBeInTheDocument();
+    expect(screen.queryByText('新论文回答。[S1]')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('');
+    ai.dispose();
+  });
+
+  it.each(['lock', 'delete', 'forget key', 'switch provider'] as const)('discards saved sensitive conversation while unmounted on %s', async (operation) => {
+    const { library, ai, paper } = await setup();
+    const folder = await library.createFolder('私密');
+    await library.categorize([paper.id], [folder.id], 'move');
+    const vault = await library.encryptFolder(folder.id, 'vault password');
+    const first = render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    ask('保存的私密问题');
+    await screen.findByText('注意力可以改善记忆。[S1]');
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保存的私密草稿' } });
+    first.unmount();
+    const previous = ai.getAssistantSession()!;
+    expect(previous.messages).toHaveLength(2);
+    const provider = library.getView().snapshot.ai.activeProviderId!;
+    if (operation === 'lock') await library.lockVault(vault.id);
+    else if (operation === 'delete') await library.deletePapers([paper.id]);
+    else if (operation === 'forget key') await ai.forgetKey(provider);
+    else {
+      const next = await ai.saveProvider({ name: '另一厂商', baseUrl: 'https://other.example.com/v1', model: 'other' }, 'another-key');
+      await ai.selectProvider(next.id);
+    }
+    expect(ai.getAssistantSession()).toBeNull();
+    ai.saveAssistantSession(previous);
+    expect(ai.getAssistantSession()).toBeNull();
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    expect(screen.queryByText('保存的私密问题')).not.toBeInTheDocument();
+    expect(screen.queryByText('注意力可以改善记忆。[S1]')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('');
+    ai.dispose();
+  });
+
+  it('restores only finished turns after navigation cancels a streaming answer and ignores its late result', async () => {
+    const { library, ai, completion } = await setup();
+    const first = render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    ask('完成的问题');
+    await screen.findByText('注意力可以改善记忆。[S1]');
+    let finish!: (answer: AiAnswer) => void;
+    vi.spyOn(ai, 'ask').mockImplementationOnce((_question, options) => {
+      options?.onDelta?.('离开前的部分回答');
+      return new Promise((resolve) => { finish = resolve; });
+    });
+    ask('未完成的问题');
+    await screen.findByText('离开前的部分回答');
+    first.unmount();
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    await act(async () => { finish({ text: '离开后的迟到回答', sources: [], providerName: '研究服务' }); });
+    expect(screen.getByText('完成的问题')).toBeInTheDocument();
+    expect(screen.queryByText('未完成的问题')).not.toBeInTheDocument();
+    expect(screen.queryByText('离开前的部分回答')).not.toBeInTheDocument();
+    expect(screen.queryByText('离开后的迟到回答')).not.toBeInTheDocument();
+    completion.mockResolvedValueOnce('返回后可以继续提问。[S1]');
+    ask('返回后的问题');
+    await screen.findByText('返回后可以继续提问。[S1]');
+    expect(screen.getByText('注意力可以改善记忆。[S1]')).toBeInTheDocument();
+    ai.dispose();
+  });
+
+  it('keeps earlier answers visible without sending excluded-file history into a new scope', async () => {
+    const { library, ai, paper, completion, streaming } = await setup();
+    const second = await library.importPdf(new TextEncoder().encode('%PDF-1.7\nother knowledge'), 'other.pdf');
+    await library.editMetadata(second.id, { title: '另一份论文' });
+    render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    ask('第一份论文的问题');
+    await screen.findByText('注意力可以改善记忆。[S1]');
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择知识库文件 另一份论文' }));
+    completion.mockResolvedValue('另一份论文的结论。[S1]');
+    ask('现在的论文呢？');
+    await screen.findByText('另一份论文的结论。[S1]');
+    expect(screen.getByText('注意力可以改善记忆。[S1]')).toBeInTheDocument();
+    const messages = streaming.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
+    expect(messages.map((message) => message.role)).toEqual(['system', 'user']);
+    expect(JSON.stringify(messages)).not.toContain('第一份论文的问题');
+    expect(JSON.parse(messages[1].content).sources.every((source: { paperId: string }) => source.paperId === second.id)).toBe(true);
+    ai.dispose();
+  });
+
+  it('does not send document conversation history when switching to direct chat', async () => {
+    const { library, ai, paper, completion, streaming } = await setup();
+    render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    ask('文献中的私有问题');
+    await screen.findByText('注意力可以改善记忆。[S1]');
+    fireEvent.click(screen.getByRole('radio', { name: '直接与模型对话' }));
+    completion.mockResolvedValue('纯模型回答。');
+    ask('一般科研问题');
+    await screen.findByText('纯模型回答。');
+    const messages = streaming.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
+    expect(messages.map((message) => message.role)).toEqual(['system', 'user']);
+    expect(messages[1].content).toBe('一般科研问题');
+    expect(JSON.stringify(messages)).not.toContain('文献中的私有问题');
+    expect(screen.getByText('注意力可以改善记忆。[S1]')).toBeInTheDocument();
+    ai.dispose();
+  });
+
+  it('omits an unsuccessful question and its partial answer from follow-up history', async () => {
+    const { library, ai, completion, streaming } = await setup();
+    streaming.mockImplementationOnce(async (_provider, _key, _messages, options: { onDelta?(text: string): void }) => {
+      options.onDelta?.('未完成的回答');
+      throw new Error('连接中断');
+    });
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    ask('未成功的问题');
+    await screen.findByRole('alert');
+    completion.mockResolvedValue('重试完成。[S1]');
+    ask('重新提问');
+    await screen.findByText('重试完成。[S1]');
+    const messages = streaming.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
+    expect(messages.map((message) => message.role)).toEqual(['system', 'user']);
+    expect(JSON.stringify(messages)).not.toContain('未成功的问题');
+    expect(JSON.stringify(messages)).not.toContain('未完成的回答');
+    ai.dispose();
+  });
+
+  it('renders streamed text before the request finishes', async () => {
+    const { library, ai, paper, streaming } = await setup();
+    let release: () => void = () => undefined;
+    streaming.mockImplementationOnce(async (_provider, _key, _messages, options: { onDelta?(text: string): void }) => {
+      options.onDelta?.('部分回答…');
+      await new Promise<void>((resolve) => { release = resolve; });
+      return '部分回答…已完成。';
+    });
+    render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    ask('流式问题');
+    await screen.findByText('部分回答…');
+    expect(screen.getByRole('button', { name: '取消回答' })).toBeInTheDocument();
+    await act(async () => { release(); });
+    await screen.findByText('部分回答…已完成。');
     ai.dispose();
   });
 });

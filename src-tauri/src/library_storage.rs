@@ -395,7 +395,8 @@ mod tests {
     #[test]
     #[ignore = "started only by scripts/qa/verify-knowledge.ts"]
     fn native_knowledge_qa_bridge() {
-        use crate::knowledge_vectors::{read_cache, save_cache, search};
+        use crate::ai_http::AiHttpState;
+        use crate::knowledge_vectors::{cache_status, read_cache, save_cache, search_scope};
         use std::io::{Read, Write};
         use std::net::TcpListener;
         use std::path::PathBuf;
@@ -424,6 +425,7 @@ mod tests {
             .parse::<u16>()
             .unwrap();
         let listener = TcpListener::bind(("127.0.0.1", port)).unwrap();
+        let http = AiHttpState::new();
         println!("KNOWLEDGE_QA_READY");
         std::io::stdout().flush().unwrap();
         loop {
@@ -461,6 +463,15 @@ mod tests {
             let args = &request["args"];
             let result: Result<Value, String> = (|| {
                 let value = match command {
+                    "ai_http_request" => serde_json::to_value(
+                        tauri::async_runtime::block_on(
+                            http.request(
+                                serde_json::from_value(args["request"].clone())
+                                    .map_err(|e| e.to_string())?,
+                            ),
+                        )
+                        .map_err(|e| e.to_string())?,
+                    ),
                     "read_library_storage" => {
                         serde_json::to_value(read_snapshot(&connection).map_err(|e| e.to_string())?)
                     }
@@ -491,11 +502,17 @@ mod tests {
                         .map_err(|e| e.to_string())?;
                         Ok(Value::Null)
                     }
-                    "search_knowledge_vectors" => serde_json::to_value(
-                        search(
-                            serde_json::from_value(args["entries"].clone()).unwrap(),
-                            serde_json::from_value(args["query"].clone()).unwrap(),
-                            args["limit"].as_u64().unwrap() as usize,
+                    "search_knowledge_scope" => serde_json::to_value(
+                        search_scope(
+                            &connection,
+                            serde_json::from_value(args["scope"].clone()).unwrap(),
+                        )
+                        .map_err(|e| e.to_string())?,
+                    ),
+                    "knowledge_cache_status" => serde_json::to_value(
+                        cache_status(
+                            &connection,
+                            serde_json::from_value(args["paperIds"].clone()).unwrap(),
                         )
                         .map_err(|e| e.to_string())?,
                     ),

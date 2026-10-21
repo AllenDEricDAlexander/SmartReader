@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AiProviderProfile } from '../library/libraryModels';
-import type { AiHttpRequest, AiHttpResponse } from './aiTransport';
-import { normalizeBaseUrl, requestCompletion, type AiMessage } from './openAiClient';
+import type { AiHttpRequest, AiHttpResponse, AiStreamTransport } from './aiTransport';
+import {
+  failureStatus, normalizeBaseUrl, providerDetail, readSseEvents, requestCompletion, streamCompletion, type AiMessage,
+} from './openAiClient';
 
 afterEach(() => vi.useRealTimers());
 
@@ -36,7 +38,10 @@ describe('OpenAI-compatible client', () => {
     ['https://provider.example/v1/chat/completions/', 'https://provider.example/v1/chat/completions'],
     ['http://localhost:11434/v1', 'http://localhost:11434/v1/chat/completions'],
     ['http://[::1]:8000/api/', 'http://[::1]:8000/api/chat/completions'],
-    [' https://provider.example/ ', 'https://provider.example/chat/completions'],
+    // A bare host gets the version prefix these services expose, which turns
+    // the most common pasted address from a silent 404 into a working one.
+    [' https://provider.example/ ', 'https://provider.example/v1/chat/completions'],
+    ['https://api.deepseek.com', 'https://api.deepseek.com/v1/chat/completions'],
   ])('normalizes %s and remains idempotent', (input, expected) => {
     expect(normalizeBaseUrl(input)).toBe(expected);
     expect(normalizeBaseUrl(expected)).toBe(expected);
@@ -65,7 +70,7 @@ describe('OpenAI-compatible client', () => {
       url: 'https://provider.example/custom/v1/chat/completions',
       apiKey,
       body: { model: provider.model, messages, stream: false },
-      timeoutMs: 60_000,
+      timeoutMs: 120_000,
       requestId: expect.any(String),
     });
     expect(request.requestId).toMatch(/^[a-z0-9_-]+$/i);
@@ -156,5 +161,90 @@ describe('OpenAI-compatible client', () => {
     expect((transport.mock.calls[0][1] as AbortSignal).aborted).toBe(true);
     expect(transport).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('streaming chat completions', () => {
+  const frames = (...payloads: string[]) => payloads.map((payload) => `data: ${payload}\n\n`).join('');
+  const delta = (content: string) => JSON.stringify({ choices: [{ delta: { content } }] });
+
+  function streamOf(chunks: string[], status = 200): AiStreamTransport {
+    return async (_request, onEvent) => {
+      onEvent({ kind: 'status', status });
+      for (const chunk of chunks) onEvent({ kind: 'chunk', data: chunk });
+      onEvent({ kind: 'end' });
+    };
+  }
+
+  it('splits server-sent events across arbitrary chunk boundaries', () => {
+    const first = readSseEvents('data: {"a":1}\n\ndata: par');
+    expect(first).toEqual({ payloads: ['{"a":1}'], rest: 'data: par' });
+    const second = readSseEvents(`${first.rest}tial\n\n: keepalive\n\ndata: [DONE]\n\n`);
+    expect(second).toEqual({ payloads: ['partial', '[DONE]'], rest: '' });
+  });
+
+  it('delivers deltas in order and returns the joined answer', async () => {
+    const deltas: string[] = [];
+    const transport = streamOf([`${frames(delta('注意'))}data: `, `${JSON.stringify({ choices: [{ delta: { content: '力。' } }] })}\n\n`, frames('[DONE]')]);
+    await expect(streamCompletion(provider, apiKey, messages, { transport, onDelta: (text) => deltas.push(text) }))
+      .resolves.toBe('注意力。');
+    expect(deltas).toEqual(['注意', '力。']);
+  });
+
+  it('asks for a streamed response and keeps the request envelope unchanged otherwise', async () => {
+    const transport = vi.fn(streamOf([frames(delta('ok'), '[DONE]')]));
+    await streamCompletion(provider, apiKey, messages, { transport });
+    expect(transport.mock.calls[0][0]).toEqual({
+      url: 'https://provider.example/custom/v1/chat/completions',
+      apiKey,
+      body: { model: provider.model, messages, stream: true },
+      timeoutMs: 120_000,
+      requestId: expect.any(String),
+    });
+  });
+
+  it('separates reasoning text from the answer', async () => {
+    const reasoning: string[] = [];
+    const transport = streamOf([frames(
+      JSON.stringify({ choices: [{ delta: { reasoning_content: '先回忆证据' } }] }),
+      delta('结论。'), '[DONE]',
+    )]);
+    await expect(streamCompletion(provider, apiKey, messages, { transport, onReasoning: (text) => reasoning.push(text) }))
+      .resolves.toBe('结论。');
+    expect(reasoning).toEqual(['先回忆证据']);
+  });
+
+  it('explains a thinking-only response instead of reporting an empty answer', async () => {
+    const transport = streamOf([frames(JSON.stringify({ choices: [{ delta: { reasoning_content: '思考' } }] }), '[DONE]')]);
+    await expect(streamCompletion(provider, apiKey, messages, { transport })).rejects.toThrow('只返回了思考内容');
+  });
+
+  it('tags an empty stream so the caller can retry without streaming', async () => {
+    const transport = streamOf(['{"choices":[{"message":{"content":"not an event stream"}}]}']);
+    const error = await streamCompletion(provider, apiKey, messages, { transport }).catch((failure: unknown) => failure);
+    expect(error).toMatchObject({ code: 'AI_STREAM_EMPTY' });
+  });
+
+  it('reports a non-success status and keeps the error body off the message', async () => {
+    const transport = streamOf([`{"error":{"message":"${apiKey} private-document-text"}}`], 404);
+    const error = await streamCompletion(provider, apiKey, messages, { transport }).catch((failure: unknown) => failure);
+    expect(String(error)).toContain('HTTP 404');
+    expect(String(error)).not.toContain(apiKey);
+    expect(String(error)).not.toContain('private-document-text');
+    expect(providerDetail(error)).toContain('private-document-text');
+    expect(failureStatus(error)).toBe(404);
+  });
+
+  it('hides the credential if a provider echoes it inside streamed text', async () => {
+    const transport = streamOf([frames(delta(`leaked ${apiKey}`), '[DONE]')]);
+    await expect(streamCompletion(provider, apiKey, messages, { transport })).resolves.toBe('leaked [已隐藏 API Key]');
+  });
+
+  it('rejects an invalid key, model, messages or timeout before dispatching', async () => {
+    const transport = vi.fn(streamOf([frames(delta('ok'), '[DONE]')]));
+    await expect(streamCompletion(provider, ' ', messages, { transport })).rejects.toThrow('API Key');
+    await expect(streamCompletion({ ...provider, model: ' ' }, apiKey, messages, { transport })).rejects.toThrow('模型');
+    await expect(streamCompletion(provider, apiKey, messages, { transport, timeoutMs: 999 })).rejects.toThrow('超时');
+    expect(transport).not.toHaveBeenCalled();
   });
 });

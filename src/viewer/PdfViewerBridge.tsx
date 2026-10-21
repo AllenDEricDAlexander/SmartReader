@@ -321,8 +321,8 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
   onDocumentInfo?(info: ViewerDocumentInfo): void;
   sessionId: string;
 }) {
-  // The viewer opens directly at the restored position. Rendering page 1 and
-  // jumping afterwards costs a wasted render and shows the wrong page first.
+  // Pair initialPage with disabled smooth scrolling so restoring a saved
+  // position never animates through the preceding pages.
   const initialPage = Math.max(0, (restore?.page ?? 1) - 1);
   const renderRange = useMemo(() => createRenderRange(), []);
 
@@ -519,6 +519,7 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
           transformGetDocumentParams={safePdfOptions}
           plugins={plugins}
           initialPage={initialPage}
+          enableSmoothScroll={false}
           defaultScale={restore?.zoom}
           setRenderRange={renderRange}
           renderLoader={(percentage) => (

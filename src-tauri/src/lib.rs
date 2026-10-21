@@ -77,10 +77,12 @@ pub fn run() {
             library_storage::write_library_storage_binary,
             library_storage::read_library_file,
             ai_http::ai_http_request,
+            ai_http::ai_http_stream,
             ai_http::cancel_ai_request,
+            knowledge_vectors::knowledge_cache_status,
             knowledge_vectors::read_knowledge_cache,
             knowledge_vectors::write_knowledge_cache,
-            knowledge_vectors::search_knowledge_vectors,
+            knowledge_vectors::search_knowledge_scope,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SmartReader");

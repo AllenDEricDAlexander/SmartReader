@@ -23,7 +23,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
     settings.providers.find((provider) => provider.id === settings.activeProviderId),
   ));
   const [apiKey, setApiKey] = useState('');
-  const [rememberKey, setRememberKey] = useState(false);
+  const [keyMemory, setKeyMemory] = useState<'session' | 'device' | 'password'>('session');
   const [savePassword, setSavePassword] = useState('');
   const [unlockPassword, setUnlockPassword] = useState('');
   const [knowledgeDraft, setKnowledgeDraft] = useState(settings.knowledge ?? { backend: 'local' as 'local' | 'milvus', milvusUrl: '' });
@@ -40,7 +40,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
   const activeReady = Boolean(active && activity.keyProviderIds.includes(active.id));
   const dirty = !selected || draft.name !== selected.name || draft.baseUrl !== selected.baseUrl
     || draft.model !== selected.model || draft.embeddingModel !== (selected.embeddingModel ?? '')
-    || draft.embeddingBaseUrl !== (selected.embeddingBaseUrl ?? '') || Boolean(apiKey) || rememberKey;
+    || draft.embeddingBaseUrl !== (selected.embeddingBaseUrl ?? '') || Boolean(apiKey);
 
   useEffect(() => {
     mounted.current = true;
@@ -61,7 +61,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
   function selectDraft(provider?: AiProviderProfile) {
     setDraft(providerDraft(provider));
     setApiKey('');
-    setRememberKey(false);
+    setKeyMemory('session');
     setSavePassword('');
     setUnlockPassword('');
     setError(null);
@@ -80,7 +80,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
     } catch (failure) {
       if (mounted.current && generation === operation.current) {
         let message = errorMessage(failure);
-        for (const secret of [apiKey, savePassword, unlockPassword, milvusToken]) {
+            for (const secret of [apiKey, savePassword, unlockPassword, milvusToken]) {
           if (secret) message = message.replaceAll(secret, '••••');
         }
         setError(message);
@@ -92,17 +92,24 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
 
   function saveProvider(event: FormEvent) {
     event.preventDefault();
-    if (rememberKey && (!savePassword.trim() || savePassword.length < 8)) {
+    const key = apiKey.trim();
+    if (key && keyMemory === 'password' && (!savePassword.trim() || savePassword.length < 8)) {
       setError('密钥保存密码至少 8 个字符。');
       return;
     }
-    if (rememberKey && !apiKey.trim()) {
-      setError('加密保存前请先输入 API Key。');
+    if (!key && keyMemory !== 'session') {
+      setError('保存密钥前请先输入 API Key。');
       return;
     }
-    void runAction('save', () => ai.saveProvider(draft, apiKey.trim() || undefined, rememberKey ? savePassword : undefined), (provider) => {
+    const remembered = keyMemory === 'device';
+    void runAction('save', () => ai.saveProvider(
+      draft,
+      key || undefined,
+      key && keyMemory === 'password' ? savePassword : undefined,
+      key ? remembered : undefined,
+    ), (provider) => {
       selectDraft(provider);
-      setNotice('厂商配置已保存。');
+      setNotice(remembered ? '厂商配置已保存，密钥会在本机保留。' : '厂商配置已保存。');
     });
   }
 
@@ -189,14 +196,24 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
             </label>
           </div>
           <p className="ai-field-help">留空仅在 Base URL 未改变时保留原密钥；更换地址会清除旧密钥。密钥不会自动填回输入框。</p>
-          <label className="ai-checkbox">
-            <input
-              type="checkbox" checked={rememberKey}
-              onChange={(event) => { setRememberKey(event.target.checked); setSavePassword(''); }}
-            />
-            <span>加密保存 API Key</span>
+          <label>
+            <span>密钥保存方式</span>
+            <select
+              aria-label="密钥保存方式" value={keyMemory}
+              onChange={(event) => { setKeyMemory(event.target.value as typeof keyMemory); setSavePassword(''); }}
+            >
+              <option value="session">仅本次会话（重启后需重新输入）</option>
+              <option value="device">在本机记住（重启后自动可用）</option>
+              <option value="password">加密保存（重启后用密码解锁）</option>
+            </select>
+            <small className="ai-field-help">{keyMemory === 'device'
+              ? '密钥会以明文保存在本机文献库文件中，能读取该文件的程序即可读到。共用电脑请改用加密保存。'
+              : keyMemory === 'password'
+                ? '密钥用密码加密后保存，每次启动需要输入该密码解锁。'
+                : '密钥只保留在当前会话内存中，重启应用后需要重新输入。'}
+              {' '}此处只决定本次输入的新密钥如何保存；留空则沿用当前的保存方式。</small>
           </label>
-          {rememberKey ? (
+          {keyMemory === 'password' ? (
             <label className="ai-password-field">
               <span>密钥保存密码</span>
               <input
@@ -234,7 +251,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
         <div className="ai-key-panel">
           <div className="ai-key-status">
             <KeyRound size={16} />
-            <strong>{hasKey ? '密钥已在当前会话可用' : selected.savedKey ? '已加密保存，待解锁' : '未配置密钥'}</strong>
+            <strong>{selected.storedKey ? '密钥已在本机保存，启动即可用' : hasKey ? '密钥已在当前会话可用' : selected.savedKey ? '已加密保存，待解锁' : '未配置密钥'}</strong>
           </div>
           {selected.savedKey && !hasKey ? (
             <form
@@ -271,15 +288,15 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
               onClick={() => void runAction('embedding', () => ai.testEmbeddingConnection(selected.id), (dimension) => setNotice(`向量模型验证成功，维度 ${dimension}。`))}>
               {busy === 'embedding' ? '验证向量中…' : '验证向量模型'}
             </button>
-            {hasKey || selected.savedKey ? (
+            {hasKey || selected.savedKey || selected.storedKey ? (
               <button
                 type="button" disabled={Boolean(busy)}
                 onClick={() => void runAction('forget', () => ai.forgetKey(selected.id), () => {
                   setApiKey('');
                   setUnlockPassword('');
                   setSavePassword('');
-                  setRememberKey(false);
-                  setNotice('会话密钥和已保存的密钥已清除。');
+                  setKeyMemory('session');
+                  setNotice('会话密钥、本机密钥和加密保存的密钥均已清除。');
                 })}
               >
                 忘记密钥
@@ -301,10 +318,10 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
         <label><span>向量检索位置</span>
           <select aria-label="向量检索位置" value={knowledgeDraft.backend} disabled={Boolean(busy) || !libraryView.loaded}
             onChange={(event) => setKnowledgeDraft({ ...knowledgeDraft, backend: event.target.value as 'local' | 'milvus' })}>
-            <option value="local">本地 · SQLite + sqlite-vec</option><option value="milvus">云端 · Milvus</option>
+            <option value="local">本地 · SQLite 持久化向量</option><option value="milvus">云端 · Milvus</option>
           </select>
         </label>
-        <p className="ai-field-help">原文和向量缓存保存于本地 SQLite。本地检索在内存中运行，向量生成仍使用所选 embedding 厂商。</p>
+        <p className="ai-field-help">原文和向量都持久保存在本地 SQLite，检索在原生层内完成，不会把向量搬进界面。向量生成仍使用所选 embedding 厂商。</p>
         {knowledgeDraft.backend === 'milvus' ? <>
           <label><span>Milvus 服务地址</span><input aria-label="Milvus 服务地址" type="url" required value={knowledgeDraft.milvusUrl}
             placeholder="https://your-milvus-endpoint" disabled={Boolean(busy)}
@@ -312,7 +329,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
           <label><span>Milvus 访问令牌（仅本次会话）</span><input aria-label="Milvus 访问令牌" type="password" autoComplete="off" value={milvusToken}
             placeholder={activity.milvusReady ? '留空保留当前地址的令牌' : '输入 Milvus / Zilliz 令牌'} disabled={Boolean(busy)}
             onChange={(event) => setMilvusToken(event.target.value)} /></label>
-          <p className="ai-field-help">仅上传未加密文件的向量，原文不上传至 Milvus。问答使用独立临时集合，结束后清理；加密文献请使用本地检索。令牌重启后需重新输入。</p>
+          <p className="ai-field-help">仅上传未加密文件的向量，原文不上传至 Milvus。向量保存在按维度命名的持久集合中（smartreader_knowledge_&lt;维度&gt;），重复提问不再重新上传；文献锁定或删除时会尽力清理云端向量。加密文献请使用本地检索，令牌重启后需重新输入。</p>
         </> : null}
         <button type="submit" disabled={Boolean(busy) || !libraryView.loaded}>保存检索设置</button>
       </form>

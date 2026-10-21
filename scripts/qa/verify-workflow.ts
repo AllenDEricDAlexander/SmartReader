@@ -76,7 +76,7 @@ try {
   await library.saveAnnotation(first.id, { id: null, documentKey: '', page: 2, type: 'note', color: '#60a5fa', text: 'QA private annotation', quote: null, areas: [], createdAt: now, updatedAt: now });
   await library.saveBookmark(first.id, { id: null, documentKey: '', page: 2, title: 'QA private bookmark', note: null, createdAt: now, updatedAt: now });
   await library.recordReading(first.id, 30, 2, 1.25);
-  const answer = await ai.ask('What supports hippocampal consolidation?', [first.id]);
+  const answer = await ai.ask('What supports hippocampal consolidation?', { paperIds: [first.id] });
   assert.equal(answer.sources[0].page, 2);
   assert.ok(answer.text.includes('[S1]'));
   const alternate = await ai.saveProvider({ name: 'Local QA B', baseUrl: `${baseUrl}/alt/v1`, model: 'qa-secondary' }, 'qa-only-key');

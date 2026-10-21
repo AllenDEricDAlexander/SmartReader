@@ -94,7 +94,7 @@ describe('AI settings', () => {
     const { library, ai } = await setup();
     render(<AiSettings library={library} ai={ai} />);
     fillProvider();
-    fireEvent.click(screen.getByLabelText('加密保存 API Key'));
+    fireEvent.change(screen.getByLabelText('密钥保存方式'), { target: { value: 'password' } });
     fireEvent.change(screen.getByLabelText('密钥保存密码'), { target: { value: 'short' } });
     fireEvent.submit(screen.getByRole('form', { name: 'AI 厂商配置' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('至少 8');
@@ -123,7 +123,7 @@ describe('AI settings', () => {
     await screen.findByText('连接验证成功。');
     expect(completion).toHaveBeenCalledWith(expect.objectContaining({ id: provider.id }), 'stored-secret', expect.any(Array), expect.any(Object));
     fireEvent.click(screen.getByRole('button', { name: '忘记密钥' }));
-    await screen.findByText('会话密钥和已保存的密钥已清除。');
+    await screen.findByText('会话密钥、本机密钥和加密保存的密钥均已清除。');
     expect(ai.hasApiKey(provider.id)).toBe(false);
     expect(library.getView().snapshot.ai.providers[0].savedKey).toBeNull();
     ai.dispose();

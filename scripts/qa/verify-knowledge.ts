@@ -1,4 +1,4 @@
-/** Real PDF + TS RAG + Rust SQLite/sqlite-vec. HTTP fixtures simulate vendors.
+/** Real PDF + TS RAG + Rust SQLite vector ranking. HTTP fixtures simulate vendors.
  * The Rust test bridge exercises native library functions, not GUI/Tauri IPC.
  */
 import assert from 'node:assert/strict';
@@ -14,8 +14,8 @@ import { AiService } from '../../src/ai/aiService';
 import { requestCompletion } from '../../src/ai/openAiClient';
 import { requestEmbeddings } from '../../src/ai/embeddingsClient';
 import { createKnowledgeStorage } from '../../src/ai/knowledgeStorage';
-import { createKnowledgeVectorSearch } from '../../src/ai/knowledgeVectors';
-import type { AiTransport } from '../../src/ai/aiTransport';
+import { createKnowledgeVectorStore } from '../../src/ai/knowledgeVectors';
+import { createAiTransport } from '../../src/ai/aiTransport';
 
 const directory = await mkdtemp(join(tmpdir(), 'smartreader-knowledge-'));
 const database = join(directory, 'qa.sqlite');
@@ -45,7 +45,8 @@ const invoke = async <T>(command: string, args?: Record<string, unknown> | Uint8
 let embeddingInputs = 0;
 let chatRequests = 0;
 let sourceTextUploaded = false;
-const collections = new Map<string, Array<{ id: string; vector: number[] }>>();
+let cloudUploads = 0;
+const collections = new Map<string, Array<{ id: string; vector: number[]; paper_id?: string; paper_fp?: string }>>();
 const api = createServer(async (request, response) => {
   try {
     let raw = '';
@@ -66,17 +67,38 @@ const api = createServer(async (request, response) => {
       result = { choices: [{ message: { content: 'Synthetic knowledge answer [S1]' } }] };
     } else {
       assert.equal(request.headers.authorization, 'Bearer qa-cloud-token');
-      assert.match(body.collectionName, /^smartreader_[a-f0-9]{32}$/);
+      if (!request.url?.endsWith('/collections/list')) assert.match(body.collectionName, /^smartreader_knowledge_\d+$/);
+      const rows = () => collections.get(body.collectionName) ?? [];
       result = { code: 0, data: {} };
-      if (request.url?.endsWith('/collections/create')) collections.set(body.collectionName, []);
+      if (request.url?.endsWith('/collections/list')) result = { code: 0, data: [...collections.keys()] };
+      else if (request.url?.endsWith('/collections/describe')) {
+        result = collections.has(body.collectionName) ? { code: 0, data: {} } : { code: 100, message: 'collection not found' };
+      } else if (request.url?.endsWith('/collections/create')) collections.set(body.collectionName, []);
+      else if (request.url?.endsWith('/collections/load')) assert(collections.has(body.collectionName));
       else if (request.url?.endsWith('/entities/insert')) {
-        sourceTextUploaded ||= body.data.some((entry: Record<string, unknown>) => Object.keys(entry).some((key) => !['id', 'vector'].includes(key)));
+        sourceTextUploaded ||= body.data.some((entry: Record<string, unknown>) =>
+          Object.keys(entry).some((key) => !['id', 'vector', 'paper_id', 'paper_fp'].includes(key)));
         collections.get(body.collectionName)!.push(...body.data);
+        cloudUploads += body.data.length;
+      } else if (request.url?.endsWith('/entities/delete')) {
+        const [, scope] = /paper_id (?:==|in) (.+)$/.exec(body.filter) ?? [];
+        assert(scope, 'cloud deletes must be scoped to papers');
+        collections.set(body.collectionName, rows().filter((row) => !scope.includes(row.paper_id!)));
+      } else if (request.url?.endsWith('/entities/query')) {
+        assert.equal(body.consistencyLevel, 'Strong');
+        assert.deepEqual(body.outputFields, ['count(*)']);
+        const [, paper] = /paper_id == "([0-9a-f]{64})"/.exec(body.filter) ?? [];
+        const [, fingerprint] = /paper_fp == "([0-9a-f]{64})"/.exec(body.filter) ?? [];
+        assert(paper && fingerprint);
+        result = { code: 0, data: [{ 'count(*)': rows().filter((row) => row.paper_id === paper && row.paper_fp === fingerprint).length }] };
       } else if (request.url?.endsWith('/entities/search')) {
-        const hits = await invoke<Array<{ id: string; score: number }>>('search_knowledge_vectors', { entries: collections.get(body.collectionName), query: body.data[0], limit: 20 });
-        result = { code: 0, data: hits.map((hit) => ({ id: hit.id, distance: hit.score })) };
-      } else if (request.url?.endsWith('/collections/drop')) collections.delete(body.collectionName);
-      else throw new Error('Unexpected fixture route');
+        const scoped = rows().filter((row) => body.filter.includes(row.paper_id!) && body.filter.includes(row.paper_fp!));
+        const query: number[] = body.data[0];
+        const norm = (vector: number[]) => Math.hypot(...vector);
+        result = { code: 0, data: scoped.map((row) => ({ id: row.id, paper_fp: row.paper_fp,
+          distance: row.vector.reduce((dot, value, index) => dot + value * query[index], 0) / (norm(row.vector) * norm(query)),
+        })).sort((a, b) => b.distance - a.distance).slice(0, body.limit) };
+      } else throw new Error('Unexpected fixture route');
     }
     response.writeHead(200, { 'Content-Type': 'application/json' });
     response.end(JSON.stringify(result));
@@ -96,14 +118,11 @@ try {
   const apiAddress = api.address();
   assert(apiAddress && typeof apiAddress !== 'string');
   const apiUrl = `http://127.0.0.1:${apiAddress.port}`;
-  const transport: AiTransport = async (request, signal) => {
-    const response = await fetch(request.url, { method: 'POST', headers: { Authorization: `Bearer ${request.apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(request.body), signal });
-    return { status: response.status, body: await response.text() };
-  };
+  const transport = createAiTransport(invoke);
   const createAi = (library: LibraryService) => new AiService(library,
     (provider, key, messages, options) => requestCompletion(provider, key, messages, { ...options, transport }), {
       embeddings: (provider, key, texts, options) => requestEmbeddings(provider, key, texts, { ...options, transport }),
-      storage: createKnowledgeStorage(invoke), vectors: createKnowledgeVectorSearch(invoke, transport),
+      storage: createKnowledgeStorage(invoke), store: createKnowledgeVectorStore(invoke, transport),
     });
   GlobalWorkerOptions.workerSrc = resolve('node_modules/pdfjs-dist/build/pdf.worker.js');
   const fixtures = join(directory, 'pdfs');
@@ -116,13 +135,13 @@ try {
   await ai.saveProvider(profile, 'qa-only-key');
   const question = 'What helps retain learned material overnight?';
   assert.equal(library.search(question).length, 0);
-  const answer = await ai.ask(question, [attention.id]);
+  const answer = await ai.ask(question, { paperIds: [attention.id] });
   assert.equal(answer.retrieval, 'local-vector');
   assert.equal(answer.sources.length, 1);
   assert.equal(answer.sources[0].page, 2);
   assert.equal(answer.sources[0].paperId, attention.id);
   const documentInputs = embeddingInputs;
-  await ai.ask(question, [attention.id]);
+  await ai.ask(question, { paperIds: [attention.id] });
   assert.equal(embeddingInputs, documentInputs, 'warm index must not re-embed documents');
   ai.dispose();
   await invoke('_qa_reopen');
@@ -130,35 +149,54 @@ try {
   await library.initialize();
   ai = createAi(library);
   await ai.saveProvider(profile, 'qa-only-key');
-  await ai.ask(question, [attention.id]);
+  await ai.ask(question, { paperIds: [attention.id] });
   assert.equal(embeddingInputs, documentInputs, 'reopened SQLite must restore vector caches');
   assert.equal((await invoke<{ migrations: number }>('_qa_counts')).migrations, 8);
   const previousChatCount = chatRequests;
-  await assert.rejects(ai.ask(question, [education.id]), /没有可用段落/);
+  await assert.rejects(ai.ask(question, { paperIds: [education.id] }), /没有可用段落/);
   assert.equal(chatRequests, previousChatCount, 'unrelated selected files must not borrow other documents');
   await ai.saveKnowledgeSettings('milvus', `${apiUrl}/milvus`, 'qa-cloud-token');
-  const cloud = await ai.ask(question, [attention.id]);
+  const cloud = await ai.ask(question, { paperIds: [attention.id] });
   assert.equal(cloud.retrieval, 'milvus-vector');
   assert.equal(cloud.sources[0].page, 2);
-  assert.equal(collections.size, 0, 'temporary cloud index must be cleaned up');
+  assert.equal(collections.size, 1, 'cloud vectors must live in one persistent collection');
+  const uploaded = cloudUploads;
+  assert(uploaded > 0, 'the first cloud question must publish this paper');
+  assert.equal((await ai.ask(question, { paperIds: [attention.id] })).retrieval, 'milvus-vector');
+  assert.equal(cloudUploads, uploaded, 'a repeated cloud question must not re-upload vectors');
   assert.equal(sourceTextUploaded, false);
+  ai.dispose();
+  ai = createAi(library);
+  await ai.saveProvider(profile, 'qa-only-key');
+  await ai.saveKnowledgeSettings('milvus', `${apiUrl}/milvus`, 'qa-cloud-token');
+  assert.equal((await ai.ask(question, { paperIds: [attention.id] })).retrieval, 'milvus-vector');
+  assert.equal(cloudUploads, uploaded, 'a restarted AI service must verify the complete cloud index without uploading');
+  const directChat = await ai.ask('Answer without any document.', { grounding: 'direct' });
+  assert.equal(directChat.retrieval, 'none');
+  assert.equal(directChat.sources.length, 0);
   await ai.saveKnowledgeSettings('local', '');
   const folder = await library.createFolder('Private QA knowledge');
   await library.categorize([attention.id], [folder.id], 'add');
   const vault = await library.encryptFolder(folder.id, 'qa knowledge password');
+  for (let attempt = 0; attempt < 100 && [...collections.values()].some((rows) => rows.some((row) => row.paper_id === attention.id)); attempt += 1) {
+    await new Promise((done) => setTimeout(done, 20));
+  }
+  assert([...collections.values()].every((rows) => rows.every((row) => row.paper_id !== attention.id)),
+    'encrypting while using local retrieval must still clean previous cloud vectors');
+  assert.equal(ai.getView().knowledgeCleanupError, undefined);
   assert.equal((await invoke<{ caches: number }>('_qa_counts')).caches, 1, 'encryption must remove the attention cache atomically');
-  const privateAnswer = await ai.ask(question, [attention.id]);
+  const privateAnswer = await ai.ask(question, { paperIds: [attention.id] });
   assert.equal(privateAnswer.sources[0].page, 2);
   assert.equal((await invoke<{ caches: number }>('_qa_counts')).caches, 1, 'private vectors must stay in unlock-session memory');
   const storedBytes = await readFile(database);
   assert.equal(storedBytes.includes(Buffer.from('Neural mechanisms of attention and memory')), false);
   assert.equal(storedBytes.includes(Buffer.from('qa-only-key')), false);
   await library.lockVault(vault.id);
-  await assert.rejects(ai.ask(question, [attention.id]), /导入或解锁/);
+  await assert.rejects(ai.ask(question, { paperIds: [attention.id] }), /导入或解锁/);
   await assert.rejects(library.unlockVault(vault.id, 'wrong password'));
   await library.unlockVault(vault.id, 'qa knowledge password');
-  assert.equal((await ai.ask(question, [attention.id])).sources[0].page, 2);
-  console.log('PASS: real PDF + Rust SQLite/sqlite-vec; semantic page-2 retrieval; selected-file isolation; durable public cache; private-cache erasure; cloud protocol fixture and cleanup.');
+  assert.equal((await ai.ask(question, { paperIds: [attention.id] })).sources[0].page, 2);
+  console.log('PASS: real PDF + Rust SQLite and native HTTP; semantic page-2 retrieval; selected-file isolation; durable public cache; private-cache erasure; complete cloud index reused after restart; encryption cleans cloud vectors in local mode; document-free chat.');
 } finally {
   ai?.dispose();
   if (native.exitCode === null) {

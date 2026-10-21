@@ -1,14 +1,15 @@
-use reqwest::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use reqwest::header::{HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tauri::ipc::Channel;
 use tauri::State;
 use tokio::task::AbortHandle;
 
-const MAX_REQUEST_BYTES: usize = 1024 * 1024;
-const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
+const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_ACTIVE_REQUESTS: usize = 64;
 const MAX_CANCELLED_REQUESTS: usize = 1024;
 const CANCEL_RETENTION: Duration = Duration::from_secs(120);
@@ -17,9 +18,9 @@ const CANCEL_RETENTION: Duration = Duration::from_secs(120);
 pub enum AiHttpError {
     #[error("AI_HTTP_INVALID_REQUEST: invalid endpoint, credentials, timeout or request id")]
     InvalidRequest,
-    #[error("AI_HTTP_REQUEST_TOO_LARGE: request body exceeds 1 MiB")]
+    #[error("AI_HTTP_REQUEST_TOO_LARGE: request body exceeds 8 MiB")]
     RequestTooLarge,
-    #[error("AI_HTTP_RESPONSE_TOO_LARGE: response body exceeds 2 MiB")]
+    #[error("AI_HTTP_RESPONSE_TOO_LARGE: response body exceeds 8 MiB")]
     ResponseTooLarge,
     #[error("AI_HTTP_INVALID_RESPONSE: response is not valid UTF-8 text")]
     InvalidResponse,
@@ -61,6 +62,18 @@ pub struct AiHttpRequest {
 pub struct AiHttpResponse {
     status: u16,
     body: String,
+}
+
+/// Streamed chat response. `status` always arrives first, then the raw response
+/// text in order, then `end`. Server-sent-event framing is parsed in the
+/// webview so this transport stays a byte forwarder for any OpenAI-compatible
+/// provider, including non-2xx error bodies.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum AiStreamEvent {
+    Status { status: u16 },
+    Chunk { data: String },
+    End,
 }
 
 struct ValidatedRequest {
@@ -106,7 +119,33 @@ impl AiHttpState {
         }
     }
 
-    async fn request(&self, request: AiHttpRequest) -> Result<AiHttpResponse, AiHttpError> {
+    pub(crate) async fn request(
+        &self,
+        request: AiHttpRequest,
+    ) -> Result<AiHttpResponse, AiHttpError> {
+        self.run(request, send_request).await
+    }
+
+    async fn stream(
+        &self,
+        request: AiHttpRequest,
+        events: Channel<AiStreamEvent>,
+    ) -> Result<(), AiHttpError> {
+        self.run(request, move |client, validated| async move {
+            stream_request(client, validated, events).await
+        })
+        .await
+    }
+
+    /// Runs one registered, cancellable HTTP operation. Registration happens
+    /// before any network I/O so `cancel_ai_request` cannot miss a request whose
+    /// abort handle is still being installed.
+    async fn run<T, F, Fut>(&self, request: AiHttpRequest, operation: F) -> Result<T, AiHttpError>
+    where
+        T: Send + 'static,
+        F: FnOnce(reqwest::Client, ValidatedRequest) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<T, AiHttpError>> + Send,
+    {
         let request = validate_request(request)?;
         let client = self.client.as_ref().map_err(|error| *error)?.clone();
         let (task, _registration) = {
@@ -125,7 +164,7 @@ impl AiHttpState {
             let (start, ready) = tokio::sync::oneshot::channel();
             let task = tauri::async_runtime::spawn(async move {
                 ready.await.map_err(|_| AiHttpError::Cancelled)?;
-                send_request(client, request).await
+                operation(client, request).await
             });
             let abort = task.inner().abort_handle();
             requests.active.insert(request_id.clone(), abort.clone());
@@ -134,8 +173,6 @@ impl AiHttpState {
                 abort,
                 requests: self.requests.clone(),
             };
-            // Registration precedes network I/O, so cancellation cannot miss an
-            // already-started request while its abort handle is being installed.
             let _ = start.send(());
             (task, registration)
         };
@@ -202,6 +239,15 @@ pub async fn ai_http_request(
 }
 
 #[tauri::command]
+pub async fn ai_http_stream(
+    state: State<'_, AiHttpState>,
+    request: AiHttpRequest,
+    on_event: Channel<AiStreamEvent>,
+) -> Result<(), AiHttpError> {
+    state.stream(request, on_event).await
+}
+
+#[tauri::command]
 pub fn cancel_ai_request(
     state: State<'_, AiHttpState>,
     request_id: String,
@@ -248,9 +294,15 @@ fn validate_request(request: AiHttpRequest) -> Result<ValidatedRequest, AiHttpEr
             || url.path().ends_with("/embeddings")
             || [
                 "/v2/vectordb/collections/create",
+                "/v2/vectordb/collections/describe",
+                "/v2/vectordb/collections/list",
                 "/v2/vectordb/collections/drop",
+                "/v2/vectordb/collections/load",
+                "/v2/vectordb/entities/delete",
                 "/v2/vectordb/entities/insert",
+                "/v2/vectordb/entities/query",
                 "/v2/vectordb/entities/search",
+                "/v2/vectordb/entities/upsert",
             ]
             .iter()
             .any(|path| url.path().ends_with(path)))
@@ -310,6 +362,69 @@ async fn send_request(
     }
     let body = String::from_utf8(bytes).map_err(|_| AiHttpError::InvalidResponse)?;
     Ok(AiHttpResponse { status, body })
+}
+
+async fn stream_request(
+    client: reqwest::Client,
+    request: ValidatedRequest,
+    events: Channel<AiStreamEvent>,
+) -> Result<(), AiHttpError> {
+    let mut response = client
+        .post(request.url)
+        .header(AUTHORIZATION, request.authorization)
+        .header(CONTENT_TYPE, "application/json")
+        .header(ACCEPT, "text/event-stream")
+        .timeout(request.timeout)
+        .body(request.body)
+        .send()
+        .await
+        .map_err(safe_network_error)?;
+    events
+        .send(AiStreamEvent::Status {
+            status: response.status().as_u16(),
+        })
+        .map_err(|_| AiHttpError::Cancelled)?;
+    let mut total = 0usize;
+    // A chunk boundary can split a multi-byte character, so incomplete UTF-8
+    // tails are held back instead of being forwarded or lossily replaced.
+    let mut pending: Vec<u8> = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(safe_network_error)? {
+        total += chunk.len();
+        if total > MAX_RESPONSE_BYTES {
+            return Err(AiHttpError::ResponseTooLarge);
+        }
+        pending.extend_from_slice(&chunk);
+        let text = match std::str::from_utf8(&pending) {
+            Ok(text) => {
+                let owned = text.to_owned();
+                pending.clear();
+                owned
+            }
+            Err(error) => {
+                if error.error_len().is_some() {
+                    return Err(AiHttpError::InvalidResponse);
+                }
+                let valid = error.valid_up_to();
+                let owned = std::str::from_utf8(&pending[..valid])
+                    .map_err(|_| AiHttpError::InvalidResponse)?
+                    .to_owned();
+                pending.drain(..valid);
+                owned
+            }
+        };
+        if !text.is_empty() {
+            events
+                .send(AiStreamEvent::Chunk { data: text })
+                .map_err(|_| AiHttpError::Cancelled)?;
+        }
+    }
+    if !pending.is_empty() {
+        return Err(AiHttpError::InvalidResponse);
+    }
+    events
+        .send(AiStreamEvent::End)
+        .map_err(|_| AiHttpError::Cancelled)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -380,6 +495,110 @@ mod tests {
         )
     }
 
+    /// Collects streamed events the way the webview channel would.
+    fn stream_channel() -> (Channel<AiStreamEvent>, Arc<Mutex<Vec<String>>>) {
+        let collected = Arc::new(Mutex::new(Vec::new()));
+        let sink = collected.clone();
+        let channel = Channel::new(move |body: tauri::ipc::InvokeResponseBody| {
+            let text = match body {
+                tauri::ipc::InvokeResponseBody::Json(json) => json,
+                tauri::ipc::InvokeResponseBody::Raw(bytes) => {
+                    String::from_utf8_lossy(&bytes).into_owned()
+                }
+            };
+            sink.lock().unwrap().push(text);
+            Ok(())
+        });
+        (channel, collected)
+    }
+
+    #[test]
+    fn streams_status_then_response_text_and_requests_event_stream() {
+        let (url, worker) = server(|mut stream| {
+            let request = read_request(&mut stream);
+            assert!(request.contains("accept: text/event-stream"));
+            assert!(request.contains("\"stream\":true"));
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n",
+                )
+                .unwrap();
+            // A multi-byte character split across chunks must not be forwarded
+            // until its continuation bytes arrive.
+            let head = "data: {\"choices\":[{\"delta\":{\"content\":\"记"
+                .as_bytes()
+                .to_vec();
+            let split = head.len() - 1;
+            write!(stream, "{:x}\r\n", split).unwrap();
+            stream.write_all(&head[..split]).unwrap();
+            stream.write_all(b"\r\n").unwrap();
+            let tail = [&head[split..], "忆\"}}]}\n\ndata: [DONE]\n\n".as_bytes()].concat();
+            write!(stream, "{:x}\r\n", tail.len()).unwrap();
+            stream.write_all(&tail).unwrap();
+            stream.write_all(b"\r\n0\r\n\r\n").unwrap();
+            stream.flush().unwrap();
+        });
+        let mut input = request(url, "stream-ok");
+        input.body = json!({"model": "local-model", "messages": [], "stream": true});
+        let (channel, collected) = stream_channel();
+        tauri::async_runtime::block_on(test_state().stream(input, channel)).unwrap();
+        worker.join().unwrap();
+        let events = collected.lock().unwrap().join("");
+        assert!(events.contains("\"kind\":\"status\""));
+        assert!(events.contains("\"status\":200"));
+        assert!(events.contains("记忆"));
+        assert!(events.ends_with("{\"kind\":\"end\"}"));
+    }
+
+    #[test]
+    fn streams_a_non_success_status_with_its_error_body() {
+        let (url, worker) = server(|mut stream| {
+            read_request(&mut stream);
+            let body = "{\"error\":{\"message\":\"no model\"}}";
+            write!(
+                stream,
+                "HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+            stream.flush().unwrap();
+        });
+        let (channel, collected) = stream_channel();
+        tauri::async_runtime::block_on(test_state().stream(request(url, "stream-404"), channel))
+            .unwrap();
+        worker.join().unwrap();
+        let events = collected.lock().unwrap().join("");
+        assert!(events.contains("\"status\":404"));
+        assert!(events.contains("no model"));
+    }
+
+    #[test]
+    fn bounds_streamed_response_bytes() {
+        let (url, worker) = server(|mut stream| {
+            read_request(&mut stream);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+                .unwrap();
+            let chunk = vec![b'x'; 64 * 1024];
+            for _ in 0..200 {
+                if write!(stream, "{:x}\r\n", chunk.len()).is_err()
+                    || stream.write_all(&chunk).is_err()
+                    || stream.write_all(b"\r\n").is_err()
+                {
+                    return;
+                }
+            }
+        });
+        let (channel, _collected) = stream_channel();
+        let error = tauri::async_runtime::block_on(
+            test_state().stream(request(url, "stream-limit"), channel),
+        )
+        .unwrap_err();
+        assert!(matches!(error, AiHttpError::ResponseTooLarge));
+        let _ = worker.join();
+    }
+
     #[test]
     fn validates_urls_limits_and_headers_before_network_io() {
         for url in [
@@ -400,8 +619,13 @@ mod tests {
             "https://10.0.0.1/private/chat/completions",
             "https://example.test/compatible-mode/v1/embeddings",
             "https://example.test/v2/vectordb/collections/create",
+            "https://example.test/v2/vectordb/collections/describe",
+            "https://example.test/v2/vectordb/collections/list",
+            "https://example.test/v2/vectordb/collections/load",
             "https://example.test/v2/vectordb/collections/drop",
+            "https://example.test/v2/vectordb/entities/delete",
             "https://example.test/v2/vectordb/entities/insert",
+            "https://example.test/v2/vectordb/entities/query",
             "https://example.test/v2/vectordb/entities/search",
         ] {
             assert!(validate_request(request(url.to_string(), "allowed")).is_ok());

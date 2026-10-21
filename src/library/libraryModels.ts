@@ -80,6 +80,12 @@ export type AiProviderProfile = {
   embeddingModel?: string;
   embeddingBaseUrl?: string;
   savedKey: EncryptedSecret | null;
+  /**
+   * API key kept on this device without a password, when the user asks for it.
+   * It persists with the library file, so it is readable by anything that can
+   * read that file; `savedKey` remains the password-protected alternative.
+   */
+  storedKey?: string | null;
 };
 
 export type AiSettings = {
