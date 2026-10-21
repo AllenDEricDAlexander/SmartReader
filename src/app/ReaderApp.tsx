@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -34,6 +35,8 @@ import type {
 } from '../persistence/persistenceApi';
 import { createDebouncedFlush } from '../persistence/debounce';
 import { defaultReaderPreferences, mergeReaderPreferences } from '../preferences/preferencesStore';
+import type { ReaderTheme } from '../preferences/preferencesModels';
+import { ThemeSwitcher } from '../preferences/ThemeSwitcher';
 import type { SettingsSection } from '../settings/SettingsWorkspace';
 import type { Tag } from '../tags/tagModels';
 import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
@@ -102,6 +105,7 @@ export function ReaderApp({
   const research = useResearch();
   const libraryView = useLibraryView(research?.library);
   const [appError, setAppError] = useState<string | null>(null);
+  const [themeError, setThemeError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState('');
   const importingRef = useRef(false);
@@ -135,6 +139,7 @@ export function ReaderApp({
     useState<SettingsSection>('shortcuts');
   const [readerPreferences, setReaderPreferences] = useState(defaultReaderPreferences);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [preferencesLoadSucceeded, setPreferencesLoadSucceeded] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [recentDocuments, setRecentDocuments] = useState<PersistedDocument[]>([]);
   const [favoriteDocuments, setFavoriteDocuments] = useState<FavoriteDocument[]>([]);
@@ -308,17 +313,32 @@ export function ReaderApp({
 
 
 
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const previousTheme = root.getAttribute('data-theme');
+    root.setAttribute('data-theme', readerPreferences.theme);
+    return () => {
+      if (previousTheme === null) root.removeAttribute('data-theme');
+      else root.setAttribute('data-theme', previousTheme);
+    };
+  }, [readerPreferences.theme]);
+
   useEffect(() => {
     let cancelled = false;
+    setPreferencesLoadSucceeded(false);
 
     persistence
       .loadPreferences()
       .then((preferences) => {
         if (!cancelled) {
           setReaderPreferences(mergeReaderPreferences(preferences));
+          setPreferencesLoadSucceeded(true);
+          setThemeError(null);
         }
       })
-      .catch(() => undefined)
+      .catch((error) => {
+        if (!cancelled) setThemeError(`设置加载失败，暂时无法切换主题：${errorMessage(error)}`);
+      })
       .finally(() => {
         if (!cancelled) {
           setPreferencesLoaded(true);
@@ -1173,11 +1193,29 @@ export function ReaderApp({
       try {
         await persistence.savePreferences(preferences);
         setReaderPreferences(preferences);
+        setPreferencesLoadSucceeded(true);
+        setThemeError(null);
       } finally {
         setSettingsSaving(false);
       }
     },
     [persistence],
+  );
+  const handleThemeChange = useCallback(
+    async (theme: ReaderTheme) => {
+      if (!preferencesLoadSucceeded || settingsSaving || theme === readerPreferences.theme) return;
+
+      const nextPreferences = { ...readerPreferences, theme };
+      setThemeError(null);
+      setReaderPreferences(nextPreferences);
+      try {
+        await handleSavePreferences(nextPreferences);
+      } catch (error) {
+        setReaderPreferences(readerPreferences);
+        setThemeError(`主题保存失败，已恢复原主题：${errorMessage(error)}`);
+      }
+    },
+    [preferencesLoadSucceeded, readerPreferences, settingsSaving, handleSavePreferences],
   );
   const handleWorkbenchDragOver = useCallback(
     (event: React.DragEvent<HTMLElement>) => {
@@ -1323,9 +1361,9 @@ export function ReaderApp({
       onDragOver={handleWorkbenchDragOver}
       onDrop={handleWorkbenchDrop}
     >
-      {appError || libraryView.error ? <div className="app-operation-error" role="alert">
-        <span>{appError ?? libraryView.error}</span>
-        <button type="button" aria-label="关闭提示" onClick={() => setAppError(null)}>关闭</button>
+      {appError || libraryView.error || themeError ? <div className="app-operation-error" role="alert">
+        <span>{appError ?? libraryView.error ?? themeError}</span>
+        <button type="button" aria-label="关闭提示" onClick={() => { setAppError(null); setThemeError(null); }}>关闭</button>
       </div> : null}
       {activeWorkspace === 'home' || activeWorkspace === 'reader' ? (
         <ReaderTabs
@@ -1341,6 +1379,13 @@ export function ReaderApp({
         />
       ) : null}
       <ReaderWorkspaceSwitch
+        themeSwitcher={
+          <ThemeSwitcher
+            theme={readerPreferences.theme}
+            disabled={!preferencesLoadSucceeded || settingsSaving}
+            onChange={(theme) => void handleThemeChange(theme)}
+          />
+        }
         workspaceContent={workspaceContent}
         importContent={research ? <section className="research-import-workspace">
           <header className="workspace-header"><h1>导入文献</h1><button type="button" onClick={closeToolWorkspace}>返回</button></header>

@@ -165,6 +165,7 @@ describe('persistenceApi', () => {
     const invoke = vi.fn().mockResolvedValue(null);
     const api = createPersistenceApi(invoke);
     const preferences = {
+      theme: 'eye-care' as const,
       sessionRestoreEnabled: true,
       restoreScope: 'all' as const,
       defaultZoomMode: 'fit-width' as const,

@@ -53,7 +53,7 @@
   white-space: nowrap;
   padding: 4px 9px;
   color: var(--sr-primary);
-  background: #eff6ff;
+  background: var(--sr-primary-soft, #eff6ff);
   border-radius: 6px;
   font-size: 11px;
 }
@@ -63,10 +63,10 @@
   align-items: flex-start;
   gap: 10px;
   padding: 12px 14px;
-  border: 1px solid #dbeafe;
+  border: 1px solid var(--sr-primary-border, #dbeafe);
   border-radius: var(--sr-radius);
-  background: #f5f9ff;
-  color: #345475;
+  background: var(--sr-primary-soft, #f5f9ff);
+  color: var(--sr-text-secondary, #345475);
   font-size: 12px;
   line-height: 1.7;
 }
@@ -110,7 +110,7 @@
 
 .ai-settings input::placeholder,
 .ai-assistant textarea::placeholder {
-  color: #94a3b8;
+  color: var(--sr-text-faint, #94a3b8);
 }
 
 .ai-provider-fields {
@@ -184,7 +184,7 @@
 }
 
 .ai-key-status {
-  color: #475569;
+  color: var(--sr-text-secondary, #475569);
   font-size: 12px;
 }
 
@@ -211,7 +211,7 @@
 }
 
 .ai-success-message {
-  color: #166534;
+  color: var(--sr-success-text, #166534);
   font-size: 12px;
 }
 
@@ -327,8 +327,8 @@
   gap: 14px;
   padding: 12px;
   border-radius: 7px;
-  background: #eff6ff;
-  color: #345475;
+  background: var(--sr-primary-soft, #eff6ff);
+  color: var(--sr-text-secondary, #345475);
   font-size: 12px;
 }
 
@@ -489,11 +489,11 @@
   gap: 12px;
   padding: 36px 20px;
   text-align: center;
-  color: #94a3b8;
+  color: var(--sr-text-faint, #94a3b8);
 }
 
 .ai-answer-empty h2 {
-  color: #64748b;
+  color: var(--sr-text-muted);
   font-size: 15px;
 }
 

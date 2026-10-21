@@ -13,11 +13,12 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import type { RefObject } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import type { DocumentSession } from '../documents/documentModels';
 import type { ViewerSearchState } from '../viewer/viewerTypes';
 
 type ReaderToolbarProps = {
+  themeSwitcher?: ReactNode;
   activeSession: DocumentSession | null;
   searchText: string;
   searchState: ViewerSearchState;
@@ -49,6 +50,7 @@ type ReaderToolbarProps = {
 };
 
 export function ReaderToolbar({
+  themeSwitcher,
   activeSession,
   searchText,
   searchState,
@@ -281,6 +283,7 @@ export function ReaderToolbar({
         >
           <Star size={16} fill={isFavorite ? 'currentColor' : 'none'} />
         </button>
+        {themeSwitcher}
         <button
           type="button"
           className="toolbar-text-button"

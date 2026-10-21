@@ -2511,6 +2511,351 @@ describe('App', () => {
     });
   });
 
+  it.each(['dark', 'light', 'eye-care'] as const)(
+    'restores the %s theme across the home, reader, and settings workspaces',
+    async (theme) => {
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:theme');
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+      const openNativePdf = vi.fn().mockResolvedValue({
+        source: { kind: 'desktop-path', path: '/tmp/theme.pdf', name: 'theme.pdf' },
+        bytes: new Uint8Array([37, 80, 68, 70, 45]),
+        fileSize: 5,
+        modifiedAt: '2026-06-15T00:00:00Z',
+      });
+      const persistence = {
+        ...createEmptyPersistence(),
+        loadPreferences: vi.fn().mockResolvedValue({ ...defaultReaderPreferences, theme }),
+      };
+      renderApp(
+        <App
+          bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+          persistence={persistence}
+          viewerRenderer={testViewerRenderer}
+        />,
+      );
+
+      await waitFor(() => expect(document.documentElement).toHaveAttribute('data-theme', theme));
+      expect(screen.getByLabelText('SmartReader workbench')).toHaveClass('home-mode');
+
+      fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
+      expect(await screen.findByLabelText('阅读工作区')).toBeInTheDocument();
+      expect(document.documentElement).toHaveAttribute('data-theme', theme);
+
+      fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+      expect(await screen.findByLabelText('设置工作区')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '外观' }));
+      expect(screen.getByRole('group', { name: '界面主题' })).toBeInTheDocument();
+      expect(document.documentElement).toHaveAttribute('data-theme', theme);
+
+      fireEvent.click(screen.getByRole('button', { name: '关闭设置' }));
+      expect(await screen.findByLabelText('阅读工作区')).toBeInTheDocument();
+      expect(document.documentElement).toHaveAttribute('data-theme', theme);
+    },
+  );
+
+  it('applies a theme after saving and restores it when the app is reopened', async () => {
+    let savedPreferences: ReaderPreferences | null = null;
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadPreferences: vi.fn().mockImplementation(async () => savedPreferences),
+      savePreferences: vi.fn().mockImplementation(async (preferences: ReaderPreferences) => {
+        savedPreferences = preferences;
+      }),
+    };
+    const props = {
+      bridge: { openNativePdf: vi.fn(), readDesktopPdf: vi.fn() },
+      persistence,
+      viewerRenderer: testViewerRenderer,
+    };
+    const { unmount } = renderApp(<App {...props} />);
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
+    fireEvent.click(screen.getByRole('button', { name: '护眼色' }));
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-theme', 'eye-care'));
+    expect(persistence.savePreferences).toHaveBeenCalledWith({
+      ...defaultReaderPreferences,
+      theme: 'eye-care',
+    });
+    unmount();
+    expect(document.documentElement).not.toHaveAttribute('data-theme');
+
+    renderApp(<App {...props} />);
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-theme', 'eye-care'));
+  });
+
+  it('switches themes from both toolbars, preserves other preferences, and restores the automatic save', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:quick-theme');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const initialPreferences: ReaderPreferences = {
+      ...defaultReaderPreferences,
+      sessionRestoreEnabled: false,
+      restoreScope: 'active',
+      defaultZoomMode: 'fit-page',
+      shortcuts: { ...defaultReaderPreferences.shortcuts, 'file.open': 'Alt+O' },
+    };
+    let savedPreferences = initialPreferences;
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadPreferences: vi.fn().mockImplementation(async () => savedPreferences),
+      savePreferences: vi.fn().mockImplementation(async (preferences: ReaderPreferences) => {
+        savedPreferences = preferences;
+      }),
+    };
+    const openNativePdf = vi.fn().mockResolvedValue({
+      source: { kind: 'desktop-path', path: '/tmp/quick-theme.pdf', name: 'quick-theme.pdf' },
+      bytes: new Uint8Array([37, 80, 68, 70, 45]),
+      fileSize: 5,
+      modifiedAt: '2026-06-15T00:00:00Z',
+    });
+    const props = {
+      bridge: { openNativePdf, readDesktopPdf: vi.fn() },
+      persistence,
+      viewerRenderer: testViewerRenderer,
+    };
+    const { unmount } = renderApp(<App {...props} />);
+    const homeSwitcher = within(screen.getByLabelText('SmartReader 顶部栏'))
+      .getByRole('combobox', { name: '切换主题' });
+    await waitFor(() => expect(homeSwitcher).toBeEnabled());
+    expect(within(homeSwitcher).getAllByRole('option').map((option) => option.textContent))
+      .toEqual(['暗色', '亮色', '护眼色']);
+    fireEvent.change(homeSwitcher, { target: { value: 'light' } });
+    expect(persistence.savePreferences).not.toHaveBeenCalled();
+
+    fireEvent.change(homeSwitcher, { target: { value: 'eye-care' } });
+    expect(document.documentElement).toHaveAttribute('data-theme', 'eye-care');
+    expect(screen.queryByLabelText('设置工作区')).not.toBeInTheDocument();
+    await waitFor(() => expect(homeSwitcher).toBeEnabled());
+    expect(persistence.savePreferences).toHaveBeenLastCalledWith({ ...initialPreferences, theme: 'eye-care' });
+
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
+    const toolbar = await screen.findByRole('region', { name: '阅读工具栏' });
+    const readerSwitcher = within(toolbar).getByRole('combobox', { name: '切换主题' });
+    expect(readerSwitcher).toHaveValue('eye-care');
+    fireEvent.change(readerSwitcher, { target: { value: 'dark' } });
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
+    await waitFor(() => expect(readerSwitcher).toBeEnabled());
+    expect(persistence.savePreferences).toHaveBeenLastCalledWith({ ...initialPreferences, theme: 'dark' });
+    expect(screen.getByRole('tab', { name: 'quick-theme.pdf' })).toHaveAttribute('aria-selected', 'true');
+    expect(openNativePdf).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));
+    const returnedSwitcher = screen.getByRole('combobox', { name: '切换主题' });
+    expect(returnedSwitcher).toHaveValue('dark');
+    fireEvent.change(returnedSwitcher, { target: { value: 'light' } });
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+    await waitFor(() => expect(returnedSwitcher).toBeEnabled());
+    expect(persistence.savePreferences).toHaveBeenLastCalledWith(initialPreferences);
+
+    fireEvent.change(returnedSwitcher, { target: { value: 'eye-care' } });
+    await waitFor(() => expect(returnedSwitcher).toBeEnabled());
+    unmount();
+    renderApp(<App {...props} />);
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '切换主题' })).toHaveValue('eye-care'));
+    expect(document.documentElement).toHaveAttribute('data-theme', 'eye-care');
+  });
+
+  it('applies a toolbar theme before persistence finishes and prevents overlapping preference saves', async () => {
+    const pendingSave = createDeferred<void>();
+    const persistence = {
+      ...createEmptyPersistence(),
+      savePreferences: vi.fn().mockReturnValue(pendingSave.promise),
+    };
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+    const switcher = screen.getByRole('combobox', { name: '切换主题' });
+    await waitFor(() => expect(switcher).toBeEnabled());
+    fireEvent.change(switcher, { target: { value: 'eye-care' } });
+    expect(document.documentElement).toHaveAttribute('data-theme', 'eye-care');
+    expect(switcher).toBeDisabled();
+    fireEvent.change(switcher, { target: { value: 'dark' } });
+    expect(persistence.savePreferences).toHaveBeenCalledTimes(1);
+    expect(document.documentElement).toHaveAttribute('data-theme', 'eye-care');
+
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
+    expect(screen.getByRole('button', { name: '保存设置' })).toBeDisabled();
+    await act(async () => { pendingSave.resolve(); await pendingSave.promise; });
+    fireEvent.click(screen.getByRole('button', { name: '关闭设置' }));
+    expect(screen.getByRole('combobox', { name: '切换主题' })).toBeEnabled();
+    expect(screen.getByRole('combobox', { name: '切换主题' })).toHaveValue('eye-care');
+  });
+
+  it('waits for saved preferences before enabling the toolbar switcher', async () => {
+    const pendingLoad = createDeferred<ReaderPreferences | null>();
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadPreferences: vi.fn().mockReturnValue(pendingLoad.promise),
+    };
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+    const switcher = screen.getByRole('combobox', { name: '切换主题' });
+    expect(switcher).toBeDisabled();
+    fireEvent.change(switcher, { target: { value: 'dark' } });
+    expect(persistence.savePreferences).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingLoad.resolve({ ...defaultReaderPreferences, theme: 'eye-care' });
+      await pendingLoad.promise;
+    });
+    expect(switcher).toBeEnabled();
+    expect(switcher).toHaveValue('eye-care');
+    expect(document.documentElement).toHaveAttribute('data-theme', 'eye-care');
+    expect(persistence.savePreferences).not.toHaveBeenCalled();
+  });
+
+  it('keeps automatic theme saving disabled if the existing preferences could not be loaded', async () => {
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadPreferences: vi.fn().mockRejectedValue(new Error('storage unavailable')),
+    };
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('设置加载失败，暂时无法切换主题：storage unavailable');
+    const switcher = screen.getByRole('combobox', { name: '切换主题' });
+    expect(switcher).toBeDisabled();
+    fireEvent.change(switcher, { target: { value: 'eye-care' } });
+    expect(persistence.savePreferences).not.toHaveBeenCalled();
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+  });
+
+  it('rolls back failed automatic theme saves and allows retry from the toolbar', async () => {
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadPreferences: vi.fn().mockResolvedValue({ ...defaultReaderPreferences, theme: 'dark' }),
+      savePreferences: vi.fn().mockRejectedValueOnce(new Error('storage unavailable'))
+        .mockResolvedValue(undefined),
+    };
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+    const switcher = screen.getByRole('combobox', { name: '切换主题' });
+    await waitFor(() => expect(switcher).toBeEnabled());
+    fireEvent.change(switcher, { target: { value: 'eye-care' } });
+    expect(document.documentElement).toHaveAttribute('data-theme', 'eye-care');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('主题保存失败，已恢复原主题：storage unavailable');
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
+    expect(switcher).toHaveValue('dark');
+    expect(switcher).toBeEnabled();
+    fireEvent.change(switcher, { target: { value: 'light' } });
+    await waitFor(() => expect(switcher).toBeEnabled());
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(persistence.savePreferences).toHaveBeenLastCalledWith({ ...defaultReaderPreferences, theme: 'light' });
+  });
+
+  it('keeps settings and both toolbars on the same saved theme', async () => {
+    const persistence = createEmptyPersistence();
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+    const switcher = screen.getByRole('combobox', { name: '切换主题' });
+    await waitFor(() => expect(switcher).toBeEnabled());
+    fireEvent.change(switcher, { target: { value: 'eye-care' } });
+    await waitFor(() => expect(switcher).toBeEnabled());
+
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
+    expect(screen.getByRole('button', { name: '护眼色' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '暗色' }));
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(screen.getByRole('combobox', { name: '切换主题' })).toHaveValue('eye-care');
+    expect(persistence.savePreferences).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
+    fireEvent.click(screen.getByRole('button', { name: '暗色' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-theme', 'dark'));
+    fireEvent.click(screen.getByRole('button', { name: '关闭设置' }));
+    expect(screen.getByRole('combobox', { name: '切换主题' })).toHaveValue('dark');
+  });
+
+  it('keeps the saved theme when appearance edits are cancelled and resets it only after saving defaults', async () => {
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadPreferences: vi.fn().mockResolvedValue({ ...defaultReaderPreferences, theme: 'dark' }),
+    };
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-theme', 'dark'));
+
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
+    fireEvent.click(screen.getByRole('button', { name: '护眼色' }));
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
+    expect(persistence.savePreferences).not.toHaveBeenCalled();
+
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
+    expect(screen.getByRole('button', { name: '暗色' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '恢复默认' }));
+    expect(screen.getByRole('button', { name: '亮色' })).toHaveAttribute('aria-pressed', 'true');
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
+
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-theme', 'light'));
+    expect(persistence.savePreferences).toHaveBeenCalledWith(defaultReaderPreferences);
+  });
+
+  it('reports theme save failures and preserves the current theme and draft for retry', async () => {
+    const persistence = {
+      ...createEmptyPersistence(),
+      savePreferences: vi.fn().mockRejectedValueOnce(new Error('storage unavailable'))
+        .mockResolvedValue(undefined),
+    };
+    renderApp(
+      <App
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />,
+    );
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
+    fireEvent.click(screen.getByRole('button', { name: '护眼色' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('设置保存失败：storage unavailable');
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+    expect(screen.getByRole('button', { name: '护眼色' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-theme', 'eye-care'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('saves session restore scope through explicit preferences save', async () => {
     const persistence = createEmptyPersistence();
 

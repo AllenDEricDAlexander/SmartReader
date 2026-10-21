@@ -8,9 +8,10 @@ import { DesktopIntegrationSettings } from './DesktopIntegrationSettings';
 import { SessionRestoreSettings } from './SessionRestoreSettings';
 import { ShortcutSettings } from './ShortcutSettings';
 import { AiSettings } from './AiSettings';
+import { AppearanceSettings } from './AppearanceSettings';
 import { useResearch } from '../app/ResearchContext';
 
-export type SettingsSection = 'shortcuts' | 'cache' | 'desktop' | 'restore' | 'ai';
+export type SettingsSection = 'appearance' | 'shortcuts' | 'cache' | 'desktop' | 'restore' | 'ai';
 
 type SettingsWorkspaceProps = {
   commandRegistry: CommandRegistry;
@@ -24,6 +25,7 @@ type SettingsWorkspaceProps = {
 };
 
 const sections: Array<{ id: SettingsSection; label: string }> = [
+  { id: 'appearance', label: '外观' },
   { id: 'shortcuts', label: '快捷键' },
   { id: 'cache', label: '缓存' },
   { id: 'desktop', label: '桌面集成' },
@@ -44,6 +46,7 @@ export function SettingsWorkspace({
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
   const [draftPreferences, setDraftPreferences] = useState(preferences);
   const [dirty, setDirty] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     setActiveSection(initialSection);
@@ -56,13 +59,19 @@ export function SettingsWorkspace({
   }, [dirty, preferences]);
 
   const updateDraftPreferences = (nextPreferences: ReaderPreferences) => {
+    setSaveError(null);
     setDirty(true);
     setDraftPreferences(nextPreferences);
   };
 
   const handleSave = async () => {
-    await onSave(draftPreferences);
-    setDirty(false);
+    setSaveError(null);
+    try {
+      await onSave(draftPreferences);
+      setDirty(false);
+    } catch (error) {
+      setSaveError(error instanceof Error ? `设置保存失败：${error.message}` : '设置保存失败，请重试。');
+    }
   };
 
   const handleClose = () => {
@@ -128,6 +137,13 @@ export function SettingsWorkspace({
           </div>
         </header>
         <div className="settings-content">
+          {saveError ? <p className="settings-error" role="alert">{saveError}</p> : null}
+          {activeSection === 'appearance' ? (
+            <AppearanceSettings
+              preferences={draftPreferences}
+              onChange={updateDraftPreferences}
+            />
+          ) : null}
           {activeSection === 'ai' && research ? <AiSettings library={research.library} ai={research.ai} /> : null}
           {activeSection === 'shortcuts' ? (
             <ShortcutSettings

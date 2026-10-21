@@ -17,6 +17,7 @@ import type {
 import type { SettingsSection } from '../settings/SettingsWorkspace';
 
 type ReaderWorkspaceViewProps = {
+  themeSwitcher?: ReactNode;
   activeAnnotations: ReaderAnnotation[];
   activeBookmarks: PersistedBookmark[];
   activeSession: DocumentSession;
@@ -62,6 +63,7 @@ type ReaderWorkspaceViewProps = {
 };
 
 export function ReaderWorkspaceView({
+  themeSwitcher,
   activeAnnotations,
   activeBookmarks,
   activeSession,
@@ -118,6 +120,7 @@ export function ReaderWorkspaceView({
       rightPanelOpen={rightPanelOpen}
       toolbar={
         <ReaderToolbar
+          themeSwitcher={themeSwitcher}
           activeSession={activeSession}
           searchText={searchText}
           searchState={searchState}

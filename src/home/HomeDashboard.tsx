@@ -42,6 +42,7 @@ type HomeNoticeState = {
 };
 
 type HomeDashboardProps = {
+  themeSwitcher?: ReactNode;
   workspaceContent?: ReactNode;
   onImportFolder?(): void | Promise<void>;
   onOpenAi?(): void;
@@ -106,6 +107,7 @@ type HomeDashboardProps = {
 };
 
 export function HomeDashboard({
+  themeSwitcher,
   workspaceContent,
   onImportFolder,
   onOpenAi,
@@ -386,6 +388,7 @@ export function HomeDashboard({
   return (
     <div className="home-dashboard-shell">
       <HomeTopBar
+        themeSwitcher={themeSwitcher}
         onOpenPdf={handleOpenPdf}
         onOpenGlobalSearch={onOpenGlobalSearch}
         onOpenImport={onOpenImport}

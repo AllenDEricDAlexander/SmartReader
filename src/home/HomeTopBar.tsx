@@ -8,9 +8,10 @@ import {
   Search,
   Settings,
 } from 'lucide-react';
-import { useRef, type FocusEvent, type KeyboardEvent, type MouseEvent } from 'react';
+import { useRef, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 
 type HomeTopBarProps = {
+  themeSwitcher?: ReactNode;
   onOpenPdf(): void;
   onOpenGlobalSearch(): void;
   onOpenImport(): void;
@@ -23,6 +24,7 @@ type HomeTopBarProps = {
 const focusRestoreMarker = 'globalSearchRestoreFocus';
 
 export function HomeTopBar({
+  themeSwitcher,
   onOpenPdf,
   onOpenGlobalSearch,
   onOpenImport,
@@ -117,6 +119,7 @@ export function HomeTopBar({
         <kbd>⌘K</kbd>
       </label>
 
+      {themeSwitcher}
       <nav className="top-shortcuts" aria-label="全局快捷入口">
         <button type="button" aria-label="导入文献" onClick={onOpenImport}>
           <FileInput size={18} />

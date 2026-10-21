@@ -2,6 +2,7 @@ import { defaultShortcuts, type CommandId } from '../commands/commandRegistry';
 import type { PartialReaderPreferences, ReaderPreferences } from './preferencesModels';
 
 export const defaultReaderPreferences: ReaderPreferences = {
+  theme: 'light',
   sessionRestoreEnabled: true,
   restoreScope: 'all',
   defaultZoomMode: 'fit-width',
@@ -36,6 +37,9 @@ export function mergeReaderPreferences(
   return {
     ...defaultReaderPreferences,
     ...(stored ?? {}),
+    theme: stored?.theme === 'light' || stored?.theme === 'dark' || stored?.theme === 'eye-care'
+      ? stored.theme
+      : defaultReaderPreferences.theme,
     shortcuts: {
       ...defaultReaderPreferences.shortcuts,
       ...(stored?.shortcuts ?? {}),

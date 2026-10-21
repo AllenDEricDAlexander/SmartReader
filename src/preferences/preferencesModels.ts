@@ -2,8 +2,10 @@ import type { CommandId } from '../commands/commandRegistry';
 
 export type DefaultZoomMode = 'actual-size' | 'fit-width' | 'fit-page';
 export type SessionRestoreScope = 'active' | 'all';
+export type ReaderTheme = 'light' | 'dark' | 'eye-care';
 
 export type ReaderPreferences = {
+  theme: ReaderTheme;
   sessionRestoreEnabled: boolean;
   restoreScope: SessionRestoreScope;
   defaultZoomMode: DefaultZoomMode;

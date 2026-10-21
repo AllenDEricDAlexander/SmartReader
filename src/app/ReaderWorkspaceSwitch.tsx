@@ -49,6 +49,7 @@ type AppVersion = {
 };
 
 type ReaderWorkspaceSwitchProps = {
+  themeSwitcher?: ReactNode;
   workspaceContent?: ReactNode;
   importContent?: ReactNode;
   onImportFolder?(): void | Promise<void>;
@@ -149,6 +150,7 @@ type ReaderWorkspaceSwitchProps = {
 };
 
 export function ReaderWorkspaceSwitch({
+  themeSwitcher,
   workspaceContent,
   importContent,
   onImportFolder,
@@ -324,6 +326,7 @@ export function ReaderWorkspaceSwitch({
       ) : null}
       {activeWorkspace === 'reader' && activeSession ? (
         <ReaderWorkspaceView
+          themeSwitcher={themeSwitcher}
           activeAnnotations={activeAnnotations}
           activeBookmarks={activeBookmarks}
           activeSession={activeSession}
@@ -374,6 +377,7 @@ export function ReaderWorkspaceSwitch({
       ) : null}
       {activeWorkspace === 'home' ? (
         <HomeDashboard
+          themeSwitcher={themeSwitcher}
           workspaceContent={workspaceContent}
           onImportFolder={onImportFolder}
           onOpenAi={research ? () => openHomeSidebarPage('ai') : undefined}

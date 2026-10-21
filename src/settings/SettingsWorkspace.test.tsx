@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { CommandRegistry } from '../commands/commandRegistry';
 import { defaultReaderPreferences } from '../preferences/preferencesStore';
@@ -16,10 +16,29 @@ function renderSettingsWorkspace(initialSection?: SettingsSection) {
     ...(initialSection ? { initialSection } : {}),
   };
 
-  return renderApp(<SettingsWorkspace {...props} />);
+  return { ...renderApp(<SettingsWorkspace {...props} />), props };
 }
 
 describe('SettingsWorkspace', () => {
+  it.each([
+    ['暗色', 'dark'],
+    ['亮色', 'light'],
+    ['护眼色', 'eye-care'],
+  ])('saves the selected %s theme with the other preferences', async (label, theme) => {
+    const { props } = renderSettingsWorkspace('appearance');
+    const options = within(screen.getByRole('group', { name: '界面主题' }));
+
+    fireEvent.click(options.getByRole('button', { name: label }));
+    expect(options.getByRole('button', { name: label })).toHaveAttribute('aria-pressed', 'true');
+    expect(options.getAllByRole('button', { pressed: true })).toHaveLength(1);
+    expect(props.onSave).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+    await waitFor(() => {
+      expect(props.onSave).toHaveBeenCalledWith({ ...defaultReaderPreferences, theme });
+    });
+  });
+
   it('shows shortcuts settings by default without an initial section', () => {
     renderSettingsWorkspace();
 

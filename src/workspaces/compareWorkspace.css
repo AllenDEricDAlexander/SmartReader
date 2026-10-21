@@ -156,7 +156,7 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: #e9edf3;
+  background: var(--sr-reader-bg, #e9edf3);
 }
 
 .library-compare-viewer > .pdf-viewer-bridge {
