@@ -1,6 +1,7 @@
 import type { AiProviderProfile, Paper } from '../library/libraryModels';
 import type { LibraryService } from '../library/libraryService';
 import { normalizeEmbeddingUrl, requestEmbeddings, validEmbedding } from './embeddingsClient';
+import { failureStatus, providerDetail } from './openAiClient';
 import { createKnowledgeStorage, type KnowledgeStorage } from './knowledgeStorage';
 import {
   createKnowledgeVectorStore,
@@ -210,8 +211,14 @@ export class KnowledgeService {
       try {
         vectors.push(...await this.embeddings(provider, key, texts, { signal }));
       } catch (error) {
-        const smaller = BATCHES.find((size) => size < batch);
-        if (!smaller || signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+        const status = failureStatus(error);
+        const detail = providerDetail(error) || (error instanceof Error ? error.message : '');
+        const batchRejected = status === 413 || ((!status || status === 400 || status === 422)
+          && /\bbatch\b|批量|批次|\btoo many (?:texts|inputs|items)\b|\b(?:input|text|array|list)s?\b.{0,80}\b(?:size|length|count|limit|max(?:imum)?)\b/i.test(detail));
+        // Shrink the actual request, including a short final batch. Auth,
+        // quota and network failures cannot be repaired by resending its text.
+        const smaller = BATCHES.find((size) => size < texts.length);
+        if (!smaller || !batchRejected || signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
         batch = smaller;
         continue;
       }

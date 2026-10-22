@@ -308,6 +308,76 @@ describe('SQLite-backed semantic knowledge', () => {
     knowledge.dispose();
   });
 
+  it.each([401, 403, 404, 429, 503])('does not retry embedding HTTP %s failures', async (status) => {
+    const app = await setup();
+    const knowledge = new KnowledgeService(app.library, app);
+    const failure = Object.assign(new Error('Synthetic HTTP failure'), { status, providerMessage: 'batch request failed' });
+    app.embeddings.mockRejectedValue(failure);
+    await expect(knowledge.index(app.paper, provider, 'test-key', app.controller.signal, app.assertAccess)).rejects.toBe(failure);
+    expect(app.embeddings).toHaveBeenCalledOnce();
+    expect(app.storage.save).not.toHaveBeenCalled();
+    knowledge.dispose();
+  });
+
+  it.each(['AI_HTTP_NETWORK', 'AI_HTTP_TIMEOUT', 'model not found', 'AbortError'])(
+    'does not retry embedding %s failures', async (message) => {
+      const app = await setup();
+      const knowledge = new KnowledgeService(app.library, app);
+      const failure = Object.assign(new Error(message), { name: message === 'AbortError' ? 'AbortError' : 'Error' });
+      app.embeddings.mockRejectedValue(failure);
+      await expect(knowledge.index(app.paper, provider, 'test-key', app.controller.signal, app.assertAccess)).rejects.toBe(failure);
+      expect(app.embeddings).toHaveBeenCalledOnce();
+      expect(app.storage.save).not.toHaveBeenCalled();
+      knowledge.dispose();
+    },
+  );
+
+  it.each([400, 422])('does not treat unrelated HTTP %s parameter failures as a batch limit', async (status) => {
+    const app = await setup();
+    const knowledge = new KnowledgeService(app.library, app);
+    const failure = Object.assign(new Error('Synthetic parameter failure'), { status, providerMessage: 'The configured model does not exist.' });
+    app.embeddings.mockRejectedValue(failure);
+    await expect(knowledge.index(app.paper, provider, 'test-key', app.controller.signal, app.assertAccess)).rejects.toBe(failure);
+    expect(app.embeddings).toHaveBeenCalledOnce();
+    knowledge.dispose();
+  });
+
+  it.each([400, 413, 422])('shrinks actual input counts for an embedding HTTP %s size rejection', async (status) => {
+    const app = await setup(Array.from({ length: 3 }, (_, index) => ({ page: index + 1, text: `Section ${index}.` })));
+    const knowledge = new KnowledgeService(app.library, app);
+    app.embeddings.mockImplementation(async (_provider, _key, texts: string[]) => {
+      if (texts.length > 1) throw Object.assign(new Error('Synthetic size failure'), {
+        status, providerMessage: status === 413 ? '' : 'The input array length exceeds the supported limit.',
+      });
+      return texts.map(() => [0, 1]);
+    });
+    await knowledge.index(app.paper, provider, 'test-key', app.controller.signal, app.assertAccess);
+    expect(app.embeddings.mock.calls.map(([, , texts]) => texts.length)).toEqual([3, 1, 1, 1]);
+    expect(app.storage.save).toHaveBeenCalledOnce();
+    knowledge.dispose();
+  });
+
+  it('stops shrinking when one input fails', async () => {
+    const app = await setup([{ page: 1, text: 'Single input.' }]);
+    const knowledge = new KnowledgeService(app.library, app);
+    const failure = Object.assign(new Error('batch size rejected'), { status: 400 });
+    app.embeddings.mockRejectedValue(failure);
+    await expect(knowledge.index(app.paper, provider, 'test-key', app.controller.signal, app.assertAccess)).rejects.toBe(failure);
+    expect(app.embeddings).toHaveBeenCalledOnce();
+    knowledge.dispose();
+  });
+
+  it('preserves cancellation during a size rejection', async () => {
+    const cancelled = await setup();
+    const cancelledKnowledge = new KnowledgeService(cancelled.library, cancelled);
+    const failure = Object.assign(new Error('batch size rejected'), { status: 400 });
+    cancelled.embeddings.mockImplementation(async () => { cancelled.controller.abort(); throw failure; });
+    await expect(cancelledKnowledge.index(cancelled.paper, provider, 'test-key', cancelled.controller.signal, cancelled.assertAccess)).rejects.toBe(failure);
+    expect(cancelled.embeddings).toHaveBeenCalledOnce();
+    expect(cancelled.storage.save).not.toHaveBeenCalled();
+    cancelledKnowledge.dispose();
+  });
+
   it('chunks Unicode safely with overlap and preserves each source page', async () => {
     const app = await setup();
     const chunks = chunkPaper({ ...app.paper, pages: [{ page: 8, text: '𠮷'.repeat(1300) }] });
