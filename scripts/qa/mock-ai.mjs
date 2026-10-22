@@ -142,6 +142,11 @@ const server = http.createServer(async (request, response) => {
     content = source ? `这是本地 QA 接口的模拟回答。所选文献为《${source.title}》，以下片段用于验证来源跳转：[${source.label}]\n\n${source.excerpt.slice(0, 600)}`
       : `这是本地 QA 接口的模拟对话。当前请求包含 ${body.messages.filter((message) => message.role === 'user').length} 条用户消息。`;
   }
+  if (body.model === 'qa-long' && kind !== 'connection' && kind !== 'metadata') {
+    content = Array.from({ length: 24 }, (_, index) =>
+      `第 ${index + 1} 段：这是用于桌面滚动联调的合成回答。生成过程中向上阅读已有内容，页面应保留阅读位置；点击“回到最新回答”后继续跟随输出。页头的取消回答按钮应始终可用。`,
+    ).join('\n\n');
+  }
   console.log(JSON.stringify({ request: sequence, kind, model: body.model, stream: body.stream === true }));
   if (body.stream === true) {
     response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache' });
