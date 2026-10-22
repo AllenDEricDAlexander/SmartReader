@@ -11,7 +11,7 @@ type ProviderDraft = { id?: string; name: string; baseUrl: string; model: string
 function providerDraft(provider?: AiProviderProfile): ProviderDraft {
   return provider
     ? { id: provider.id, name: provider.name, baseUrl: provider.baseUrl, model: provider.model,
-      embeddingModel: provider.embeddingModel ?? (/阿里云|aliyun/i.test(provider.name) ? 'text-embedding-v4' : ''), embeddingBaseUrl: provider.embeddingBaseUrl ?? '' }
+      embeddingModel: provider.embeddingModel ?? '', embeddingBaseUrl: provider.embeddingBaseUrl ?? '' }
     : { name: '', baseUrl: '', model: '', embeddingModel: '', embeddingBaseUrl: '' };
 }
 

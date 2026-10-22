@@ -30,6 +30,22 @@ function fillProvider() {
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 
 describe('AI settings', () => {
+  it.each(['阿里云', 'aliyun'])('preserves an unset embedding model when opening and saving %s settings', async (name) => {
+    const { library, ai, completion } = await setup();
+    await ai.saveProvider({ name, baseUrl: 'https://api.example.com/v1', model: 'chat-model' }, 'session-key');
+    render(<AiSettings library={library} ai={ai} />);
+    expect(screen.getByLabelText('Embedding 模型')).toHaveValue('');
+    expect(screen.getByRole('button', { name: '验证连接' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '验证连接' }));
+    await screen.findByText('连接验证成功。');
+    expect(completion).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '保存厂商配置' }));
+    await screen.findByText('厂商配置已保存。');
+    expect(library.getView().snapshot.ai.providers[0].embeddingModel).toBeUndefined();
+    expect(screen.getByRole('button', { name: '验证连接' })).toBeEnabled();
+    ai.dispose();
+  });
+
   it('persists a separate embedding model and verifies its vector dimension', async () => {
     const { library, ai } = await setup();
     render(<AiSettings library={library} ai={ai} />);
