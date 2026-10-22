@@ -2,15 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { createTauriBridge } from './tauriBridge';
 
 describe('tauriBridge', () => {
-  it('updates both the native window and webview background', async () => {
+  it('updates the window, webview and native backing layers through one command', async () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
     const bridge = createTauriBridge({ invoke });
 
     await bridge.setWindowBackgroundColor?.('#C7EDCC');
 
     expect(invoke.mock.calls).toEqual([
-      ['plugin:window|set_background_color', { color: '#C7EDCC' }],
-      ['plugin:webview|set_webview_background_color', { color: '#C7EDCC' }],
+      ['set_window_background_color', { color: '#C7EDCC' }],
     ]);
   });
 
@@ -23,16 +22,14 @@ describe('tauriBridge', () => {
     const first = bridge.setWindowBackgroundColor?.('#C7EDCC');
     const second = bridge.setWindowBackgroundColor?.('#0f172a');
     await Promise.resolve();
-    expect(invoke).toHaveBeenCalledExactlyOnceWith('plugin:window|set_background_color', { color: '#C7EDCC' });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('set_window_background_color', { color: '#C7EDCC' });
 
     resolveWindow();
     await Promise.all([first, second]);
 
     expect(invoke.mock.calls).toEqual([
-      ['plugin:window|set_background_color', { color: '#C7EDCC' }],
-      ['plugin:webview|set_webview_background_color', { color: '#C7EDCC' }],
-      ['plugin:window|set_background_color', { color: '#0f172a' }],
-      ['plugin:webview|set_webview_background_color', { color: '#0f172a' }],
+      ['set_window_background_color', { color: '#C7EDCC' }],
+      ['set_window_background_color', { color: '#0f172a' }],
     ]);
   });
 
@@ -42,7 +39,7 @@ describe('tauriBridge', () => {
 
     await expect(bridge.setWindowBackgroundColor?.('#C7EDCC')).rejects.toThrow('permission denied');
     await expect(bridge.setWindowBackgroundColor?.('#0f172a')).resolves.toBeUndefined();
-    expect(invoke).toHaveBeenLastCalledWith('plugin:webview|set_webview_background_color', { color: '#0f172a' });
+    expect(invoke).toHaveBeenLastCalledWith('set_window_background_color', { color: '#0f172a' });
   });
 
   it('skips native background updates outside the Tauri runtime', async () => {

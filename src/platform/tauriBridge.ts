@@ -93,10 +93,7 @@ export function createTauriBridge(
         return Promise.resolve();
       }
 
-      const update = backgroundUpdates.then(async () => {
-        await invoke('plugin:window|set_background_color', { color });
-        await invoke('plugin:webview|set_webview_background_color', { color });
-      });
+      const update = backgroundUpdates.then(() => invoke<void>('set_window_background_color', { color }));
       backgroundUpdates = update.catch(() => undefined);
       return update;
     },

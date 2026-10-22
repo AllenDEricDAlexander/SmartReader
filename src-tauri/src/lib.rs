@@ -3,6 +3,7 @@ mod db;
 mod file_commands;
 mod knowledge_vectors;
 mod library_storage;
+mod window_appearance;
 
 use tauri::{Emitter, Manager};
 
@@ -37,6 +38,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
+            window_appearance::set_window_background_color,
             db::save_document,
             db::get_document,
             db::list_recent_documents,
