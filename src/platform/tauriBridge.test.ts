@@ -2,6 +2,55 @@ import { describe, expect, it, vi } from 'vitest';
 import { createTauriBridge } from './tauriBridge';
 
 describe('tauriBridge', () => {
+  it('updates both the native window and webview background', async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    const bridge = createTauriBridge({ invoke });
+
+    await bridge.setWindowBackgroundColor?.('#C7EDCC');
+
+    expect(invoke.mock.calls).toEqual([
+      ['plugin:window|set_background_color', { color: '#C7EDCC' }],
+      ['plugin:webview|set_webview_background_color', { color: '#C7EDCC' }],
+    ]);
+  });
+
+  it('finishes background updates in order when themes change before IPC completes', async () => {
+    let resolveWindow!: () => void;
+    const pendingWindow = new Promise<void>((resolve) => { resolveWindow = resolve; });
+    const invoke = vi.fn().mockResolvedValue(undefined).mockReturnValueOnce(pendingWindow);
+    const bridge = createTauriBridge({ invoke });
+
+    const first = bridge.setWindowBackgroundColor?.('#C7EDCC');
+    const second = bridge.setWindowBackgroundColor?.('#0f172a');
+    await Promise.resolve();
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('plugin:window|set_background_color', { color: '#C7EDCC' });
+
+    resolveWindow();
+    await Promise.all([first, second]);
+
+    expect(invoke.mock.calls).toEqual([
+      ['plugin:window|set_background_color', { color: '#C7EDCC' }],
+      ['plugin:webview|set_webview_background_color', { color: '#C7EDCC' }],
+      ['plugin:window|set_background_color', { color: '#0f172a' }],
+      ['plugin:webview|set_webview_background_color', { color: '#0f172a' }],
+    ]);
+  });
+
+  it('reports background failures and allows the next update to succeed', async () => {
+    const invoke = vi.fn().mockRejectedValueOnce(new Error('permission denied')).mockResolvedValue(undefined);
+    const bridge = createTauriBridge({ invoke });
+
+    await expect(bridge.setWindowBackgroundColor?.('#C7EDCC')).rejects.toThrow('permission denied');
+    await expect(bridge.setWindowBackgroundColor?.('#0f172a')).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenLastCalledWith('plugin:webview|set_webview_background_color', { color: '#0f172a' });
+  });
+
+  it('skips native background updates outside the Tauri runtime', async () => {
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+
+    await expect(createTauriBridge().setWindowBackgroundColor?.('#C7EDCC')).resolves.toBeUndefined();
+  });
+
   it('opens a native PDF path and reads bytes', async () => {
     const open = vi.fn().mockResolvedValue('/tmp/book.pdf');
     const pdfBytes = new Uint8Array([37, 80, 68, 70, 45]);

@@ -316,12 +316,20 @@ export function ReaderApp({
   useLayoutEffect(() => {
     const root = document.documentElement;
     const previousTheme = root.getAttribute('data-theme');
+    let cancelled = false;
     root.setAttribute('data-theme', readerPreferences.theme);
+    const backgroundColor = getComputedStyle(root).getPropertyValue('--sr-bg').trim();
+    if (backgroundColor && bridge.setWindowBackgroundColor) {
+      void bridge.setWindowBackgroundColor(backgroundColor).catch((error) => {
+        if (!cancelled) setAppError(`窗口背景同步失败：${errorMessage(error)}`);
+      });
+    }
     return () => {
+      cancelled = true;
       if (previousTheme === null) root.removeAttribute('data-theme');
       else root.setAttribute('data-theme', previousTheme);
     };
-  }, [readerPreferences.theme]);
+  }, [bridge, readerPreferences.theme]);
 
   useEffect(() => {
     let cancelled = false;
