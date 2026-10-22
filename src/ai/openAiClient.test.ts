@@ -240,6 +240,64 @@ describe('streaming chat completions', () => {
     await expect(streamCompletion(provider, apiKey, messages, { transport })).resolves.toBe('leaked [已隐藏 API Key]');
   });
 
+  it.each(Array.from({ length: apiKey.length - 1 }, (_, index) => index + 1))(
+    'hides keys split at offset %s in both answer and reasoning callbacks', async (split) => {
+      const answers: string[] = [];
+      const thoughts: string[] = [];
+      const transport = streamOf([frames(
+        delta(`Answer ${apiKey.slice(0, split)}`),
+        JSON.stringify({ choices: [{ delta: { reasoning_content: `Thought ${apiKey.slice(0, split)}` } }] }),
+        delta(`${apiKey.slice(split)}; ${apiKey}`),
+        JSON.stringify({ choices: [{ delta: { reasoning: `${apiKey.slice(split)}; ${apiKey}` } }] }),
+        '[DONE]',
+      )]);
+      const result = await streamCompletion(provider, apiKey, messages, {
+        transport, onDelta: (text) => answers.push(text), onReasoning: (text) => thoughts.push(text),
+      });
+      expect(answers.join('')).toBe('Answer [已隐藏 API Key]; [已隐藏 API Key]');
+      expect(thoughts.join('')).toBe('Thought [已隐藏 API Key]; [已隐藏 API Key]');
+      expect(result).toBe(answers.join(''));
+    },
+  );
+
+  it('handles overlapping key prefixes and releases ordinary trailing text after success', async () => {
+    const answers: string[] = [];
+    const thoughts: string[] = [];
+    const transport = streamOf([frames(
+      delta('prefix ab'), delta('ab, tail a'),
+      JSON.stringify({ choices: [{ delta: { reasoning_content: 'Reasoning a' } }] }), '[DONE]',
+    )]);
+    await expect(streamCompletion(provider, 'abab', messages, {
+      transport, onDelta: (text) => answers.push(text), onReasoning: (text) => thoughts.push(text),
+    })).resolves.toBe('prefix [已隐藏 API Key], tail a');
+    expect(answers.join('')).toBe('prefix [已隐藏 API Key], tail a');
+    expect(thoughts.join('')).toBe('Reasoning a');
+  });
+
+  it.each(['network', 'provider', 'cancel'])('discards pending key prefixes on %s failure', async (kind) => {
+    const controller = new AbortController();
+    const answers: string[] = [];
+    const thoughts: string[] = [];
+    const transport: AiStreamTransport = async (_request, onEvent) => {
+      onEvent({ kind: 'status', status: 200 });
+      onEvent({ kind: 'chunk', data: frames(JSON.stringify({ choices: [{ delta: {
+        content: 'Answer test-secret-', reasoning_content: 'Thought test-secret-',
+      } }] })) });
+      if (kind === 'network') throw new Error('AI_HTTP_NETWORK');
+      if (kind === 'cancel') {
+        controller.abort();
+        // Even a transport that ignores cancellation cannot reveal the suffix.
+        onEvent({ kind: 'chunk', data: frames(JSON.stringify({ choices: [{ delta: { content: 'key', reasoning_content: 'key' } }] })) });
+      } else onEvent({ kind: 'chunk', data: frames(JSON.stringify({ error: { message: 'Synthetic failure' } })) });
+      onEvent({ kind: 'end' });
+    };
+    await expect(streamCompletion(provider, apiKey, messages, {
+      signal: controller.signal, transport, onDelta: (text) => answers.push(text), onReasoning: (text) => thoughts.push(text),
+    })).rejects.toThrow();
+    expect(answers.join('')).toBe('Answer ');
+    expect(thoughts.join('')).toBe('Thought ');
+  });
+
   it('rejects an invalid key, model, messages or timeout before dispatching', async () => {
     const transport = vi.fn(streamOf([frames(delta('ok'), '[DONE]')]));
     await expect(streamCompletion(provider, ' ', messages, { transport })).rejects.toThrow('API Key');

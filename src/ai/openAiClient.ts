@@ -121,6 +121,8 @@ export async function streamCompletion(
   let content = '';
   let reasoning = '';
   let errorBody = '';
+  const answerOutput = createStreamRedactor(apiKey, options.onDelta);
+  const reasoningOutput = createStreamRedactor(apiKey, options.onReasoning);
   const consume = (text: string) => {
     if (status && (status < 200 || status >= 300)) {
       // Error bodies are not server-sent events; keep them for the message.
@@ -150,23 +152,25 @@ export async function streamCompletion(
         : typeof delta?.reasoning === 'string' ? delta.reasoning : '';
       if (chunk) {
         content += chunk;
-        options.onDelta?.(redact(chunk, apiKey));
+        answerOutput.push(chunk);
       }
       if (thought) {
         reasoning += thought;
-        options.onReasoning?.(redact(thought, apiKey));
+        reasoningOutput.push(thought);
       }
     }
   };
   try {
     await transport({ url, apiKey, body: { ...body, stream: true }, timeoutMs, requestId: crypto.randomUUID() },
       (event) => {
+        if (options.signal?.aborted) return;
         if (event.kind === 'status') status = event.status;
         else if (event.kind === 'chunk') consume(event.data);
       }, options.signal);
   } catch (error) {
     throw normalizeAiTransportError(error);
   }
+  if (options.signal?.aborted) throw normalizeAiTransportError('AI_HTTP_CANCELLED');
   if (!Number.isInteger(status) || status < 100 || status > 599) throw new Error('AI 服务返回了无效的响应。');
   if (status < 200 || status >= 300) throw httpError(status, errorBody, apiKey);
   if (failure) throw failure;
@@ -177,6 +181,8 @@ export async function streamCompletion(
     // instead of reporting an empty answer.
     throw Object.assign(new Error('AI 服务没有返回任何回答内容，请确认模型支持流式 Chat Completions 输出。'), { code: 'AI_STREAM_EMPTY' });
   }
+  answerOutput.flush();
+  reasoningOutput.flush();
   return redact(content, apiKey);
 }
 
@@ -279,6 +285,30 @@ function prepareCompletion(provider: AiProviderProfile, key: string, messages: A
 
 function redact(text: string, apiKey: string): string {
   return apiKey ? text.split(apiKey).join('[已隐藏 API Key]') : text;
+}
+
+/** Holds possible key prefixes between deltas; failed streams never flush them. */
+function createStreamRedactor(apiKey: string, emit?: (text: string) => void) {
+  let pending = '';
+  return {
+    push(text: string) {
+      pending += text;
+      let output = '';
+      for (let at = pending.indexOf(apiKey); at >= 0; at = pending.indexOf(apiKey)) {
+        output += `${pending.slice(0, at)}[已隐藏 API Key]`;
+        pending = pending.slice(at + apiKey.length);
+      }
+      let held = Math.min(apiKey.length - 1, pending.length);
+      while (held > 0 && !pending.endsWith(apiKey.slice(0, held))) held -= 1;
+      output += pending.slice(0, pending.length - held);
+      pending = pending.slice(pending.length - held);
+      if (output) emit?.(output);
+    },
+    flush() {
+      if (pending) emit?.(pending);
+      pending = '';
+    },
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
