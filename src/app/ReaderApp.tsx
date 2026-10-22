@@ -895,17 +895,15 @@ export function ReaderApp({
     async (documentsToRemove: PersistedDocument[]) => {
       try {
         await Promise.all(
-          documentsToRemove.map((document) =>
-            persistence.removeRecentDocument(document.documentKey),
-          ),
+          documentsToRemove.map(async (document) => {
+            await persistence.removeRecentDocument(document.documentKey);
+            setRecentDocuments((current) =>
+              current.filter((item) => item.documentKey !== document.documentKey),
+            );
+          }),
         );
-        const removedKeys = new Set(documentsToRemove.map((document) => document.documentKey));
-
-        setRecentDocuments((current) =>
-          current.filter((document) => !removedKeys.has(document.documentKey)),
-        );
-      } catch {
-        return;
+      } catch (error) {
+        setAppError(`移除记录失败：${errorMessage(error)}`);
       }
     },
     [persistence],
@@ -915,8 +913,8 @@ export function ReaderApp({
     try {
       await persistence.clearRecentDocuments();
       setRecentDocuments([]);
-    } catch {
-      return;
+    } catch (error) {
+      setAppError(`清除记录失败：${errorMessage(error)}`);
     }
   }, [persistence]);
 
@@ -1415,6 +1413,7 @@ export function ReaderApp({
         pageInput={pageInput}
         persistence={persistence}
         readerPreferences={readerPreferences}
+        preferencesReady={preferencesLoadSucceeded}
         recentDocuments={displayRecentDocuments}
         searchState={searchState}
         searchOptions={searchOptions}

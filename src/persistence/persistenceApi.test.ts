@@ -166,6 +166,8 @@ describe('persistenceApi', () => {
     const api = createPersistenceApi(invoke);
     const preferences = {
       theme: 'eye-care' as const,
+      homeWelcomeEnabled: false,
+      homeRecentViewMode: 'cards' as const,
       sessionRestoreEnabled: true,
       restoreScope: 'all' as const,
       defaultZoomMode: 'fit-width' as const,

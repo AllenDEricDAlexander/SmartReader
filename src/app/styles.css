@@ -1096,6 +1096,7 @@ button:disabled,
 }
 
 .home-welcome-banner {
+  position: relative;
   min-width: 0;
   min-height: 132px;
   display: grid;
@@ -1106,6 +1107,16 @@ button:disabled,
   border: 1px solid var(--sr-border);
   border-radius: var(--sr-radius);
   background: var(--sr-surface);
+}
+
+.welcome-close-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  border-color: transparent;
+  background: transparent;
+  color: var(--sr-text-muted);
 }
 
 .welcome-brand-icon {
@@ -1528,6 +1539,94 @@ button:disabled,
 .home-recent-files {
   display: grid;
   gap: 14px;
+}
+
+.home-recent-files > .section-heading {
+  flex-wrap: wrap;
+}
+
+.recent-reading-toolbar,
+.recent-reading-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.recent-reading-toolbar {
+  min-width: 0;
+}
+
+.recent-reading-toolbar .segmented-control button {
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.recent-reading-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 12px;
+}
+
+.recent-reading-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--sr-border);
+  border-radius: var(--sr-radius);
+  background: var(--sr-surface-muted);
+}
+
+.recent-reading-card.missing {
+  border-color: var(--sr-warning, #f59e0b);
+}
+
+.recent-reading-open {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.recent-reading-open:hover:not(:disabled) {
+  background: transparent;
+  color: var(--sr-primary);
+}
+
+.recent-reading-card .recent-file-name .pdf-file-icon {
+  width: 44px;
+  height: 52px;
+}
+
+.recent-reading-progress {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.recent-page-progress,
+.recent-reading-time {
+  color: var(--sr-text-muted);
+  font-size: 12px;
+}
+
+.recent-reading-missing {
+  color: var(--sr-danger);
+  font-size: 12px;
+}
+
+.recent-reading-card-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.recent-reading-card-actions .recent-reading-actions {
+  justify-content: space-between;
 }
 
 .recent-files-table-wrap {

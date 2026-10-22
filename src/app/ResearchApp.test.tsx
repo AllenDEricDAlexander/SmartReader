@@ -7,6 +7,7 @@ import { LibraryService } from '../library/libraryService';
 import type { LibraryStorage } from '../library/libraryStorage';
 import type { PersistenceApi, PersistedReaderSession, PersistedDocument, PersistedAnnotation, PersistedBookmark } from '../persistence/persistenceApi';
 import type { OpenedDesktopPdf, TauriBridge } from '../platform/tauriBridge';
+import { defaultReaderPreferences } from '../preferences/preferencesStore';
 import type { PdfRenderer } from '../viewer/PdfViewerBridge';
 import { ViewerController } from '../viewer/viewerController';
 import { App } from './App';
@@ -238,6 +239,59 @@ describe('desktop research App integration', () => {
     expect(app.persistence.saveAnnotation).not.toHaveBeenCalled();
     expect(app.persistence.setDocumentFavorite).not.toHaveBeenCalled();
     expect(app.bridge.readDesktopPdf).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['list', 'remove'],
+    ['cards', 'clear'],
+  ] as const)('resumes managed PDFs from %s view and preserves library data when records %s', async (homeRecentViewMode, action) => {
+    const app = fixture();
+    vi.mocked(app.persistence.loadPreferences).mockResolvedValue({ ...defaultReaderPreferences, homeRecentViewMode });
+    render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);
+    await openNative();
+    fireEvent.click(screen.getByRole('button', { name: '阅读到第 5 页' }));
+    const id = app.library.getView().papers[0].id;
+    await waitFor(() => expect(app.library.getPaper(id)).toMatchObject({ lastPage: 5, zoom: 1.25 }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add bookmark' }));
+    await waitFor(() => expect(app.library.getPaper(id)?.bookmarks).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: '收藏当前文档' }));
+    await waitFor(() => expect(app.library.getPaper(id)?.favorite).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: '模拟选择笔记' }));
+    fireEvent.change(await screen.findByLabelText('Annotation note'), { target: { value: secretNote } });
+    fireEvent.click(screen.getByRole('button', { name: '保存笔记' }));
+    await waitFor(() => expect(app.library.getPaper(id)?.annotations[0]?.text).toBe(secretNote));
+
+    fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));
+    let recentRegion = screen.getByRole('region', { name: '最近阅读' });
+    expect(within(recentRegion).getByText('上次阅读到 第 5 / 6 页')).toBeInTheDocument();
+    expect(within(recentRegion).getAllByText('cognition.pdf')).toHaveLength(1);
+    if (homeRecentViewMode === 'cards') {
+      expect(within(recentRegion).getByRole('article', { name: 'cognition.pdf' })).toBeInTheDocument();
+    } else {
+      expect(within(recentRegion).getByRole('table')).toBeInTheDocument();
+    }
+    fireEvent.click(within(recentRegion).getByRole('button', { name: '继续阅读 cognition.pdf' }));
+    await screen.findByLabelText('测试 PDF 视图');
+    expect(screen.getByLabelText('阅读状态')).toHaveTextContent('第 5 / 6 页');
+    fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));
+    recentRegion = screen.getByRole('region', { name: '最近阅读' });
+
+    if (action === 'remove') {
+      fireEvent.click(within(recentRegion).getByRole('button', { name: '更多操作 cognition.pdf' }));
+      fireEvent.click(within(recentRegion).getByRole('menuitem', { name: '从最近记录移除' }));
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: '清除记录' }));
+      fireEvent.click(screen.getByRole('button', { name: '清空记录' }));
+    }
+    await waitFor(() => expect(app.library.getPaper(id)?.recentHidden).toBe(true));
+    expect(within(screen.getByRole('region', { name: '最近阅读' })).getByText('暂无最近阅读记录')).toBeInTheDocument();
+    const reloaded = new LibraryService(app.storage, app.extract);
+    await reloaded.initialize();
+    expect(reloaded.getPaper(id)).toMatchObject({ recentHidden: true, lastPage: 5, zoom: 1.25, favorite: true });
+    expect(reloaded.getPaper(id)?.bookmarks).toHaveLength(1);
+    expect(reloaded.getPaper(id)?.annotations[0]?.text).toBe(secretNote);
+    expect(Array.from(await app.storage.readFile(id))).toEqual(Array.from(primaryPdf()));
+    expect(app.persistence.removeRecentDocument).not.toHaveBeenCalled();
   });
 
   it('reopens a legacy desktop document hidden from recent files with its original notes and bookmarks', async () => {

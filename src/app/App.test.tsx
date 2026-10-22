@@ -1019,7 +1019,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.drop(screen.getByRole('region', { name: '欢迎使用 SmartReader' }), {
+    fireEvent.drop(await screen.findByRole('region', { name: '欢迎使用 SmartReader' }), {
       dataTransfer: {
         files: [file],
       },
@@ -1263,7 +1263,7 @@ describe('App', () => {
       />,
     );
 
-    expect(await screen.findByRole('button', { name: '恢复会话 book.pdf' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '继续阅读 book.pdf' })).toBeInTheDocument();
     expect(readDesktopPdf).not.toHaveBeenCalled();
     expect(screen.queryByRole('tab', { name: 'book.pdf' })).not.toBeInTheDocument();
   });
@@ -2360,7 +2360,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: '恢复会话 book.pdf' }));
+    fireEvent.click(await screen.findByRole('button', { name: '继续阅读 book.pdf' }));
 
     await waitFor(() => {
       expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/book.pdf');
@@ -2510,6 +2510,100 @@ describe('App', () => {
       expect(persistence.savePreferences).toHaveBeenCalled();
     });
   });
+
+  it('remembers the home reading view and dismissed welcome banner across navigation and reopening', async () => {
+    const initialPreferences: ReaderPreferences = {
+      ...defaultReaderPreferences, theme: 'eye-care', restoreScope: 'active',
+    };
+    let savedPreferences = initialPreferences;
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadPreferences: vi.fn(async () => savedPreferences),
+      savePreferences: vi.fn(async (next: ReaderPreferences) => { savedPreferences = next; }),
+    };
+    const props = {
+      bridge: { openNativePdf: vi.fn(), readDesktopPdf: vi.fn() },
+      persistence,
+      viewerRenderer: testViewerRenderer,
+    };
+    const mounted = renderApp(<App {...props} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '卡片视图' })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole('button', { name: '卡片视图' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '卡片视图' })).toHaveAttribute('aria-pressed', 'true'));
+    fireEvent.click(screen.getByRole('button', { name: '关闭欢迎语' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: '欢迎使用 SmartReader' })).not.toBeInTheDocument());
+    expect(savedPreferences).toEqual({ ...initialPreferences, homeRecentViewMode: 'cards', homeWelcomeEnabled: false });
+
+    fireEvent.click(screen.getByRole('button', { name: '最近文件 0' }));
+    fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));
+    expect(screen.getByRole('button', { name: '卡片视图' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('region', { name: '欢迎使用 SmartReader' })).not.toBeInTheDocument();
+    mounted.unmount();
+
+    renderApp(<App {...props} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '卡片视图' })).toHaveAttribute('aria-pressed', 'true'));
+    expect(screen.queryByRole('region', { name: '欢迎使用 SmartReader' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '列表视图' }));
+    await waitFor(() => expect(savedPreferences.homeRecentViewMode).toBe('list'));
+    expect(savedPreferences).toEqual({ ...initialPreferences, homeWelcomeEnabled: false });
+  });
+
+  it('restores the welcome banner through appearance settings and leaves cancelled edits unapplied', async () => {
+    let savedPreferences = { ...defaultReaderPreferences, homeWelcomeEnabled: false };
+    const persistence = {
+      ...createEmptyPersistence(),
+      loadPreferences: vi.fn(async () => savedPreferences),
+      savePreferences: vi.fn(async (next: ReaderPreferences) => { savedPreferences = next; }),
+    };
+    renderApp(<App bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }} persistence={persistence} viewerRenderer={testViewerRenderer} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '卡片视图' })).toBeEnabled());
+
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
+    expect(screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ }));
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(screen.queryByRole('region', { name: '欢迎使用 SmartReader' })).not.toBeInTheDocument();
+    expect(persistence.savePreferences).not.toHaveBeenCalled();
+
+    fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
+    expect(screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ }));
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+    await waitFor(() => expect(savedPreferences.homeWelcomeEnabled).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: '关闭设置' }));
+    expect(screen.getByRole('region', { name: '欢迎使用 SmartReader' })).toBeInTheDocument();
+  });
+
+  it.each(['关闭欢迎语', '卡片视图'])(
+    'retains home preferences when saving %s fails and permits retry',
+    async (action) => {
+      const persistence = {
+        ...createEmptyPersistence(),
+        savePreferences: vi.fn().mockRejectedValueOnce(new Error('storage unavailable')).mockResolvedValue(undefined),
+      };
+      renderApp(<App bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }} persistence={persistence} viewerRenderer={testViewerRenderer} />);
+      await waitFor(() => expect(screen.getByRole('button', { name: action })).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: action }));
+
+      expect(await screen.findByRole('dialog', { name: '设置保存失败' })).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: '欢迎使用 SmartReader' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '列表视图' })).toHaveAttribute('aria-pressed', 'true');
+      fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+      fireEvent.click(screen.getByRole('button', { name: action }));
+
+      await waitFor(() => {
+        if (action === '关闭欢迎语') {
+          expect(screen.queryByRole('region', { name: '欢迎使用 SmartReader' })).not.toBeInTheDocument();
+        } else {
+          expect(screen.getByRole('button', { name: '卡片视图' })).toHaveAttribute('aria-pressed', 'true');
+        }
+      });
+      expect(persistence.savePreferences).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it.each(['dark', 'light', 'eye-care'] as const)(
     'restores the %s theme across the home, reader, and settings workspaces',
@@ -2675,6 +2769,8 @@ describe('App', () => {
     fireEvent.change(switcher, { target: { value: 'eye-care' } });
     expect(document.documentElement).toHaveAttribute('data-theme', 'eye-care');
     expect(switcher).toBeDisabled();
+    expect(screen.getByRole('button', { name: '关闭欢迎语' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '卡片视图' })).toBeDisabled();
     fireEvent.change(switcher, { target: { value: 'dark' } });
     expect(persistence.savePreferences).toHaveBeenCalledTimes(1);
     expect(document.documentElement).toHaveAttribute('data-theme', 'eye-care');
@@ -2702,6 +2798,9 @@ describe('App', () => {
     );
     const switcher = screen.getByRole('combobox', { name: '切换主题' });
     expect(switcher).toBeDisabled();
+    expect(screen.queryByRole('region', { name: '欢迎使用 SmartReader' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '卡片视图' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '卡片视图' }));
     fireEvent.change(switcher, { target: { value: 'dark' } });
     expect(persistence.savePreferences).not.toHaveBeenCalled();
 
@@ -2710,6 +2809,8 @@ describe('App', () => {
       await pendingLoad.promise;
     });
     expect(switcher).toBeEnabled();
+    expect(screen.getByRole('button', { name: '关闭欢迎语' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '卡片视图' })).toBeEnabled();
     expect(switcher).toHaveValue('eye-care');
     expect(document.documentElement).toHaveAttribute('data-theme', 'eye-care');
     expect(persistence.savePreferences).not.toHaveBeenCalled();

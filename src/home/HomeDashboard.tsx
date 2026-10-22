@@ -9,6 +9,8 @@ import {
 } from 'react';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { BookmarkDashboard, PersistedDocument } from '../persistence/persistenceApi';
+import type { ReaderPreferences } from '../preferences/preferencesModels';
+import { defaultReaderPreferences } from '../preferences/preferencesStore';
 import type { Tag } from '../tags/tagModels';
 import { TagManager } from '../tags/TagManager';
 import { HomeActionNotice } from './HomeActionNotice';
@@ -25,7 +27,6 @@ import { HomeFavorites } from './HomeFavorites';
 import { HomeQuickStart } from './HomeQuickStart';
 import { HomeRecentFiles } from './HomeRecentFiles';
 import { HomeRecentFilesWorkspace } from './HomeRecentFilesWorkspace';
-import { HomeRecentSessions } from './HomeRecentSessions';
 import { HomeSidebar, type HomeSidebarPage, type HomeSidebarProps } from './HomeSidebar';
 import { HomeStatusBar } from './HomeStatusBar';
 import { HomeTopBar } from './HomeTopBar';
@@ -44,6 +45,10 @@ type HomeNoticeState = {
 type HomeDashboardProps = {
   themeSwitcher?: ReactNode;
   workspaceContent?: ReactNode;
+  preferences?: ReaderPreferences;
+  preferencesReady?: boolean;
+  preferencesDisabled?: boolean;
+  onSavePreferences?(preferences: ReaderPreferences): void | Promise<void>;
   onImportFolder?(): void | Promise<void>;
   onOpenAi?(): void;
   recentDocuments: PersistedDocument[];
@@ -109,6 +114,10 @@ type HomeDashboardProps = {
 export function HomeDashboard({
   themeSwitcher,
   workspaceContent,
+  preferences = defaultReaderPreferences,
+  preferencesReady = true,
+  preferencesDisabled = false,
+  onSavePreferences = noop,
   onImportFolder,
   onOpenAi,
   recentDocuments,
@@ -170,6 +179,7 @@ export function HomeDashboard({
 }: HomeDashboardProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [notice, setNotice] = useState<HomeNoticeState | null>(null);
+  const homePreferencesDisabled = !preferencesReady || preferencesDisabled;
   const favoriteDocumentKeys = new Set(favoriteDocuments.map((document) => document.documentKey));
   const openShortcutSettings = onOpenShortcutSettings ?? onOpenSettings;
 
@@ -193,20 +203,30 @@ export function HomeDashboard({
   const showClearRecordNotice = useCallback(() => {
     setNotice({
       title: '清除记录',
-      message: '当前版本不会直接清空记录。确认后将展示功能待补充说明。',
-      confirmLabel: '确认',
+      message: '确认清空所有最近阅读记录？此操作不会删除 PDF 文件、收藏或批注。',
+      confirmLabel: '清空记录',
       onConfirm: () => {
-        setNotice({
-          title: '清除记录功能待补充',
-          message: '清除记录将在会话恢复管理功能中补充。',
+        setNotice(null);
+        void Promise.resolve().then(onClearRecentDocuments).catch(() => {
+          setNotice({ title: '清除记录失败', message: '无法清空最近阅读记录，请重试。' });
         });
       },
     });
-  }, []);
+  }, [onClearRecentDocuments]);
 
   const showNotice = useCallback((title: string, message: string) => {
     setNotice({ title, message });
   }, []);
+
+  const updateHomePreferences = async (updates: Partial<ReaderPreferences>) => {
+    if (homePreferencesDisabled) return;
+
+    try {
+      await onSavePreferences({ ...preferences, ...updates });
+    } catch {
+      showNotice('设置保存失败', '首页显示设置未能保存，请重试。');
+    }
+  };
 
   const handleOpenFavoriteDocument = useCallback(
     async (document: FavoriteDocument) => {
@@ -261,30 +281,38 @@ export function HomeDashboard({
   const homeContent = (
     <div className="home-content" onDragOver={blockHomeDrop} onDrop={blockHomeDrop}>
       <div className="home-primary">
-        <HomeWelcomeBanner />
+        {preferencesReady && preferences.homeWelcomeEnabled ? (
+          <HomeWelcomeBanner
+            disabled={homePreferencesDisabled}
+            onClose={() => void updateHomePreferences({ homeWelcomeEnabled: false })}
+          />
+        ) : null}
         <HomeQuickStart
           onOpenPdf={handleOpenPdf}
           onDropPdf={onDropPdf}
           onRejectDrop={(message) => showNotice('无法打开文件', message)}
           onOpenFolder={onImportFolder ? () => void onImportFolder() : onOpenFolders}
         />
-        <HomeRecentSessions
-          documents={recentDocuments}
-          onReopenDocument={onReopenRecentDocument}
-          onClearRecords={showClearRecordNotice}
-        />
         <HomeRecentFiles
           documents={recentDocuments}
+          viewMode={preferences.homeRecentViewMode}
+          viewModeDisabled={homePreferencesDisabled}
+          onViewModeChange={(homeRecentViewMode) => void updateHomePreferences({ homeRecentViewMode })}
           favoriteDocumentKeys={favoriteDocumentKeys}
           onOpenAll={onOpenRecentFiles}
+          onClearRecords={showClearRecordNotice}
           onReopenDocument={onReopenRecentDocument}
           onToggleFavorite={onToggleFavorite}
           onLocateFile={() =>
             showNotice('定位文件功能待补充', '定位文件将在最近文件管理功能中补充。')
           }
-          onRemoveRecent={() =>
-            showNotice('移除最近记录功能待补充', '从最近记录移除将在最近文件管理功能中补充。')
-          }
+          onRemoveRecent={async (document) => {
+            try {
+              await onRemoveRecentDocuments([document]);
+            } catch {
+              showNotice('移除记录失败', '无法移除这条最近阅读记录，请重试。');
+            }
+          }}
         />
         <HomeFavorites
           documents={favoriteDocuments}

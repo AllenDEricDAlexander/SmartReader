@@ -5,6 +5,7 @@ import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
 import type { PersistedDocument } from '../persistence/persistenceApi';
+import { defaultReaderPreferences } from '../preferences/preferencesStore';
 import type { Tag, TagDashboard } from '../tags/tagModels';
 import { renderApp } from '../test/renderApp';
 import { HomeDashboard } from './HomeDashboard';
@@ -332,6 +333,56 @@ describe('HomeDashboard', () => {
     expect(screen.queryByRole('heading', { name: '阅读仪表盘' })).not.toBeInTheDocument();
   });
 
+  it('respects the saved welcome visibility and saves closing it without changing other preferences', async () => {
+    const preferences = { ...defaultReaderPreferences, theme: 'dark' as const, homeRecentViewMode: 'cards' as const };
+    const onSavePreferences = vi.fn();
+    const props = createDashboardProps({ preferences, onSavePreferences });
+    const { rerender } = renderApp(<HomeDashboard {...props} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭欢迎语' }));
+    await waitFor(() => expect(onSavePreferences).toHaveBeenCalledExactlyOnceWith({
+      ...preferences,
+      homeWelcomeEnabled: false,
+    }));
+    rerender(<HomeDashboard {...props} preferences={{ ...preferences, homeWelcomeEnabled: false }} />);
+    expect(screen.queryByRole('region', { name: '欢迎使用 SmartReader' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '最近阅读' })).toBeInTheDocument();
+  });
+
+  it('saves the reading view choice and keeps the previous view if saving fails', async () => {
+    const onSavePreferences = vi.fn().mockRejectedValue(new Error('storage unavailable'));
+    renderDashboard({ recentDocuments: recentSessionDocuments, onSavePreferences });
+
+    fireEvent.click(screen.getByRole('button', { name: '卡片视图' }));
+
+    expect(onSavePreferences).toHaveBeenCalledWith({ ...defaultReaderPreferences, homeRecentViewMode: 'cards' });
+    expect(await screen.findByRole('dialog', { name: '设置保存失败' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '列表视图' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(screen.getByRole('region', { name: '最近阅读' })).getByRole('table')).toBeInTheDocument();
+  });
+
+  it('prevents home preference changes while preferences are unavailable or saving', () => {
+    const onSavePreferences = vi.fn();
+    renderDashboard({ preferencesDisabled: true, onSavePreferences });
+
+    expect(screen.getByRole('button', { name: '关闭欢迎语' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '卡片视图' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '关闭欢迎语' }));
+    fireEvent.click(screen.getByRole('button', { name: '卡片视图' }));
+    expect(onSavePreferences).not.toHaveBeenCalled();
+  });
+
+  it('waits for loaded preferences before showing the welcome banner', () => {
+    const props = createDashboardProps({ preferencesReady: false });
+    const { rerender } = renderApp(<HomeDashboard {...props} />);
+
+    expect(screen.queryByRole('region', { name: '欢迎使用 SmartReader' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '卡片视图' })).toBeDisabled();
+    rerender(<HomeDashboard {...props} preferencesReady preferences={{ ...defaultReaderPreferences, homeWelcomeEnabled: false }} />);
+    expect(screen.queryByRole('region', { name: '欢迎使用 SmartReader' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '卡片视图' })).toBeEnabled();
+  });
+
   it('renders home main modules in prototype order', () => {
     renderDashboard({
       activeSidebarPage: 'home',
@@ -342,8 +393,7 @@ describe('HomeDashboard', () => {
     const moduleHeadings = [
       screen.getByRole('heading', { level: 1, name: '欢迎使用 SmartReader' }),
       screen.getByRole('heading', { name: '快速开始' }),
-      screen.getByRole('heading', { name: '恢复上次会话' }),
-      screen.getByRole('heading', { name: '最近文件' }),
+      screen.getByRole('heading', { name: '最近阅读' }),
       screen.getByRole('heading', { name: '收藏文件' }),
     ];
 
@@ -713,17 +763,20 @@ describe('HomeDashboard', () => {
     expect(onParentDrop).not.toHaveBeenCalled();
   });
 
-  it('renders the restore last session module heading and subtitle', () => {
+  it('merges recent files and session recovery into one recent reading module', () => {
     renderDashboard({ recentDocuments: recentSessionDocuments });
 
-    expect(screen.getByRole('heading', { name: '恢复上次会话' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '最近阅读' })).toBeInTheDocument();
     expect(screen.getByText('继续您上次阅读的内容')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '恢复上次会话' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '最近文件' })).not.toBeInTheDocument();
+    expect(screen.getAllByText('Design Notes.pdf')).toHaveLength(1);
   });
 
   it('shows the first restore session file details', () => {
     renderDashboard({ recentDocuments: recentSessionDocuments });
 
-    const restoreRegion = screen.getByRole('region', { name: '恢复上次会话' });
+    const restoreRegion = screen.getByRole('region', { name: '最近阅读' });
 
     expect(within(restoreRegion).getByText('Design Notes.pdf')).toBeInTheDocument();
     expect(within(restoreRegion).getByText('/Users/mario/Documents/')).toBeInTheDocument();
@@ -733,24 +786,40 @@ describe('HomeDashboard', () => {
     ).toBeInTheDocument();
   });
 
-  it('limits restore session rows to the first three documents', () => {
-    renderDashboard({ recentDocuments: recentSessionDocuments });
+  it('uses the same five reading records and actions in card view', () => {
+    const onReopenRecentDocument = vi.fn();
+    const onToggleFavorite = vi.fn();
+    renderDashboard({
+      recentDocuments: recentTableDocuments,
+      preferences: { ...defaultReaderPreferences, homeRecentViewMode: 'cards' },
+      onReopenRecentDocument,
+      onToggleFavorite,
+    });
 
-    const restoreRegion = screen.getByRole('region', { name: '恢复上次会话' });
+    const recentRegion = screen.getByRole('region', { name: '最近阅读' });
+    const card = within(recentRegion).getByRole('article', { name: 'Design Notes.pdf' });
 
-    expect(within(restoreRegion).getByText('Design Notes.pdf')).toBeInTheDocument();
-    expect(within(restoreRegion).getByText('Reader Spec.pdf')).toBeInTheDocument();
-    expect(within(restoreRegion).getByText('UX Review.pdf')).toBeInTheDocument();
-    expect(within(restoreRegion).queryByText('Hidden Fourth.pdf')).not.toBeInTheDocument();
+    expect(within(recentRegion).queryByRole('table')).not.toBeInTheDocument();
+    expect(within(recentRegion).getAllByRole('article')).toHaveLength(5);
+    expect(within(recentRegion).getByText('Product Metrics.pdf')).toBeInTheDocument();
+    expect(within(recentRegion).queryByText('Sixth Hidden.pdf')).not.toBeInTheDocument();
+    expect(within(card).getByText('上次阅读到 第 12 / 86 页')).toBeInTheDocument();
+    expect(within(card).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '14');
+
+    fireEvent.click(within(card).getByRole('button', { name: '继续阅读 Design Notes.pdf' }));
+    expect(onReopenRecentDocument).toHaveBeenCalledExactlyOnceWith(recentTableDocuments[0]);
+    fireEvent.click(within(card).getByRole('button', { name: '更多操作 Design Notes.pdf' }));
+    fireEvent.click(within(card).getByRole('menuitem', { name: '收藏' }));
+    expect(onToggleFavorite).toHaveBeenCalledWith(recentTableDocuments[0].documentKey, true);
   });
 
   it('renders the recent files table with the first five documents', () => {
     renderDashboard({ recentDocuments: recentTableDocuments });
 
-    const recentFilesRegion = screen.getByRole('region', { name: '最近文件' });
+    const recentFilesRegion = screen.getByRole('region', { name: '最近阅读' });
     const designNotesRow = within(recentFilesRegion).getByText('Design Notes.pdf').closest('tr');
 
-    expect(within(recentFilesRegion).getByRole('heading', { name: '最近文件' })).toBeInTheDocument();
+    expect(within(recentFilesRegion).getByRole('heading', { name: '最近阅读' })).toBeInTheDocument();
     expect(within(recentFilesRegion).getByRole('button', { name: '查看全部（6）' })).toBeInTheDocument();
     expect(within(recentFilesRegion).getByRole('columnheader', { name: '文件名' })).toBeInTheDocument();
     expect(within(recentFilesRegion).getByRole('columnheader', { name: '路径' })).toBeInTheDocument();
@@ -799,12 +868,30 @@ describe('HomeDashboard', () => {
     renderDashboard({ recentDocuments: recentTableDocuments, onOpenRecentFiles });
 
     fireEvent.click(
-      within(screen.getByRole('region', { name: '最近文件' })).getByRole('button', {
+      within(screen.getByRole('region', { name: '最近阅读' })).getByRole('button', {
         name: '查看全部（6）',
       }),
     );
 
     expect(onOpenRecentFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['list', 'cards'] as const)('shows a single empty reading state in %s view', (homeRecentViewMode) => {
+    renderDashboard({ preferences: { ...defaultReaderPreferences, homeRecentViewMode } });
+
+    expect(screen.getAllByText('暂无最近阅读记录')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: '清除记录' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /继续阅读 / })).not.toBeInTheDocument();
+  });
+
+  it.each(['list', 'cards'] as const)('shows missing files, unknown page counts and last-opened time in %s view', (homeRecentViewMode) => {
+    const document = { ...recentSessionDocuments[0], missing: true, pageCount: null, lastOpenedAt: '2026-10-22T12:30:00Z' };
+    renderDashboard({ recentDocuments: [document], preferences: { ...defaultReaderPreferences, homeRecentViewMode } });
+
+    const recentRegion = screen.getByRole('region', { name: '最近阅读' });
+    expect(within(recentRegion).getByText('文件已移动或删除')).toBeInTheDocument();
+    expect(within(recentRegion).getByText('上次阅读到 第 12 页')).toBeInTheDocument();
+    expect(within(recentRegion).getByText(expectedLocalDateTime(document.lastOpenedAt), { exact: false })).toBeInTheDocument();
   });
 
   it('renders favorite files as three prototype cards', () => {
@@ -926,7 +1013,7 @@ describe('HomeDashboard', () => {
       onToggleFavorite,
     });
 
-    const recentFilesRegion = screen.getByRole('region', { name: '最近文件' });
+    const recentFilesRegion = screen.getByRole('region', { name: '最近阅读' });
 
     fireEvent.click(
       within(recentFilesRegion).getByRole('button', { name: '更多操作 Design Notes.pdf' }),
@@ -955,24 +1042,25 @@ describe('HomeDashboard', () => {
     expect(screen.getByText('定位文件将在最近文件管理功能中补充。')).toBeInTheDocument();
   });
 
-  it('shows the deferred remove-recent notice from the recent files menu', () => {
-    renderDashboard({ recentDocuments: recentTableDocuments });
+  it('removes a recent reading record through its menu', async () => {
+    const onRemoveRecentDocuments = vi.fn();
+    renderDashboard({ recentDocuments: recentTableDocuments, onRemoveRecentDocuments });
 
-    const recentFilesRegion = screen.getByRole('region', { name: '最近文件' });
+    const recentFilesRegion = screen.getByRole('region', { name: '最近阅读' });
 
     fireEvent.click(
       within(recentFilesRegion).getByRole('button', { name: '更多操作 Design Notes.pdf' }),
     );
     fireEvent.click(within(recentFilesRegion).getByRole('menuitem', { name: '从最近记录移除' }));
 
-    expect(screen.getByRole('dialog', { name: '移除最近记录功能待补充' })).toBeInTheDocument();
-    expect(screen.getByText('从最近记录移除将在最近文件管理功能中补充。')).toBeInTheDocument();
+    await waitFor(() => expect(onRemoveRecentDocuments).toHaveBeenCalledExactlyOnceWith([recentTableDocuments[0]]));
+    expect(within(recentFilesRegion).queryByRole('menu')).not.toBeInTheDocument();
   });
 
   it('closes the recent files menu with Escape and returns focus to its trigger', () => {
     renderDashboard({ recentDocuments: recentTableDocuments });
 
-    const recentFilesRegion = screen.getByRole('region', { name: '最近文件' });
+    const recentFilesRegion = screen.getByRole('region', { name: '最近阅读' });
     const menuButton = within(recentFilesRegion).getByRole('button', {
       name: '更多操作 Design Notes.pdf',
     });
@@ -991,7 +1079,7 @@ describe('HomeDashboard', () => {
   it('cycles recent files menu item focus with arrow keys', () => {
     renderDashboard({ recentDocuments: recentTableDocuments });
 
-    const recentFilesRegion = screen.getByRole('region', { name: '最近文件' });
+    const recentFilesRegion = screen.getByRole('region', { name: '最近阅读' });
 
     fireEvent.click(
       within(recentFilesRegion).getByRole('button', { name: '更多操作 Design Notes.pdf' }),
@@ -1014,25 +1102,21 @@ describe('HomeDashboard', () => {
     expect(removeItem).toHaveFocus();
   });
 
-  it('reopens a recent document when clicking its restore session row area', () => {
+  it('reopens a recent document when clicking its file name', () => {
     const onReopenRecentDocument = vi.fn();
     renderDashboard({ recentDocuments: recentSessionDocuments, onReopenRecentDocument });
 
-    const restoreRegion = screen.getByRole('region', { name: '恢复上次会话' });
-    const row = within(restoreRegion).getByText('Design Notes.pdf').closest('.session-row');
-    expect(row).not.toBeNull();
-
-    fireEvent.click(row as HTMLElement);
+    fireEvent.click(screen.getByRole('button', { name: '打开 Design Notes.pdf' }));
 
     expect(onReopenRecentDocument).toHaveBeenCalledTimes(1);
     expect(onReopenRecentDocument).toHaveBeenCalledWith(recentSessionDocuments[0]);
   });
 
-  it('reopens once when keyboard activation clicks a restore session row area', () => {
+  it('reopens once when keyboard activation clicks a recent file name', () => {
     const onReopenRecentDocument = vi.fn();
     renderDashboard({ recentDocuments: recentSessionDocuments, onReopenRecentDocument });
 
-    const rowAreaButton = screen.getByRole('button', { name: '恢复会话 Design Notes.pdf' });
+    const rowAreaButton = screen.getByRole('button', { name: '打开 Design Notes.pdf' });
 
     fireEvent.keyDown(rowAreaButton, { key: 'Enter' });
     fireEvent.click(rowAreaButton);
@@ -1076,29 +1160,43 @@ describe('HomeDashboard', () => {
     expect(onReopenRecentDocument).toHaveBeenCalledWith(recentSessionDocuments[0]);
   });
 
-  it('opens clear-record confirmation and then shows the deferred clear-record notice', () => {
-    renderDashboard({ recentDocuments: recentSessionDocuments });
+  it('clears recent reading records only after confirmation', async () => {
+    const onClearRecentDocuments = vi.fn();
+    renderDashboard({ recentDocuments: recentSessionDocuments, onClearRecentDocuments });
 
     fireEvent.click(screen.getByRole('button', { name: '清除记录' }));
 
     expect(screen.getByRole('dialog', { name: '清除记录' })).toBeInTheDocument();
     expect(
-      screen.getByText('当前版本不会直接清空记录。确认后将展示功能待补充说明。'),
+      screen.getByText('确认清空所有最近阅读记录？此操作不会删除 PDF 文件、收藏或批注。'),
     ).toBeInTheDocument();
+    expect(onClearRecentDocuments).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+    fireEvent.click(screen.getByRole('button', { name: '清空记录' }));
 
-    expect(screen.getByRole('dialog', { name: '清除记录功能待补充' })).toBeInTheDocument();
-    expect(screen.getByText('清除记录将在会话恢复管理功能中补充。')).toBeInTheDocument();
+    await waitFor(() => expect(onClearRecentDocuments).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('refocuses and traps focus when clear-record confirmation changes to deferred notice', () => {
-    renderDashboard({ recentDocuments: recentSessionDocuments });
+  it('keeps reading records when clearing is cancelled', () => {
+    const onClearRecentDocuments = vi.fn();
+    renderDashboard({ recentDocuments: recentSessionDocuments, onClearRecentDocuments });
 
     fireEvent.click(screen.getByRole('button', { name: '清除记录' }));
-    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
 
-    const dialog = screen.getByRole('dialog', { name: '清除记录功能待补充' });
+    expect(onClearRecentDocuments).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '继续阅读 Design Notes.pdf' })).toBeInTheDocument();
+  });
+
+  it('reports a failed clear operation and traps focus in the error notice', async () => {
+    const onClearRecentDocuments = vi.fn().mockRejectedValue(new Error('storage unavailable'));
+    renderDashboard({ recentDocuments: recentSessionDocuments, onClearRecentDocuments });
+
+    fireEvent.click(screen.getByRole('button', { name: '清除记录' }));
+    fireEvent.click(screen.getByRole('button', { name: '清空记录' }));
+
+    const dialog = await screen.findByRole('dialog', { name: '清除记录失败' });
     const closeButton = screen.getByRole('button', { name: '关闭' });
 
     expect(dialog).toBeInTheDocument();

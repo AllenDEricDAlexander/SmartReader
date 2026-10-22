@@ -76,6 +76,7 @@ type ReaderWorkspaceSwitchProps = {
   pageInput: string;
   persistence: Parameters<typeof TagManager>[0]['persistence'];
   readerPreferences: ReaderPreferences;
+  preferencesReady?: boolean;
   recentDocuments: PersistedDocument[];
   searchState: ViewerSearchState;
   searchOptions: ViewerSearchOptions;
@@ -177,6 +178,7 @@ export function ReaderWorkspaceSwitch({
   pageInput,
   persistence,
   readerPreferences,
+  preferencesReady = true,
   recentDocuments,
   searchState,
   searchOptions,
@@ -379,6 +381,10 @@ export function ReaderWorkspaceSwitch({
         <HomeDashboard
           themeSwitcher={themeSwitcher}
           workspaceContent={workspaceContent}
+          preferences={readerPreferences}
+          preferencesReady={preferencesReady}
+          preferencesDisabled={settingsSaving}
+          onSavePreferences={handleSavePreferences}
           onImportFolder={onImportFolder}
           onOpenAi={research ? () => openHomeSidebarPage('ai') : undefined}
           taskStatus={importing ? 'importing' : 'idle'}

@@ -3,6 +3,8 @@ import type { PartialReaderPreferences, ReaderPreferences } from './preferencesM
 
 export const defaultReaderPreferences: ReaderPreferences = {
   theme: 'light',
+  homeWelcomeEnabled: true,
+  homeRecentViewMode: 'list',
   sessionRestoreEnabled: true,
   restoreScope: 'all',
   defaultZoomMode: 'fit-width',
@@ -40,6 +42,12 @@ export function mergeReaderPreferences(
     theme: stored?.theme === 'light' || stored?.theme === 'dark' || stored?.theme === 'eye-care'
       ? stored.theme
       : defaultReaderPreferences.theme,
+    homeWelcomeEnabled: typeof stored?.homeWelcomeEnabled === 'boolean'
+      ? stored.homeWelcomeEnabled
+      : defaultReaderPreferences.homeWelcomeEnabled,
+    homeRecentViewMode: stored?.homeRecentViewMode === 'list' || stored?.homeRecentViewMode === 'cards'
+      ? stored.homeRecentViewMode
+      : defaultReaderPreferences.homeRecentViewMode,
     shortcuts: {
       ...defaultReaderPreferences.shortcuts,
       ...(stored?.shortcuts ?? {}),

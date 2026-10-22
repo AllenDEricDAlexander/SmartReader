@@ -32,6 +32,19 @@ export function AppearanceSettings({ preferences, onChange }: AppearanceSettings
         </div>
         <span>统一应用于软件页面和 PDF 阅读页面，保存设置后生效。</span>
       </div>
+      <label className="settings-toggle">
+        <input
+          type="checkbox"
+          checked={preferences.homeWelcomeEnabled}
+          onChange={(event) =>
+            onChange({ ...preferences, homeWelcomeEnabled: event.target.checked })
+          }
+        />
+        <span>
+          <strong>进入首页时显示欢迎语</strong>
+          <small>关闭首页欢迎语后，可在这里重新开启，保存设置后生效。</small>
+        </span>
+      </label>
     </section>
   );
 }

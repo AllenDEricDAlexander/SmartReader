@@ -1,22 +1,31 @@
-import { FileText, MoreVertical } from 'lucide-react';
+import { FileText, Grid2X2, List, MoreVertical } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { PersistedDocument } from '../persistence/persistenceApi';
-import { formatDateTime, formatProgressPercent, getDirectoryPath } from './homeDisplayUtils';
+import type { HomeRecentViewMode } from '../preferences/preferencesModels';
+import { formatDateTime, formatPageProgress, formatProgressPercent, getDirectoryPath } from './homeDisplayUtils';
 
 type HomeRecentFilesProps = {
   documents: PersistedDocument[];
+  viewMode: HomeRecentViewMode;
+  viewModeDisabled?: boolean;
+  onViewModeChange(viewMode: HomeRecentViewMode): void;
   favoriteDocumentKeys: Set<string>;
   onOpenAll(): void;
+  onClearRecords(): void;
   onReopenDocument(document: PersistedDocument): void | Promise<void>;
   onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
   onLocateFile(document: PersistedDocument): void;
-  onRemoveRecent(document: PersistedDocument): void;
+  onRemoveRecent(document: PersistedDocument): void | Promise<void>;
 };
 
 export function HomeRecentFiles({
   documents,
+  viewMode,
+  viewModeDisabled,
+  onViewModeChange,
   favoriteDocumentKeys,
   onOpenAll,
+  onClearRecords,
   onReopenDocument,
   onToggleFavorite,
   onLocateFile,
@@ -122,44 +131,198 @@ export function HomeRecentFiles({
     }
   };
 
+  const renderProgress = (document: PersistedDocument) => {
+    const progressPercent = formatProgressPercent(document.progress);
+
+    return (
+      <div className="recent-reading-progress">
+        <span className="recent-page-progress">{formatPageProgress(document)}</span>
+        <span className="progress-cell">
+          <span>{progressPercent}%</span>
+          <span
+            className="recent-progress"
+            role="progressbar"
+            aria-label={`阅读进度 ${document.displayName}`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progressPercent}
+          >
+            <span style={{ width: `${progressPercent}%` }} />
+          </span>
+        </span>
+      </div>
+    );
+  };
+
+  const renderActions = (document: PersistedDocument) => {
+    const favorite = favoriteDocumentKeys.has(document.documentKey);
+    const menuOpen = openMenuKey === document.documentKey;
+
+    return (
+      <>
+        <div className="recent-reading-actions">
+          <button
+            type="button"
+            className="session-continue-button"
+            aria-label={`继续阅读 ${document.displayName}`}
+            onClick={() => void onReopenDocument(document)}
+          >
+            继续阅读
+          </button>
+          <button
+            type="button"
+            ref={(element) => setTriggerRef(document.documentKey, element)}
+            className="icon-button"
+            aria-label={`更多操作 ${document.displayName}`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setOpenMenuKey(menuOpen ? null : document.documentKey)}
+          >
+            <MoreVertical size={16} />
+          </button>
+        </div>
+        {menuOpen ? (
+          <div
+            className="recent-file-menu"
+            role="menu"
+            onKeyDown={(event) => handleMenuKeyDown(event, document.documentKey)}
+          >
+            <button
+              type="button"
+              ref={(element) => setMenuItemRef(document.documentKey, 0, element)}
+              role="menuitem"
+              onClick={() => handleMenuAction(() => onReopenDocument(document))}
+            >
+              打开
+            </button>
+            <button
+              type="button"
+              ref={(element) => setMenuItemRef(document.documentKey, 1, element)}
+              role="menuitem"
+              onClick={() => handleMenuAction(() => onToggleFavorite(document.documentKey, !favorite))}
+            >
+              {favorite ? '取消收藏' : '收藏'}
+            </button>
+            <button
+              type="button"
+              ref={(element) => setMenuItemRef(document.documentKey, 2, element)}
+              role="menuitem"
+              onClick={() => handleMenuAction(() => onLocateFile(document))}
+            >
+              定位文件
+            </button>
+            <button
+              type="button"
+              ref={(element) => setMenuItemRef(document.documentKey, 3, element)}
+              role="menuitem"
+              onClick={() => handleMenuAction(() => onRemoveRecent(document))}
+            >
+              从最近记录移除
+            </button>
+          </div>
+        ) : null}
+      </>
+    );
+  };
+
   return (
     <section className="home-panel home-recent-files" aria-labelledby="home-recent-files-title">
       <div className="section-heading horizontal">
         <div>
-          <p>最近阅读过的 PDF</p>
-          <h2 id="home-recent-files-title">最近文件</h2>
+          <p>继续您上次阅读的内容</p>
+          <h2 id="home-recent-files-title">最近阅读</h2>
         </div>
-        <button type="button" className="text-link-button" onClick={onOpenAll}>
-          查看全部（{documents.length}）
-        </button>
+        <div className="recent-reading-toolbar">
+          <div className="segmented-control" role="group" aria-label="最近阅读显示方式">
+            <button
+              type="button"
+              className={viewMode === 'list' ? 'active' : undefined}
+              aria-pressed={viewMode === 'list'}
+              disabled={viewModeDisabled}
+              onClick={() => {
+                closeMenu();
+                if (viewMode !== 'list') onViewModeChange('list');
+              }}
+            >
+              <List size={16} />
+              列表视图
+            </button>
+            <button
+              type="button"
+              className={viewMode === 'cards' ? 'active' : undefined}
+              aria-pressed={viewMode === 'cards'}
+              disabled={viewModeDisabled}
+              onClick={() => {
+                closeMenu();
+                if (viewMode !== 'cards') onViewModeChange('cards');
+              }}
+            >
+              <Grid2X2 size={16} />
+              卡片视图
+            </button>
+          </div>
+          <button type="button" className="text-link-button" disabled={!documents.length} onClick={onClearRecords}>
+            清除记录
+          </button>
+          <button type="button" className="text-link-button" onClick={onOpenAll}>
+            查看全部（{documents.length}）
+          </button>
+        </div>
       </div>
       {recentDocuments.length > 0 ? (
-        <div className="recent-files-table-wrap">
-          <table className="recent-files-table">
-            <thead>
-              <tr>
-                <th scope="col">文件名</th>
-                <th scope="col">路径</th>
-                <th scope="col">上次打开</th>
-                <th scope="col">阅读进度</th>
-                <th scope="col">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentDocuments.map((document) => {
-                const progressPercent = formatProgressPercent(document.progress);
-                const favorite = favoriteDocumentKeys.has(document.documentKey);
-                const menuOpen = openMenuKey === document.documentKey;
-
-                return (
+        viewMode === 'cards' ? (
+          <div className="recent-reading-grid">
+            {recentDocuments.map((document) => (
+              <article
+                key={document.documentKey}
+                className={document.missing ? 'recent-reading-card missing' : 'recent-reading-card'}
+                aria-label={document.displayName}
+              >
+                <button
+                  type="button"
+                  className="recent-file-name recent-reading-open"
+                  aria-label={`打开 ${document.displayName}`}
+                  onClick={() => void onReopenDocument(document)}
+                >
+                  <span className="pdf-file-icon" aria-hidden="true"><FileText size={24} /></span>
+                  <strong title={document.displayName}>{document.displayName}</strong>
+                </button>
+                <span className="path-cell" title={document.path ?? undefined}>
+                  {getDirectoryPath(document.path, document.documentKey)}
+                </span>
+                <span className="recent-reading-time">上次打开：{formatDateTime(document.lastOpenedAt ?? document.modifiedAt)}</span>
+                {document.missing ? <span className="recent-reading-missing">文件已移动或删除</span> : null}
+                {renderProgress(document)}
+                <div className="recent-reading-card-actions">{renderActions(document)}</div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="recent-files-table-wrap">
+            <table className="recent-files-table">
+              <thead>
+                <tr>
+                  <th scope="col">文件名</th>
+                  <th scope="col">路径</th>
+                  <th scope="col">上次打开</th>
+                  <th scope="col">阅读进度</th>
+                  <th scope="col">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentDocuments.map((document) => (
                   <tr key={document.documentKey}>
                     <td data-label="文件名">
-                      <span className="recent-file-name">
-                        <span className="pdf-file-icon" aria-hidden="true">
-                          <FileText size={16} />
-                        </span>
+                      <button
+                        type="button"
+                        className="recent-file-name recent-reading-open"
+                        aria-label={`打开 ${document.displayName}`}
+                        onClick={() => void onReopenDocument(document)}
+                      >
+                        <span className="pdf-file-icon" aria-hidden="true"><FileText size={16} /></span>
                         <strong title={document.displayName}>{document.displayName}</strong>
-                      </span>
+                      </button>
+                      {document.missing ? <span className="recent-reading-missing">文件已移动或删除</span> : null}
                     </td>
                     <td
                       className="path-cell"
@@ -168,89 +331,19 @@ export function HomeRecentFiles({
                     >
                       {getDirectoryPath(document.path, document.documentKey)}
                     </td>
-                    <td data-label="上次打开">{formatDateTime(document.modifiedAt)}</td>
-                    <td data-label="阅读进度">
-                      <span className="progress-cell">
-                        <span>{progressPercent}%</span>
-                        <span
-                          className="recent-progress"
-                          role="progressbar"
-                          aria-label={`阅读进度 ${document.displayName}`}
-                          aria-valuemin={0}
-                          aria-valuemax={100}
-                          aria-valuenow={progressPercent}
-                        >
-                          <span style={{ width: `${progressPercent}%` }} />
-                        </span>
-                      </span>
-                    </td>
-                    <td className="recent-menu-cell" data-label="操作">
-                      <button
-                        type="button"
-                        ref={(element) => setTriggerRef(document.documentKey, element)}
-                        className="icon-button"
-                        aria-label={`更多操作 ${document.displayName}`}
-                        aria-haspopup="menu"
-                        aria-expanded={menuOpen}
-                        onClick={() => setOpenMenuKey(menuOpen ? null : document.documentKey)}
-                      >
-                        <MoreVertical size={16} />
-                      </button>
-                      {menuOpen ? (
-                        <div
-                          className="recent-file-menu"
-                          role="menu"
-                          onKeyDown={(event) => handleMenuKeyDown(event, document.documentKey)}
-                        >
-                          <button
-                            type="button"
-                            ref={(element) => setMenuItemRef(document.documentKey, 0, element)}
-                            role="menuitem"
-                            onClick={() => handleMenuAction(() => onReopenDocument(document))}
-                          >
-                            打开
-                          </button>
-                          <button
-                            type="button"
-                            ref={(element) => setMenuItemRef(document.documentKey, 1, element)}
-                            role="menuitem"
-                            onClick={() =>
-                              handleMenuAction(() =>
-                                onToggleFavorite(document.documentKey, !favorite),
-                              )
-                            }
-                          >
-                            {favorite ? '取消收藏' : '收藏'}
-                          </button>
-                          <button
-                            type="button"
-                            ref={(element) => setMenuItemRef(document.documentKey, 2, element)}
-                            role="menuitem"
-                            onClick={() => handleMenuAction(() => onLocateFile(document))}
-                          >
-                            定位文件
-                          </button>
-                          <button
-                            type="button"
-                            ref={(element) => setMenuItemRef(document.documentKey, 3, element)}
-                            role="menuitem"
-                            onClick={() => handleMenuAction(() => onRemoveRecent(document))}
-                          >
-                            从最近记录移除
-                          </button>
-                        </div>
-                      ) : null}
-                    </td>
+                    <td data-label="上次打开">{formatDateTime(document.lastOpenedAt ?? document.modifiedAt)}</td>
+                    <td data-label="阅读进度">{renderProgress(document)}</td>
+                    <td className="recent-menu-cell" data-label="操作">{renderActions(document)}</td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
       ) : (
         <div className="empty-block">
-          <strong>暂无最近文件</strong>
-          <span>打开 PDF 后会显示在这里。</span>
+          <strong>暂无最近阅读记录</strong>
+          <span>打开 PDF 后会在这里保留阅读进度。</span>
         </div>
       )}
     </section>

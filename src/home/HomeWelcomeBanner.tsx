@@ -1,8 +1,23 @@
-import { BookOpenCheck, FileText, ShieldCheck, Sparkles } from 'lucide-react';
+import { BookOpenCheck, FileText, ShieldCheck, Sparkles, X } from 'lucide-react';
 
-export function HomeWelcomeBanner() {
+type HomeWelcomeBannerProps = {
+  disabled?: boolean;
+  onClose(): void;
+};
+
+export function HomeWelcomeBanner({ disabled, onClose }: HomeWelcomeBannerProps) {
   return (
     <section className="home-welcome-banner" aria-label="欢迎使用 SmartReader">
+      <button
+        type="button"
+        className="icon-button welcome-close-button"
+        aria-label="关闭欢迎语"
+        title="关闭欢迎语，可在设置的外观中重新开启"
+        disabled={disabled}
+        onClick={onClose}
+      >
+        <X size={16} />
+      </button>
       <div className="welcome-brand-icon" aria-hidden="true">
         <BookOpenCheck size={44} strokeWidth={1.8} />
       </div>

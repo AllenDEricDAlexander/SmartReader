@@ -20,6 +20,31 @@ function renderSettingsWorkspace(initialSection?: SettingsSection) {
 }
 
 describe('SettingsWorkspace', () => {
+  it('saves the home welcome preference only after saving settings', async () => {
+    const { props } = renderSettingsWorkspace('appearance');
+    const toggle = screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ });
+
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(toggle).not.toBeChecked();
+    expect(props.onSave).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+    await waitFor(() => expect(props.onSave).toHaveBeenCalledWith({
+      ...defaultReaderPreferences,
+      homeWelcomeEnabled: false,
+    }));
+  });
+
+  it('discards a cancelled home welcome preference change', () => {
+    const { props } = renderSettingsWorkspace('appearance');
+    fireEvent.click(screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ }));
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+
+    expect(props.onClose).toHaveBeenCalledOnce();
+    expect(props.onSave).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['暗色', 'dark'],
     ['亮色', 'light'],
