@@ -163,14 +163,6 @@ export function HomeRecentFiles({
         <div className="recent-reading-actions">
           <button
             type="button"
-            className="session-continue-button"
-            aria-label={`继续阅读 ${document.displayName}`}
-            onClick={() => void onReopenDocument(document)}
-          >
-            继续阅读
-          </button>
-          <button
-            type="button"
             ref={(element) => setTriggerRef(document.documentKey, element)}
             className="icon-button"
             aria-label={`更多操作 ${document.displayName}`}

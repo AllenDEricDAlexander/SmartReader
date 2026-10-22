@@ -270,7 +270,7 @@ describe('desktop research App integration', () => {
     } else {
       expect(within(recentRegion).getByRole('table')).toBeInTheDocument();
     }
-    fireEvent.click(within(recentRegion).getByRole('button', { name: '继续阅读 cognition.pdf' }));
+    fireEvent.click(within(recentRegion).getByRole('button', { name: '打开 cognition.pdf' }));
     await screen.findByLabelText('测试 PDF 视图');
     expect(screen.getByLabelText('阅读状态')).toHaveTextContent('第 5 / 6 页');
     fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));

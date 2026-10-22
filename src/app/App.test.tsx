@@ -1265,7 +1265,7 @@ describe('App', () => {
       />,
     );
 
-    expect(await screen.findByRole('button', { name: '继续阅读 book.pdf' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '打开 book.pdf' })).toBeInTheDocument();
     expect(readDesktopPdf).not.toHaveBeenCalled();
     expect(screen.queryByRole('tab', { name: 'book.pdf' })).not.toBeInTheDocument();
   });
@@ -2362,7 +2362,7 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: '继续阅读 book.pdf' }));
+    fireEvent.click(await screen.findByRole('button', { name: '打开 book.pdf' }));
 
     await waitFor(() => {
       expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/book.pdf');

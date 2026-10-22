@@ -1627,7 +1627,7 @@ button:disabled,
 }
 
 .recent-reading-card-actions .recent-reading-actions {
-  justify-content: space-between;
+  justify-content: flex-end;
 }
 
 .recent-files-table-wrap {

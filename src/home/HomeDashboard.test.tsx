@@ -806,7 +806,7 @@ describe('HomeDashboard', () => {
     expect(within(card).getByText('上次阅读到 第 12 / 86 页')).toBeInTheDocument();
     expect(within(card).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '14');
 
-    fireEvent.click(within(card).getByRole('button', { name: '继续阅读 Design Notes.pdf' }));
+    fireEvent.click(within(card).getByRole('button', { name: '打开 Design Notes.pdf' }));
     expect(onReopenRecentDocument).toHaveBeenCalledExactlyOnceWith(recentTableDocuments[0]);
     fireEvent.click(within(card).getByRole('button', { name: '更多操作 Design Notes.pdf' }));
     fireEvent.click(within(card).getByRole('menuitem', { name: '收藏' }));
@@ -1131,31 +1131,16 @@ describe('HomeDashboard', () => {
     expect(onReopenRecentDocument).toHaveBeenCalledWith(recentSessionDocuments[0]);
   });
 
-  it('reopens once when clicking a restore session continue button', () => {
+  it.each(['list', 'cards'] as const)('opens file names directly without a duplicate continue button in %s view', (homeRecentViewMode) => {
     const onReopenRecentDocument = vi.fn();
-    renderDashboard({ recentDocuments: recentSessionDocuments, onReopenRecentDocument });
+    renderDashboard({
+      recentDocuments: recentSessionDocuments,
+      preferences: { ...defaultReaderPreferences, homeRecentViewMode },
+      onReopenRecentDocument,
+    });
 
-    fireEvent.click(screen.getByRole('button', { name: '继续阅读 Design Notes.pdf' }));
-
-    expect(onReopenRecentDocument).toHaveBeenCalledTimes(1);
-    expect(onReopenRecentDocument).toHaveBeenCalledWith(recentSessionDocuments[0]);
-  });
-
-  it('reopens once when keyboard activation clicks a restore session continue button', () => {
-    const onReopenRecentDocument = vi.fn();
-    renderDashboard({ recentDocuments: recentSessionDocuments, onReopenRecentDocument });
-
-    const continueButton = screen.getByRole('button', { name: '继续阅读 Design Notes.pdf' });
-
-    fireEvent.keyDown(continueButton, { key: 'Enter' });
-    fireEvent.click(continueButton);
-    expect(onReopenRecentDocument).toHaveBeenCalledTimes(1);
-    expect(onReopenRecentDocument).toHaveBeenCalledWith(recentSessionDocuments[0]);
-
-    onReopenRecentDocument.mockClear();
-
-    fireEvent.keyDown(continueButton, { key: ' ' });
-    fireEvent.click(continueButton);
+    expect(screen.queryByRole('button', { name: /继续阅读 / })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '打开 Design Notes.pdf' }));
     expect(onReopenRecentDocument).toHaveBeenCalledTimes(1);
     expect(onReopenRecentDocument).toHaveBeenCalledWith(recentSessionDocuments[0]);
   });
@@ -1186,7 +1171,7 @@ describe('HomeDashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: '关闭' }));
 
     expect(onClearRecentDocuments).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: '继续阅读 Design Notes.pdf' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开 Design Notes.pdf' })).toBeInTheDocument();
   });
 
   it('reports a failed clear operation and traps focus in the error notice', async () => {
