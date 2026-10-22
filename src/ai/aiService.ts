@@ -90,6 +90,7 @@ export class AiService {
   private disposeSnapshot: () => void;
   private forgetting = new Set<string>();
   private publicPaperIds = new Set<string>();
+  private knowledgePaperIds = new Set<string>();
   private knowledgeCleanupError: string | undefined;
 
   constructor(
@@ -101,6 +102,7 @@ export class AiService {
     this.knowledge = new KnowledgeService(library, knowledgeDependencies);
     this.embeddingRequest = knowledgeDependencies.embeddings ?? requestEmbeddings;
     this.publicPaperIds = new Set(library.getView().snapshot.papers.filter((paper) => paper.kind === 'plain').map((paper) => paper.id));
+    this.knowledgePaperIds = new Set(library.getView().papers.filter((paper) => !paper.knowledgeExcluded).map((paper) => paper.id));
     this.disposeSnapshot = library.subscribe(() => {
       this.adoptStoredKeys();
       const records = library.getView().snapshot.papers;
@@ -109,6 +111,10 @@ export class AiService {
       // Encrypting a folder leaves it unlocked, so it does not emit onLocked.
       // Its previously public vectors still need the same invalidation.
       if (encrypted.length) this.invalidateKnowledge(encrypted);
+      const papers = library.getView().papers;
+      const excluded = papers.filter((paper) => paper.knowledgeExcluded && this.knowledgePaperIds.has(paper.id)).map((paper) => paper.id);
+      this.knowledgePaperIds = new Set(papers.filter((paper) => !paper.knowledgeExcluded).map((paper) => paper.id));
+      if (excluded.length) this.invalidateKnowledge(excluded, false);
     });
     this.disposeIndexed = library.onIndexed((paperId) => {
       if (library.getView().snapshot.ai.autoEnrich) {
@@ -116,7 +122,9 @@ export class AiService {
         void this.enrich(paperId).catch(() => undefined);
       }
       const provider = library.getView().snapshot.ai.providers.find((item) => item.id === library.getView().snapshot.ai.activeProviderId);
-      if (provider?.embeddingModel && this.keys.has(provider.id)) void this.buildKnowledge([paperId], false).catch(() => undefined);
+      if (provider?.embeddingModel && this.keys.has(provider.id) && !library.getPaper(paperId)?.knowledgeExcluded) {
+        void this.buildKnowledge([paperId], false).catch(() => undefined);
+      }
     });
     this.disposeLocked = library.onLocked((ids) => {
       this.invalidateKnowledge(ids);
@@ -147,26 +155,29 @@ export class AiService {
     return secret ? { backend: 'milvus', milvusUrl: secret.url, milvusKey: secret.key, assertAccess: () => undefined } : null;
   }
 
-  private invalidateKnowledge(ids: string[]): void {
+  private invalidateKnowledge(ids: string[], accessChanged = true): void {
     for (const id of ids) {
-      this.jobs.get(id)?.controller.abort(new Error('文献保护状态已变化，AI 处理已取消。'));
+      if (accessChanged) this.jobs.get(id)?.controller.abort(new Error('文献保护状态已变化，AI 处理已取消。'));
       this.knowledgeJobs.get(id)?.controller.abort();
       this.indexedKnowledge.delete(id);
       this.knowledgeErrors.delete(id);
     }
     const search = this.knowledgeSearchOptions();
-    if (search) {
-      void this.knowledge.forget(ids, search).catch(() => {
-        if (this.disposed) return;
-        this.knowledgeCleanupError = '云端向量清理未完成，请在 Milvus 中确认并删除对应文献的向量。';
-        this.publish();
-      });
-    } else if (this.library.getView().snapshot.ai.knowledge?.milvusUrl) {
+    void this.knowledge.forget(ids, search ?? { backend: 'local', milvusUrl: '', assertAccess: () => undefined }).catch(() => {
+      if (this.disposed) return;
+      this.knowledgeCleanupError = '云端向量清理未完成，请在 Milvus 中确认并删除对应文献的向量。';
+      this.publish();
+    });
+    if (!search && this.library.getView().snapshot.ai.knowledge?.milvusUrl) {
       this.knowledgeCleanupError = '当前没有 Milvus 访问令牌，未能清理可能遗留的云端向量，请在 Milvus 中确认并删除。';
     }
-    this.cancelAnswer();
-    this.answerEpoch += 1;
-    this.assistantSession = null;
+    // Removing knowledge leaves completed conversations and library metadata
+    // intact, while an in-flight answer must not retain the removed context.
+    if (accessChanged || this.answerController) {
+      this.cancelAnswer();
+      this.answerEpoch += 1;
+      this.assistantSession = null;
+    }
     this.publish();
   }
 
@@ -352,7 +363,7 @@ export class AiService {
 
   async buildKnowledge(paperIds?: string[], force = true): Promise<void> {
     await this.library.initialize();
-    const papers = this.library.getView().papers.filter((paper) => !paperIds || paperIds.includes(paper.id));
+    const papers = this.library.getView().papers.filter((paper) => !paper.knowledgeExcluded && (!paperIds || paperIds.includes(paper.id)));
     if (!papers.length) throw new Error('请先添加或解锁知识库文件。');
     for (const paper of papers) {
       let job = this.knowledgeJobs.get(paper.id);
@@ -372,7 +383,9 @@ export class AiService {
           if (!provider.embeddingModel) throw new Error('请先在 AI 设置中填写 embedding 模型。');
           const assertAccess = () => {
             controller.signal.throwIfAborted();
-            if (!this.library.canAccess(paper.id, access)) throw new Error('文献已锁定或移除，索引已取消。');
+            if (!this.library.canAccess(paper.id, access) || this.library.getPaper(paper.id)?.knowledgeExcluded) {
+              throw new Error('文献已锁定或移出知识库，索引已取消。');
+            }
           };
           assertAccess();
           const knowledgeSettings = this.library.getView().snapshot.ai.knowledge;
@@ -391,7 +404,9 @@ export class AiService {
           this.indexedKnowledge.add(paper.id);
           this.knowledgeErrors.delete(paper.id);
         }).catch((error) => {
-          if (this.library.canAccess(paper.id, access)) this.knowledgeErrors.set(paper.id, errorMessage(error));
+          if (!controller.signal.aborted && this.library.canAccess(paper.id, access) && !this.library.getPaper(paper.id)?.knowledgeExcluded) {
+            this.knowledgeErrors.set(paper.id, errorMessage(error));
+          }
           throw error;
         }).finally(() => {
           if (this.knowledgeJobs.get(paper.id)?.promise === work) this.knowledgeJobs.delete(paper.id);
@@ -484,7 +499,7 @@ export class AiService {
     const { provider, key } = this.activeProvider();
     const { paperIds } = options;
     const knowledgeSettings = this.library.getView().snapshot.ai.knowledge;
-    const available = this.library.getView().papers.filter((paper) => (!paperIds || paperIds.includes(paper.id))
+    const available = this.library.getView().papers.filter((paper) => !paper.knowledgeExcluded && (!paperIds || paperIds.includes(paper.id))
       && (paper.pages.some((page) => page.text.trim()) || paper.metadata.abstract.trim())
       && (paperIds !== undefined || knowledgeSettings?.backend !== 'milvus'
         || this.library.getView().snapshot.papers.find((record) => record.id === paper.id)?.kind === 'plain'));
@@ -502,7 +517,8 @@ export class AiService {
     this.publish();
     const assertAccess = () => {
       controller.signal.throwIfAborted();
-      if (available.some((paper) => !this.library.canAccess(paper.id, access))) throw new Error('文献已锁定或移除，回答已丢弃。');
+      if (available.some((paper) => !this.library.canAccess(paper.id, access)
+        || (grounded && this.library.getPaper(paper.id)?.knowledgeExcluded))) throw new Error('文献已锁定或移出知识库，回答已丢弃。');
     };
     const sources: AiSource[] = [];
     let retrieval: AiRetrieval = grounded ? 'fulltext' : 'none';
@@ -524,7 +540,7 @@ export class AiService {
       for (const turn of history) messages.push({ role: turn.role, content: turn.content });
       messages.push({ role: 'user', content: grounded ? JSON.stringify({ question: query, sources }) : query });
       const raw = await this.respond(provider, key, messages, controller.signal, options);
-      controller.signal.throwIfAborted();
+      assertAccess();
       if (sources.some((source) => !this.library.canAccess(source.paperId, access))) throw new Error('文献已锁定或移除，回答已丢弃。');
       return { text: verifyCitations(raw, sources), sources, providerName: provider.name, retrieval };
     } finally {

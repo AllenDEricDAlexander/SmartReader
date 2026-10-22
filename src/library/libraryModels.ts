@@ -45,6 +45,8 @@ export type Paper = {
   lastPage: number;
   zoom: number;
   recentHidden: boolean;
+  /** Missing on older papers, which remain included in the AI knowledge base. */
+  knowledgeExcluded?: boolean;
   annotations: ReaderAnnotation[];
   bookmarks: Bookmark[];
   tagIds: number[];

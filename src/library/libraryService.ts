@@ -19,7 +19,7 @@ import type { PdfExtraction } from './pdfExtraction';
 type PdfExtractor = (bytes: Uint8Array, options?: { password?: string; signal?: AbortSignal }) => Promise<PdfExtraction>;
 type PaperUpdates = Partial<Pick<Paper,
   'favorite' | 'pinned' | 'lastPage' | 'zoom' | 'lastReadAt' | 'recentHidden' |
-  'readingSeconds' | 'annotations' | 'bookmarks' | 'tagIds' | 'aiStatus' | 'aiError'
+  'readingSeconds' | 'annotations' | 'bookmarks' | 'tagIds' | 'aiStatus' | 'aiError' | 'knowledgeExcluded'
 >>;
 type LibraryTransaction = {
   snapshot: LibrarySnapshot;
@@ -296,7 +296,7 @@ export class LibraryService {
     });
   }
 
-  async batchUpdate(ids: string[], updates: Pick<PaperUpdates, 'favorite' | 'pinned'>): Promise<void> {
+  async batchUpdate(ids: string[], updates: Pick<PaperUpdates, 'favorite' | 'pinned' | 'knowledgeExcluded'>): Promise<void> {
     await this.mutate(async (tx) => {
       for (const id of new Set(ids)) {
         await this.putPaper(tx, { ...this.requirePaper(id, tx), ...updates });
