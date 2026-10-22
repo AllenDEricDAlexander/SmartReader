@@ -63,6 +63,16 @@ function renderTabs(overrides: Partial<ReaderTabsTestProps> = {}) {
 }
 
 describe('ReaderTabs shared document navigation', () => {
+  it('focuses home after a document closes and the workspace returns home with remaining tabs', () => {
+    const { props, rerender } = renderTabs();
+    fireEvent.click(screen.getByRole('button', { name: '关闭文档 A.pdf' }));
+
+    rerender(<ReaderTabsUnderTest {...props} sessions={[sessionB]} activeSessionId={sessionB.id} homeActive />);
+
+    expect(screen.getByRole('button', { name: '首页' })).toHaveFocus();
+    expect(screen.getByRole('tab', { name: /B\.pdf/ })).toHaveAttribute('aria-selected', 'false');
+  });
+
   it('renders home, tabs, close siblings, and the new-file action', () => {
     renderTabs({ homeActive: true });
 

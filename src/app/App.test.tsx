@@ -531,7 +531,7 @@ describe('App', () => {
     expect(screen.getByText('PDF blob:round-trip')).toBeInTheDocument();
   });
 
-  it('closes a background tab first and then returns home after closing the final tab', async () => {
+  it('returns home after closing a background tab and keeps the other document open', async () => {
     let blobIndex = 0;
     vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
       blobIndex += 1;
@@ -578,9 +578,11 @@ describe('App', () => {
     expect(screen.queryByRole('tab', { name: 'close-a.pdf' })).not.toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'close-b.pdf' })).toHaveAttribute(
       'aria-selected',
-      'true',
+      'false',
     );
-    expect(screen.getByText('PDF blob:close-2')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('阅读工作区')).not.toBeInTheDocument();
+    expect(within(navigation).getByRole('button', { name: '首页' })).toHaveFocus();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:close-1');
     expect(revokeObjectURL).not.toHaveBeenCalledWith('blob:close-2');
 
@@ -591,6 +593,45 @@ describe('App', () => {
         expect.objectContaining({ activeDocumentKey: null, tabs: [] }),
       );
     });
+  });
+
+  it.each(['tab button', 'shortcut'])('returns home when closing the active document via %s while another tab remains', async (action) => {
+    let sequence = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:close-active-${++sequence}`);
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const openNativePdf = vi.fn().mockImplementation(async () => {
+      const name = sequence === 0 ? 'keep.pdf' : 'close.pdf';
+      return {
+        source: { kind: 'desktop-path', path: `/tmp/${name}`, name },
+        bytes: new Uint8Array([37, 80, 68, 70, 45]), fileSize: 5, modifiedAt: null,
+      };
+    });
+    renderApp(<App
+      bridge={{ openNativePdf, readDesktopPdf: vi.fn() }}
+      persistence={createEmptyPersistence()}
+      viewerRenderer={testViewerRenderer}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: /打开本地 PDF/ }));
+    await screen.findByRole('tab', { name: 'keep.pdf' });
+    const navigation = screen.getByLabelText('文档导航栏');
+    fireEvent.click(within(navigation).getByRole('button', { name: '打开新文件' }));
+    await screen.findByRole('tab', { name: 'close.pdf' });
+
+    if (action === 'shortcut') {
+      fireEvent.keyDown(window, { key: 'w', metaKey: true });
+    } else {
+      fireEvent.click(within(navigation).getByRole('button', { name: '关闭文档 close.pdf' }));
+    }
+
+    expect(screen.getByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('阅读工作区')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'close.pdf' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'keep.pdf' })).toHaveAttribute('aria-selected', 'false');
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:close-active-2');
+    expect(revokeObjectURL).not.toHaveBeenCalledWith('blob:close-active-1');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'keep.pdf' }));
+    expect(await screen.findByText('PDF blob:close-active-1')).toBeInTheDocument();
   });
 
   it('opens a new tab from the shared bar and focuses an existing duplicate', async () => {

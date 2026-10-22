@@ -574,7 +574,6 @@ export function ReaderApp({
   }, []);
 
   const {
-    closeActiveTab,
     closeReaderSession,
     handleViewerWheel,
     jumpToActiveDocumentPage,
@@ -734,6 +733,17 @@ export function ReaderApp({
     setHomeSidebarPage('home');
     setWorkspaceReturnTarget(null);
   }, []);
+
+  const handleCloseReaderSession = useCallback((sessionId: string) => {
+    if (!documents.sessions.some((session) => session.id === sessionId)) return;
+
+    closeReaderSession(sessionId);
+    if (activeWorkspace === 'home' || activeWorkspace === 'reader') openHomeWorkspace();
+  }, [activeWorkspace, closeReaderSession, documents.sessions, openHomeWorkspace]);
+
+  const closeActiveTab = useCallback(() => {
+    if (activeSession) handleCloseReaderSession(activeSession.id);
+  }, [activeSession, handleCloseReaderSession]);
 
   const closeToolWorkspace = useCallback(() => {
     setWorkspaceOverride(workspaceReturnTarget === 'home' ? 'home' : null);
@@ -1381,7 +1391,7 @@ export function ReaderApp({
           onOpenPdf={openPdf}
           onBrowserFileChange={handleBrowserFileChange}
           onSelectSession={openReaderSession}
-          onCloseSession={closeReaderSession}
+          onCloseSession={handleCloseReaderSession}
         />
       ) : null}
       <ReaderWorkspaceSwitch

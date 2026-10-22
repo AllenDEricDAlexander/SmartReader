@@ -66,13 +66,13 @@ export function ReaderTabs({
 
   useEffect(() => {
     const activeTab = activeSessionId ? tabRefs.current.get(activeSessionId) : null;
-    activeTab?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    if (!homeActive) activeTab?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
 
     if (pendingFocusSessionIdRef.current === null) {
       return;
     }
 
-    if (sessions.length === 0) {
+    if (homeActive || sessions.length === 0) {
       homeButtonRef.current?.focus();
     } else {
       const focusTarget =
@@ -81,7 +81,7 @@ export function ReaderTabs({
       focusTarget?.focus();
     }
     pendingFocusSessionIdRef.current = null;
-  }, [activeSessionId, sessions]);
+  }, [activeSessionId, homeActive, sessions]);
 
   return (
     <header className="reader-tabs" aria-label="文档导航栏">
