@@ -1,4 +1,4 @@
-import { BookOpen, FileSearch, MessageSquarePlus, Plus, Send, Settings, ShieldCheck, Sparkles, Square } from 'lucide-react';
+import { ArrowDown, BookOpen, FileSearch, MessageSquarePlus, Plus, Send, Settings, ShieldCheck, Sparkles, Square } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { errorMessage, type LibraryService } from '../library/libraryService';
 import type { Paper } from '../library/libraryModels';
@@ -39,11 +39,15 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [showLatest, setShowLatest] = useState(false);
   const nextMessageId = useRef((session?.messages.at(-1)?.id ?? 0) + 1);
   const requestGeneration = useRef(0);
   const ownsRequest = useRef(false);
   const mounted = useRef(true);
-  const transcriptEnd = useRef<HTMLDivElement | null>(null);
+  const transcriptViewport = useRef<HTMLElement | null>(null);
+  const assistantHeader = useRef<HTMLElement | null>(null);
+  const questionInput = useRef<HTMLTextAreaElement | null>(null);
+  const followingTranscript = useRef(true);
   const provider = libraryView.snapshot.ai.providers.find((item) => item.id === libraryView.snapshot.ai.activeProviderId);
   const configured = Boolean(provider && activity.keyProviderIds.includes(provider.id));
   const busy = pending || activity.asking || addingFiles || buildingIndex;
@@ -115,9 +119,30 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   }, [initialPaperId, library, libraryView.loaded]);
 
   useEffect(() => {
-    // Not every host implements scrolling; following the transcript is cosmetic.
-    transcriptEnd.current?.scrollIntoView?.({ block: 'end' });
+    // Keep the reader's position when they scroll up during a streaming answer.
+    if (messages.length && followingTranscript.current) scrollToLatest();
   }, [messages]);
+
+  function scrollToLatest() {
+    followingTranscript.current = true;
+    setShowLatest(false);
+    const viewport = transcriptViewport.current;
+    if (viewport) viewport.scrollTop = viewport.scrollHeight;
+  }
+
+  function continueQuestion() {
+    followingTranscript.current = false;
+    setShowLatest(true);
+    // Measure after the header's actions update, including any wrapped row.
+    requestAnimationFrame(() => {
+      const viewport = transcriptViewport.current;
+      const input = questionInput.current;
+      const header = assistantHeader.current;
+      if (!viewport || !input || !header || input.disabled) return;
+      viewport.scrollTop += input.getBoundingClientRect().top - viewport.getBoundingClientRect().top - header.offsetHeight - 32;
+      input.focus({ preventScroll: true });
+    });
+  }
 
   function updateMessage(generation: number, epoch: number, id: number, change: (message: AiChatMessage) => AiChatMessage) {
     if (!mounted.current || generation !== requestGeneration.current || epoch !== ai.getView().answerEpoch) return;
@@ -185,6 +210,8 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
     setPending(true);
     setError(null);
     setNotice(null);
+    followingTranscript.current = true;
+    setShowLatest(false);
     setDraft({ text: '', epoch });
     setChat((current) => ({
       epoch,
@@ -266,14 +293,25 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   }
 
   return (
-    <section className="ai-assistant" aria-labelledby="ai-assistant-title">
-      <header className="ai-assistant-header">
+    <section className="ai-assistant" aria-labelledby="ai-assistant-title" ref={transcriptViewport}
+      onScroll={(event) => {
+        const viewport = event.currentTarget;
+        const nearBottom = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 48;
+        followingTranscript.current = nearBottom;
+        setShowLatest(!nearBottom);
+      }}>
+      <header className="ai-assistant-header" ref={assistantHeader}>
         <div>
           <span className="ai-eyebrow"><Sparkles size={15} />文献研究助手</span>
           <h1 id="ai-assistant-title">让答案回到文献</h1>
           <p>检索本地论文，用有来源的回答辅助阅读；也可以直接和模型对话。</p>
         </div>
         <div className="ai-header-actions">
+          {showLatest && messages.length ? <button type="button" onClick={scrollToLatest}><ArrowDown size={16} />回到最新回答</button> : null}
+          {!busy && messages.some((message) => message.role === 'assistant' && !message.streaming) ? (
+            <button type="button" onClick={continueQuestion}><Send size={15} />继续提问</button>
+          ) : null}
+          {pending || activity.asking ? <button type="button" onClick={cancel}><Square size={14} />取消回答</button> : null}
           <button type="button" onClick={resetChat} disabled={busy || !messages.length}>
             <MessageSquarePlus size={16} />新建对话
           </button>
@@ -296,6 +334,9 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
           ) : null}
           {configured && grounding === 'library' && cloudKnowledge && !activity.milvusReady ? (
             <p className="settings-error" role="alert">云端检索需要在 AI 设置中输入 Milvus 地址和访问令牌。</p>
+          ) : null}
+          {configured && grounding === 'library' && cloudKnowledge && !provider?.embeddingModel ? (
+            <p className="settings-error" role="alert">云端检索需要在 AI 设置中配置 Embedding 模型；也可以切换为直接与模型对话。</p>
           ) : null}
           <form onSubmit={(event) => void submit(event)}>
             <div className="ai-knowledge-scope" role="group" aria-label="回答方式">
@@ -322,7 +363,10 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
                 <button type="button" disabled={grounding === 'direct' || !vectorConfigured || !scopedCount} onClick={() => void buildIndex()}>重建向量索引</button>
                 <span className="ai-muted">{usablePapers.length} 份可检索 · 已选范围 {scopedCount} 份</span>
               </div>
-              <p className="ai-muted">{provider?.embeddingModel ? `${cloudKnowledge ? '云端 Milvus' : '本地 SQLite 持久化向量'} · ${provider.embeddingModel}` : '当前使用本地全文检索；配置 embedding 模型后启用语义向量检索。'}</p>
+              <p className="ai-muted">{provider?.embeddingModel
+                ? `${cloudKnowledge ? '云端 Milvus' : '本地 SQLite 持久化向量'} · ${provider.embeddingModel}`
+                : cloudKnowledge ? '云端 Milvus · 尚未配置 Embedding 模型，暂不可检索。'
+                  : '当前使用本地全文检索；配置 embedding 模型后启用语义向量检索。'}</p>
               {cloudKnowledge ? <p className="ai-muted">加密文献不加入云端检索；需要时请切换本地模式。</p> : null}
               {!libraryView.papers.length ? <p className="ai-muted">知识库还没有文件。添加 PDF 后会保存到本地文献库并建立索引；仅打开阅读的文件不会自动加入。</p> : <>
                 <div className="ai-knowledge-scope" role="group" aria-label="问答范围">
@@ -356,6 +400,7 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
               <span>科研问题</span>
               <textarea
                 aria-label="科研问题"
+                ref={questionInput}
                 value={visibleDraft}
                 maxLength={4000}
                 rows={4}
@@ -367,13 +412,12 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
             <div className="ai-question-footer">
               <small>{visibleDraft.length} / 4000{messages.length ? ` · 已有 ${messages.filter((message) => message.role === 'user').length} 轮提问` : ''}</small>
               <div>
-                {pending || activity.asking ? <button type="button" onClick={cancel}><Square size={14} />取消回答</button> : null}
                 <button
                   type="submit"
                   className="primary-action"
                   disabled={!questionReady || busy || !visibleDraft.trim()}
                 >
-                  <Send size={15} />检索并提问
+                  <Send size={15} />{grounding === 'direct' ? '发送问题' : '检索并提问'}
                 </button>
               </div>
             </div>
@@ -415,7 +459,7 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
                   ) : null}
                   {message.error ? <p className="settings-error" role="alert">{message.error}</p> : null}
                   {message.content ? <div className="ai-answer-text">{message.content}</div> : null}
-                  {message.streaming && !message.content ? <p className="ai-working-message" role="status">正在检索文献并生成回答…</p> : null}
+                  {message.streaming && !message.content ? <p className="ai-working-message" role="status">{grounding === 'direct' ? '正在生成回答…' : '正在检索文献并生成回答…'}</p> : null}
                 </div>
                 {message.sources?.length ? (
                   <aside className="ai-sources-panel" aria-label="回答来源">
@@ -437,13 +481,12 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
                 ) : null}
               </article>
             ))}
-            <div ref={transcriptEnd} />
           </div>
         ) : !busy ? (
           <div className="ai-answer-empty">
             <BookOpen size={30} />
             <h2>从一个问题开始</h2>
-            <p>比较观点、查找依据或梳理结论，回答会附上可返回原文的来源，并支持继续追问。</p>
+            <p>{grounding === 'direct' ? '直接向所选模型提问，支持继续追问；当前模式不检索文献或附带来源。' : '比较观点、查找依据或梳理结论，回答会附上可返回原文的来源，并支持继续追问。'}</p>
           </div>
         ) : null}
       </div>

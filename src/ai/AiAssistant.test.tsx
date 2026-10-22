@@ -38,7 +38,7 @@ async function setup(configured = true) {
 
 function ask(question = '注意力的结论是什么？') {
   fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: question } });
-  fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
+  fireEvent.click(screen.getByRole('button', { name: /^(检索并提问|发送问题)$/ }));
 }
 
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
@@ -67,6 +67,30 @@ describe('AI research assistant', () => {
     expect(screen.getByRole('button', { name: '检索并提问' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '打开 AI 设置' }));
     expect(onOpenSettings).toHaveBeenCalledOnce();
+    ai.dispose();
+  });
+
+  it('explains missing cloud embeddings and keeps direct-chat actions accurate and usable', async () => {
+    const { library, ai } = await setup();
+    await ai.saveKnowledgeSettings('milvus', 'https://milvus.example.test', 'vector-token');
+    expect(ai.getView().milvusReady).toBe(true);
+    let finish!: (answer: AiAnswer) => void;
+    const askSpy = vi.spyOn(ai, 'ask').mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('配置 Embedding 模型');
+    expect(screen.getByText('云端 Milvus · 尚未配置 Embedding 模型，暂不可检索。')).toBeInTheDocument();
+    expect(screen.queryByText(/当前使用本地全文检索/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '一般科研问题' } });
+    expect(screen.getByRole('button', { name: '检索并提问' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('radio', { name: '直接与模型对话' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发送问题' })).toBeEnabled();
+    expect(screen.getByText(/当前模式不检索文献或附带来源/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '发送问题' }));
+    expect(screen.getByText('正在生成回答…')).toBeInTheDocument();
+    expect(screen.queryByText('正在检索文献并生成回答…')).not.toBeInTheDocument();
+    expect(askSpy).toHaveBeenCalledWith('一般科研问题', expect.objectContaining({ grounding: 'direct' }));
+    await act(async () => { finish({ text: '普通对话回答', sources: [], providerName: '研究服务' }); });
     ai.dispose();
   });
 
@@ -296,7 +320,7 @@ describe('AI research assistant', () => {
     expect(screen.getByRole('radio', { name: '直接与模型对话' })).toBeChecked();
     expect(screen.getByLabelText('科研问题')).toHaveValue('普通对话草稿');
     completion.mockResolvedValueOnce('普通对话回答');
-    fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
+    fireEvent.click(screen.getByRole('button', { name: '发送问题' }));
     await screen.findByText('普通对话回答');
     const direct = streaming.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
     expect(direct.map((message) => message.role)).toEqual(['system', 'user']);
@@ -456,8 +480,77 @@ describe('AI research assistant', () => {
     ask('流式问题');
     await screen.findByText('部分回答…');
     expect(screen.getByRole('button', { name: '取消回答' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '继续提问' })).not.toBeInTheDocument();
     await act(async () => { release(); });
     await screen.findByText('部分回答…已完成。');
+    ai.dispose();
+  });
+
+  it('returns to the existing question input below the sticky header without losing the draft', async () => {
+    const { library, ai } = await setup();
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: '继续提问' })).not.toBeInTheDocument();
+    ask('第一个问题');
+    await screen.findByText('注意力可以改善记忆。[S1]');
+    const input = screen.getByLabelText('科研问题');
+    fireEvent.change(input, { target: { value: '保留的追问草稿' } });
+    const button = screen.getByRole('button', { name: '继续提问' });
+    const header = button.closest('header')!;
+    const viewport = screen.getByRole('region', { name: '让答案回到文献' });
+    viewport.scrollTop = 1400;
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ top: 60 } as DOMRect);
+    vi.spyOn(input, 'getBoundingClientRect').mockReturnValue({ top: -740 } as DOMRect);
+    Object.defineProperty(header, 'offsetHeight', { configurable: true, value: 180 });
+    let frame!: FrameRequestCallback;
+    const animationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementationOnce((callback) => { frame = callback; return 1; });
+    fireEvent.click(button);
+    expect(screen.getByRole('button', { name: '回到最新回答' })).toBeInTheDocument();
+    act(() => { frame(0); });
+    expect(viewport.scrollTop).toBe(388);
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue('保留的追问草稿');
+    expect(screen.getByText('注意力可以改善记忆。[S1]')).toBeInTheDocument();
+    animationFrame.mockRestore();
+    ai.dispose();
+  });
+
+  it('pauses stream following while reading earlier text and resumes at the latest answer', async () => {
+    const { library, ai } = await setup();
+    let sendDelta: (text: string) => void = () => undefined;
+    let finish!: (answer: AiAnswer) => void;
+    vi.spyOn(ai, 'ask').mockImplementationOnce((_question, options) => {
+      sendDelta = (text) => options?.onDelta?.(text);
+      return new Promise((resolve) => { finish = resolve; });
+    });
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    const viewport = screen.getByRole('region', { name: '让答案回到文献' });
+    let scrollHeight = 1600;
+    let scrollTop = 0;
+    Object.defineProperties(viewport, {
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = Math.max(0, Math.min(value, scrollHeight - 600)); } },
+    });
+    ask('长回答');
+    expect(scrollTop).toBe(1000);
+    expect(screen.getByRole('button', { name: '取消回答' }).closest('header')).not.toBeNull();
+    fireEvent.scroll(viewport, { target: { scrollTop: 300 } });
+    expect(screen.getByRole('button', { name: '回到最新回答' })).toBeInTheDocument();
+    scrollHeight = 1800;
+    await act(async () => { sendDelta('继续生成的文本'); });
+    expect(scrollTop).toBe(300);
+    fireEvent.click(screen.getByRole('button', { name: '回到最新回答' }));
+    expect(scrollTop).toBe(1200);
+    expect(screen.queryByRole('button', { name: '回到最新回答' })).not.toBeInTheDocument();
+    scrollHeight = 2000;
+    await act(async () => { sendDelta('，更多文本'); });
+    expect(scrollTop).toBe(1400);
+    fireEvent.scroll(viewport, { target: { scrollTop: 300 } });
+    fireEvent.scroll(viewport, { target: { scrollTop: 1390 } });
+    expect(screen.queryByRole('button', { name: '回到最新回答' })).not.toBeInTheDocument();
+    scrollHeight = 2200;
+    await act(async () => { finish({ text: '完整回答', sources: [], providerName: '研究服务' }); });
+    expect(scrollTop).toBe(1600);
     ai.dispose();
   });
 });
