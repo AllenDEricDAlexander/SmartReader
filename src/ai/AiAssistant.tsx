@@ -1,4 +1,4 @@
-import { ArrowDown, BookOpen, FileSearch, MessageSquarePlus, Plus, Send, Settings, ShieldCheck, Sparkles, Square } from 'lucide-react';
+import { ArrowDown, BookOpen, FileSearch, MessageSquarePlus, Plus, Send, Settings, ShieldCheck, Sparkles, Square, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { errorMessage, type LibraryService } from '../library/libraryService';
 import type { Paper } from '../library/libraryModels';
@@ -30,6 +30,7 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   const [selectedPaperIds, setSelectedPaperIds] = useState<string[]>(newPaperScope && initialPaperId ? [initialPaperId] : session?.selectedPaperIds ?? []);
   const [fileQuery, setFileQuery] = useState(session?.fileQuery ?? '');
   const [addingFiles, setAddingFiles] = useState(false);
+  const [changingKnowledge, setChangingKnowledge] = useState(false);
   const [buildingIndex, setBuildingIndex] = useState(false);
   const ownsBuild = useRef<string[] | null>(null);
   const initialSelection = useRef({ library, id: initialPaperId ?? session?.initialPaperId });
@@ -50,10 +51,12 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   const followingTranscript = useRef(true);
   const provider = libraryView.snapshot.ai.providers.find((item) => item.id === libraryView.snapshot.ai.activeProviderId);
   const configured = Boolean(provider && activity.keyProviderIds.includes(provider.id));
-  const busy = pending || activity.asking || addingFiles || buildingIndex;
+  const busy = pending || activity.asking || addingFiles || buildingIndex || changingKnowledge;
   const cloudKnowledge = libraryView.snapshot.ai.knowledge?.backend === 'milvus';
   const encryptedIds = new Set(libraryView.snapshot.papers.filter((paper) => paper.kind === 'encrypted').map((paper) => paper.id));
-  const usablePapers = libraryView.papers.filter((paper) => hasKnowledgeText(paper) && (!cloudKnowledge || !encryptedIds.has(paper.id)));
+  const knowledgePapers = libraryView.papers.filter((paper) => !paper.knowledgeExcluded);
+  const removedPapers = libraryView.papers.filter((paper) => paper.knowledgeExcluded);
+  const usablePapers = knowledgePapers.filter((paper) => hasKnowledgeText(paper) && (!cloudKnowledge || !encryptedIds.has(paper.id)));
   const vectorConfigured = Boolean(provider?.embeddingModel && configured);
   const selectedIds = selectedPaperIds.filter((id) => usablePapers.some((paper) => paper.id === id));
   const scopedCount = scope === 'all' ? usablePapers.length : selectedIds.length;
@@ -65,7 +68,7 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   );
   const questionReady = configured
     && (grounding === 'direct' || (scopedCount > 0 && (!cloudKnowledge || (vectorConfigured && activity.milvusReady))));
-  const matchingPapers = libraryView.papers.filter((paper) =>
+  const matchingPapers = knowledgePapers.filter((paper) =>
     `${paper.metadata.title} ${paper.fileName}`.toLocaleLowerCase().includes(fileQuery.trim().toLocaleLowerCase()));
   const messages = useMemo(
     () => (chat.epoch === activity.answerEpoch ? chat.messages : []),
@@ -161,6 +164,9 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
       if (!mounted.current) return;
       const accessible = [...new Set(ids)].filter((id) => library.getPaper(id));
       if (accessible.length) {
+        const removedIds = accessible.filter((id) => library.getPaper(id)?.knowledgeExcluded);
+        if (removedIds.length) await library.batchUpdate(removedIds, { knowledgeExcluded: false });
+        if (!mounted.current) return;
         setScope('selected');
         setSelectedPaperIds((selected) => [...new Set([...selected, ...accessible])]);
         setMode('library');
@@ -170,6 +176,30 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
       if (mounted.current) setError(errorMessage(failure));
     } finally {
       if (mounted.current) setAddingFiles(false);
+    }
+  }
+
+  async function changeKnowledge(paper: Paper, included: boolean) {
+    if (busy) return;
+    setChangingKnowledge(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await library.batchUpdate([paper.id], { knowledgeExcluded: !included });
+      if (!mounted.current) return;
+      if (included) {
+        setScope('selected');
+        setSelectedPaperIds((ids) => [...new Set([...ids, paper.id])]);
+        setMode('library');
+      } else {
+        setSelectedPaperIds((ids) => ids.filter((id) => id !== paper.id));
+        if (!usablePapers.some((item) => item.id !== paper.id)) setMode(null);
+      }
+      setNotice(included ? '文件已重新加入知识库。' : '文件已从 AI 知识库移除，文献库中的文献和原始 PDF 均保留。');
+    } catch (failure) {
+      if (mounted.current) setError(errorMessage(failure));
+    } finally {
+      if (mounted.current) setChangingKnowledge(false);
     }
   }
 
@@ -368,33 +398,48 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
                 : cloudKnowledge ? '云端 Milvus · 尚未配置 Embedding 模型，暂不可检索。'
                   : '当前使用本地全文检索；配置 embedding 模型后启用语义向量检索。'}</p>
               {cloudKnowledge ? <p className="ai-muted">加密文献不加入云端检索；需要时请切换本地模式。</p> : null}
-              {!libraryView.papers.length ? <p className="ai-muted">知识库还没有文件。添加 PDF 后会保存到本地文献库并建立索引；仅打开阅读的文件不会自动加入。</p> : <>
+              <p className="ai-muted">移除文件只影响 AI 知识库，文献库中的文献仍会保留，可随时重新加入。</p>
+              {!knowledgePapers.length ? <p className="ai-muted">知识库还没有文件。添加 PDF 后会保存到本地文献库并建立索引；仅打开阅读的文件不会自动加入。</p> : <>
                 <div className="ai-knowledge-scope" role="group" aria-label="问答范围">
                   <label><input type="radio" name="knowledge-scope" checked={scope === 'all'} disabled={grounding === 'direct'} onChange={() => setScope('all')} />全部可检索文献</label>
                   <label><input type="radio" name="knowledge-scope" checked={scope === 'selected'} disabled={grounding === 'direct'} onChange={() => setScope('selected')} />指定文件（可多选）</label>
                 </div>
                 <input type="search" aria-label="搜索知识库文件" placeholder="按论文标题或文件名查找" disabled={grounding === 'direct'} value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} />
                 <div className="ai-knowledge-list">
-                  {matchingPapers.map((paper) => <label className="ai-knowledge-file" key={paper.id}>
-                    <input type="checkbox" aria-label={`选择知识库文件 ${paper.metadata.title || paper.fileName}`}
-                      checked={scope === 'all' ? usablePapers.some((item) => item.id === paper.id) : selectedIds.includes(paper.id)}
-                      disabled={grounding === 'direct' || !hasKnowledgeText(paper) || (cloudKnowledge && encryptedIds.has(paper.id))} onChange={(event) => {
-                        const checked = event.target.checked;
-                        setSelectedPaperIds((ids) => {
-                          const previous = scope === 'all' ? usablePapers.map((item) => item.id) : ids;
-                          return checked ? [...new Set([...previous, paper.id])] : previous.filter((id) => id !== paper.id);
-                        });
-                        setScope('selected');
-                      }} />
-                    <span><strong>{paper.metadata.title || paper.fileName}</strong><small>{paper.fileName} · {paper.pageCount} 页 · {hasKnowledgeText(paper) ? '文本可检索' : paper.indexStatus === 'pending' ? '正在建立索引' : '没有可检索文本，请重新索引或补充摘要'}</small>
-                      {activity.indexingPaperIds?.includes(paper.id) ? <small>正在生成向量…</small> : activity.indexedPaperIds?.includes(paper.id) ? <small>向量已建立</small> : null}
-                      {activity.knowledgeErrors?.[paper.id] ? <small className="settings-error">{activity.knowledgeErrors[paper.id]}</small> : null}
-                    </span>
-                  </label>)}
+                  {matchingPapers.map((paper) => <div className="ai-knowledge-file" key={paper.id}>
+                    <label>
+                      <input type="checkbox" aria-label={`选择知识库文件 ${paper.metadata.title || paper.fileName}`}
+                        checked={scope === 'all' ? usablePapers.some((item) => item.id === paper.id) : selectedIds.includes(paper.id)}
+                        disabled={grounding === 'direct' || !hasKnowledgeText(paper) || (cloudKnowledge && encryptedIds.has(paper.id))} onChange={(event) => {
+                          const checked = event.target.checked;
+                          setSelectedPaperIds((ids) => {
+                            const previous = scope === 'all' ? usablePapers.map((item) => item.id) : ids;
+                            return checked ? [...new Set([...previous, paper.id])] : previous.filter((id) => id !== paper.id);
+                          });
+                          setScope('selected');
+                        }} />
+                      <span><strong>{paper.metadata.title || paper.fileName}</strong><small>{paper.fileName} · {paper.pageCount} 页 · {hasKnowledgeText(paper) ? '文本可检索' : paper.indexStatus === 'pending' ? '正在建立索引' : '没有可检索文本，请重新索引或补充摘要'}</small>
+                        {activity.indexingPaperIds?.includes(paper.id) ? <small>正在生成向量…</small> : activity.indexedPaperIds?.includes(paper.id) ? <small>向量已建立</small> : null}
+                        {activity.knowledgeErrors?.[paper.id] ? <small className="settings-error">{activity.knowledgeErrors[paper.id]}</small> : null}
+                      </span>
+                    </label>
+                    <button type="button" aria-label={`移除知识库文件 ${paper.metadata.title || paper.fileName}`}
+                      title="仅从 AI 知识库移除，保留文献库中的文献" onClick={() => void changeKnowledge(paper, false)}><Trash2 size={14} aria-hidden="true" />移除</button>
+                  </div>)}
                   {!matchingPapers.length ? <p className="ai-muted">没有匹配的知识库文件。</p> : null}
                 </div>
               </>}
-              {grounding === 'library' && scope === 'selected' && !scopedCount && libraryView.papers.length ? <p className="ai-muted">请选择至少一份有可检索文本的文件。</p> : null}
+              {removedPapers.length ? <details className="ai-knowledge-removed">
+                <summary>已移除文件（{removedPapers.length}）</summary>
+                <div className="ai-knowledge-list">
+                  {removedPapers.map((paper) => <div className="ai-knowledge-file" key={paper.id}>
+                    <span><strong>{paper.metadata.title || paper.fileName}</strong><small>{paper.fileName} · 仍保存在文献库中</small></span>
+                    <button type="button" aria-label={`重新加入知识库文件 ${paper.metadata.title || paper.fileName}`}
+                      onClick={() => void changeKnowledge(paper, true)}><Plus size={14} aria-hidden="true" />重新加入</button>
+                  </div>)}
+                </div>
+              </details> : null}
+              {grounding === 'library' && scope === 'selected' && !scopedCount && knowledgePapers.length ? <p className="ai-muted">请选择至少一份有可检索文本的文件。</p> : null}
             </fieldset>
             <label className="ai-question-field">
               <span>科研问题</span>

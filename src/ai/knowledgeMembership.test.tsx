@@ -1,9 +1,10 @@
 import { webcrypto } from 'node:crypto';
-import { waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyMetadata, type LibrarySnapshot } from '../library/libraryModels';
 import { LibraryService } from '../library/libraryService';
 import type { LibraryStorage } from '../library/libraryStorage';
+import { AiAssistant } from './AiAssistant';
 import { AiService } from './aiService';
 import { KnowledgeService } from './knowledgeService';
 
@@ -37,10 +38,99 @@ async function setup() {
   return { library, ai, paper, completion, streaming, storage, files };
 }
 
+function ask(question: string) {
+  fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: question } });
+  fireEvent.click(screen.getByRole('button', { name: /^(检索并提问|发送问题)$/ }));
+}
+
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('AI knowledge membership', () => {
+  it('removes a selected file without changing its library contents or widening the selected scope', async () => {
+    const { library, ai, paper } = await setup();
+    const second = await library.importPdf(new TextEncoder().encode('%PDF-1.7\nsecond knowledge paper'), 'second.pdf');
+    await library.editMetadata(second.id, { title: '另一篇论文' });
+    await library.updatePaper(paper.id, { favorite: true, readingSeconds: 120 });
+    const before = structuredClone(library.getPaper(paper.id)!);
+    render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '移除知识库文件 知识库论文' }));
+    await screen.findByText('文件已从 AI 知识库移除，文献库中的文献和原始 PDF 均保留。');
+    expect(library.getPaper(paper.id)).toEqual({ ...before, knowledgeExcluded: true, updatedAt: expect.any(String) });
+    expect(Array.from(await library.readPdf(paper.id))).toEqual(Array.from(pdf));
+    expect(library.search('Attention').map((hit) => hit.paperId)).toContain(paper.id);
+    expect(screen.getByText('1 份可检索 · 已选范围 0 份')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 另一篇论文' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: '检索并提问' })).toBeDisabled();
+    ai.dispose();
+  });
+
+  it('persists removal across a new library instance and lets an empty knowledge base chat directly', async () => {
+    const { library, ai, paper, storage } = await setup();
+    const panel = render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '移除知识库文件 知识库论文' }));
+    await screen.findByText(/文件已从 AI 知识库移除/);
+    expect(screen.queryByRole('checkbox', { name: '选择知识库文件 知识库论文' })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '直接与模型对话' })).toBeChecked();
+    panel.unmount();
+    ai.dispose();
+
+    const reopened = new LibraryService(storage, extraction);
+    await reopened.initialize();
+    const completion = vi.fn().mockResolvedValue('普通对话回答');
+    const restarted = new AiService(reopened, completion);
+    expect((await restarted.ask('普通问题')).retrieval).toBe('none');
+    render(<AiAssistant library={reopened} ai={restarted} onOpenPaper={vi.fn()} />);
+    expect(screen.getByText('已移除文件（1）')).toBeInTheDocument();
+    expect(reopened.getPaper(paper.id)?.knowledgeExcluded).toBe(true);
+    expect(completion.mock.calls[0][2][1].content).toBe('普通问题');
+    restarted.dispose();
+  });
+
+  it('rejoins removed files from the library without importing another PDF', async () => {
+    const { library, ai, paper, files } = await setup();
+    await library.batchUpdate([paper.id], { knowledgeExcluded: true });
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    fireEvent.click(screen.getByText('已移除文件（1）'));
+    fireEvent.click(screen.getByRole('button', { name: '重新加入知识库文件 知识库论文' }));
+    await screen.findByText('文件已重新加入知识库。');
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 知识库论文' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: '检索本地文献并附来源' })).toBeChecked();
+    expect(screen.queryByText('已移除文件（1）')).not.toBeInTheDocument();
+    expect(library.getView().papers).toHaveLength(1);
+    expect(files.size).toBe(1);
+    ask('Attention');
+    await screen.findByText('研究结论。[S1]');
+    ai.dispose();
+  });
+
+  it('restores a removed PDF when the same contents are added again', async () => {
+    const { library, ai, paper } = await setup();
+    await library.batchUpdate([paper.id], { knowledgeExcluded: true });
+    const onAddPdfs = vi.fn(async () => [(await library.importPdf(pdf, 'renamed.pdf')).id]);
+    render(<AiAssistant library={library} ai={ai} onAddPdfs={onAddPdfs} onOpenPaper={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '添加本地 PDF' }));
+    await screen.findByText(/已添加 1 份知识库文件/);
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 知识库论文' })).toBeChecked();
+    expect(library.getPaper(paper.id)?.knowledgeExcluded).toBe(false);
+    expect(library.getView().papers).toHaveLength(1);
+    ai.dispose();
+  });
+
+  it('keeps a file included when saving the removal fails and allows retry', async () => {
+    const { library, ai, paper, storage } = await setup();
+    vi.spyOn(storage, 'commit').mockRejectedValueOnce(new Error('保存失败'));
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '移除知识库文件 知识库论文' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('保存失败');
+    expect(library.getPaper(paper.id)?.knowledgeExcluded).not.toBe(true);
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 知识库论文' })).toBeChecked();
+    expect(screen.queryByText('已移除文件（1）')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '移除知识库文件 知识库论文' }));
+    await screen.findByText(/文件已从 AI 知识库移除/);
+    ai.dispose();
+  });
+
   it('excludes removed files from full-text answers even when a caller explicitly requests them', async () => {
     const { library, ai, paper } = await setup();
     const second = await library.importPdf(new TextEncoder().encode('%PDF-1.7\nincluded paper'), 'included.pdf');
@@ -131,6 +221,27 @@ describe('AI knowledge membership', () => {
     await library.batchUpdate([paper.id], { knowledgeExcluded: true });
     finish('迟到回答。[S1]');
     await cancelled;
+    expect(library.getPaper(paper.id)).toBeDefined();
+    ai.dispose();
+  });
+
+  it('keeps finished answers visible without sending removed-file history into the next question', async () => {
+    const { library, ai, paper, completion, streaming } = await setup();
+    const second = await library.importPdf(new TextEncoder().encode('%PDF-1.7\nconversation scope'), 'second.pdf');
+    await library.editMetadata(second.id, { title: '保留论文' });
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    ask('移除前的问题');
+    await screen.findByText('研究结论。[S1]');
+    fireEvent.click(screen.getByRole('button', { name: '移除知识库文件 知识库论文' }));
+    await screen.findByText(/文件已从 AI 知识库移除/);
+    expect(screen.getByText('研究结论。[S1]')).toBeInTheDocument();
+    completion.mockResolvedValue('新范围的回答。[S1]');
+    ask('移除后的问题');
+    await screen.findByText('新范围的回答。[S1]');
+    const messages = streaming.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
+    expect(messages.map((message) => message.role)).toEqual(['system', 'user']);
+    expect(JSON.stringify(messages)).not.toContain('移除前的问题');
+    expect(JSON.parse(messages[1].content).sources.every((source: { paperId: string }) => source.paperId === second.id)).toBe(true);
     expect(library.getPaper(paper.id)).toBeDefined();
     ai.dispose();
   });
