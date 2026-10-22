@@ -1543,7 +1543,7 @@ describe('App', () => {
     });
   });
 
-  it('keeps the fallback PDF visible after closing the active tab', async () => {
+  it('keeps the remaining PDF available from home after closing the active tab', async () => {
     let blobIndex = 0;
     vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
       blobIndex += 1;
@@ -1578,10 +1578,11 @@ describe('App', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(screen.getByText('PDF blob:tab-1')).toBeInTheDocument();
-    });
+    expect(screen.getByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('阅读工作区')).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'two.pdf' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'one.pdf' }));
+    expect(await screen.findByText('PDF blob:tab-1')).toBeInTheDocument();
   });
 
   it('keeps the PDF source in sync when switching tabs with shortcuts', async () => {
@@ -1736,8 +1737,9 @@ describe('App', () => {
     expect(screen.queryByRole('tab', { name: 'shortcut-a.pdf' })).not.toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'shortcut-b.pdf' })).toHaveAttribute(
       'aria-selected',
-      'true',
+      'false',
     );
+    expect(screen.getByRole('heading', { name: '快速上手' })).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'w', metaKey: true });
     expect(await screen.findByRole('heading', { name: '快速上手' })).toBeInTheDocument();
