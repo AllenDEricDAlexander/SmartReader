@@ -2915,12 +2915,15 @@ select {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--sr-surface);
+  background: var(--sr-reader-bg, #e5e7eb);
   overflow: hidden;
 }
 
+/* Virtual page rows span the viewport width. Only the actual page layer should
+   use the paper color, leaving one continuous background around short PDFs. */
 .pdf-viewer-bridge .rpv-core__viewer {
-  --rpv-core__inner-page-background-color: var(--sr-page-bg, #fff);
+  --rpv-core__inner-page-background-color: transparent;
+  --rpv-core__full-screen-target-background-color: var(--sr-reader-bg, #e5e7eb);
   --rpv-core__doc-loading-background-color: var(--sr-surface);
   --rpv-core__doc-error-background-color: var(--sr-surface);
   --rpv-core__spinner-border-color: var(--sr-primary);
@@ -2932,7 +2935,7 @@ select {
 }
 
 .pdf-viewer-bridge .rpv-core__inner-pages {
-  background: var(--sr-reader-bg, var(--sr-surface));
+  background: var(--sr-reader-bg, #e5e7eb);
 }
 
 .pdf-viewer-bridge .rpv-core__page-layer {
