@@ -439,10 +439,12 @@ mod tests {
             first["session"]["title"] = json!("已重命名的科研讨论");
             history["aiConversations"] = json!({
                 "activeId": "second", "entries": [
-                    {"id": "first", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": first, "pinned": true,
+                    {"id": "first", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": first, "pinned": true, "pinOrder": 1,
                         "selection": {"providerId": "provider-one", "model": "model-one"}},
                     {"id": "second", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": null, "pinned": false,
-                        "selection": {"providerId": "provider-two", "model": "model-two"}}
+                        "selection": {"providerId": "provider-two", "model": "model-two"}},
+                    {"id": "third", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": null, "pinned": true, "pinOrder": 0,
+                        "selection": {"providerId": "provider-three", "model": "model-three"}}
                 ]
             });
             write_snapshot(&mut connection, 1, history, vec![]).unwrap();
@@ -453,6 +455,8 @@ mod tests {
             assert_eq!(restored["aiConversations"]["activeId"], "second");
             assert_eq!(restored["aiConversations"]["entries"][0]["pinned"], true);
             assert_eq!(restored["aiConversations"]["entries"][1]["pinned"], false);
+            assert_eq!(restored["aiConversations"]["entries"][0]["pinOrder"], 1);
+            assert_eq!(restored["aiConversations"]["entries"][2]["pinOrder"], 0);
             assert_eq!(
                 restored["aiConversations"]["entries"][0]["selection"]["model"],
                 "model-one"
@@ -466,7 +470,7 @@ mod tests {
                     .as_array()
                     .unwrap()
                     .len(),
-                2
+                3
             );
             let mut expected = saved["aiSession"].clone();
             expected["session"]["title"] = json!("已重命名的科研讨论");

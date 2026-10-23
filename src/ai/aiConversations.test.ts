@@ -75,7 +75,7 @@ describe('pinned AI conversation histories', () => {
     expect((await app.ai.searchConversations('会话')).map((entry) => entry.id)).toEqual(expected);
     for (const entry of app.snapshot().aiConversations!.entries) {
       const original = before.entries.find((item) => item.id === entry.id)!;
-      expect(entry).toEqual(pinned.includes(entry.id) ? { ...original, pinned: true } : original);
+      expect(entry).toEqual(pinned.includes(entry.id) ? { ...original, pinned: true, pinOrder: pinned.indexOf(entry.id) } : original);
     }
     for (const id of pinned) await app.ai.setConversationPinned(id, false);
     expect(app.ai.getView().conversations?.map((entry) => entry.id)).toEqual(order);
@@ -100,6 +100,125 @@ describe('pinned AI conversation histories', () => {
     await app.ai.deleteConversation(app.ids[1]);
     await app.ai.setConversationPinned(app.ids[0], true);
     expect(app.snapshot().aiConversations?.entries.filter((entry) => entry.pinned)).toHaveLength(10);
+    app.ai.dispose();
+  });
+
+  it('persists a manual order without changing chats and keeps it through renames, autosaves and restart', async () => {
+    const app = await histories(4);
+    for (const id of app.ids.slice(0, 3)) await app.ai.setConversationPinned(id, true);
+    const desired = [app.ids[2], app.ids[0], app.ids[1]];
+    const before = app.snapshot().aiConversations!;
+    const active = app.ai.getAssistantSession();
+    await app.ai.reorderPinnedConversations(desired);
+    expect(app.ai.getView().activeConversationId).toBe(before.activeId);
+    expect(app.ai.getAssistantSession()).toEqual(active);
+    expect(app.ai.getView().conversations?.map((entry) => entry.id)).toEqual([...desired, app.ids[3]]);
+    expect((await app.ai.searchConversations('会话')).map((entry) => entry.id)).toEqual([...desired, app.ids[3]]);
+    for (const entry of app.snapshot().aiConversations!.entries) {
+      const original = before.entries.find((item) => item.id === entry.id)!;
+      expect(entry).toEqual(entry.pinned ? { ...original, pinOrder: desired.indexOf(entry.id) } : original);
+    }
+    await app.ai.renameConversation(app.ids[0], '重命名后的常用会话');
+    await app.ai.selectConversation(app.ids[1]);
+    await save(app.ai, '最新的问答');
+    await app.ai.selectConversation(app.ids[3]);
+    expect(app.ai.getView().conversations?.filter((entry) => entry.pinned).map((entry) => entry.id)).toEqual(desired);
+    app.ai.dispose();
+    const restarted = services(app.storage);
+    await restarted.ai.loadAssistantSession();
+    expect(restarted.ai.getView().activeConversationId).toBe(app.ids[3]);
+    expect(restarted.ai.getAssistantSession()?.draft).toBe(active?.draft);
+    expect(restarted.ai.getView().conversations?.filter((entry) => entry.pinned).map((entry) => entry.id)).toEqual(desired);
+    expect((await restarted.ai.searchConversations('')).filter((entry) => entry.pinned).map((entry) => entry.id)).toEqual(desired);
+    await restarted.ai.selectConversation(app.ids[0]);
+    expect(restarted.ai.getAssistantSession()).toMatchObject({ title: '重命名后的常用会话', messages: session(restarted.ai, '会话1').messages });
+    restarted.ai.dispose();
+  });
+
+  it('keeps legacy pin order on load, appends new pins and preserves remaining order after unpinning or deletion', async () => {
+    const app = await histories(4);
+    app.ai.dispose();
+    const legacy = app.snapshot();
+    legacy.aiConversations!.entries.forEach((entry, index) => {
+      entry.updatedAt = `2026-10-${20 + index}T00:00:00.000Z`;
+      if (index < 2) entry.pinned = true;
+      delete entry.pinOrder;
+    });
+    const stored = await app.storage.load();
+    await app.storage.commit(stored.revision, legacy, []);
+    const commits = vi.mocked(app.storage.commit).mock.calls.length;
+    const restarted = services(app.storage);
+    await restarted.ai.loadAssistantSession();
+    expect(app.snapshot()).toEqual(legacy);
+    expect(app.storage.commit).toHaveBeenCalledTimes(commits);
+    expect(restarted.ai.getView().conversations?.filter((entry) => entry.pinned).map((entry) => entry.id)).toEqual([app.ids[1], app.ids[0]]);
+    await restarted.ai.setConversationPinned(app.ids[2], true);
+    expect(restarted.ai.getView().conversations?.filter((entry) => entry.pinned).map((entry) => entry.id)).toEqual([app.ids[1], app.ids[0], app.ids[2]]);
+    await restarted.ai.reorderPinnedConversations([app.ids[2], app.ids[0], app.ids[1]]);
+    await restarted.ai.setConversationPinned(app.ids[0], false);
+    expect(app.snapshot().aiConversations?.entries[0].pinOrder).toBeUndefined();
+    await restarted.ai.setConversationPinned(app.ids[0], true);
+    expect(restarted.ai.getView().conversations?.filter((entry) => entry.pinned).map((entry) => entry.id)).toEqual([app.ids[2], app.ids[1], app.ids[0]]);
+    await restarted.ai.deleteConversation(app.ids[1]);
+    await restarted.ai.setConversationPinned(app.ids[3], true);
+    expect(restarted.ai.getView().conversations?.filter((entry) => entry.pinned).map((entry) => entry.id)).toEqual([app.ids[2], app.ids[0], app.ids[3]]);
+    restarted.ai.dispose();
+  });
+
+  it('rejects duplicate, missing, unknown, unpinned and stale reorder requests without writing', async () => {
+    const app = await histories(3);
+    await app.ai.setConversationPinned(app.ids[0], true);
+    await app.ai.setConversationPinned(app.ids[1], true);
+    const before = app.snapshot();
+    const active = app.ai.getAssistantSession();
+    const commits = vi.mocked(app.storage.commit).mock.calls.length;
+    for (const ids of [[app.ids[0], app.ids[0]], [app.ids[0]], [app.ids[0], 'missing'], [app.ids[0], app.ids[2]], app.ids]) {
+      await expect(app.ai.reorderPinnedConversations(ids)).rejects.toThrow('置顶会话列表已变化');
+      expect(app.snapshot()).toEqual(before);
+      expect(app.ai.getAssistantSession()).toEqual(active);
+      expect(app.storage.commit).toHaveBeenCalledTimes(commits);
+    }
+    await app.ai.setConversationPinned(app.ids[1], false);
+    const afterUnpin = app.snapshot();
+    await expect(app.ai.reorderPinnedConversations(app.ids.slice(0, 2))).rejects.toThrow('置顶会话列表已变化');
+    expect(app.snapshot()).toEqual(afterUnpin);
+    app.ai.dispose();
+  });
+
+  it('keeps the original order and context on a failed save and permits retrying', async () => {
+    const app = await histories(2);
+    for (const id of app.ids) await app.ai.setConversationPinned(id, true);
+    const before = app.snapshot();
+    const active = app.ai.getAssistantSession();
+    vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('disk full'));
+    await expect(app.ai.reorderPinnedConversations([...app.ids].reverse())).rejects.toThrow('disk full');
+    expect(app.snapshot()).toEqual(before);
+    expect(app.ai.getAssistantSession()).toEqual(active);
+    expect(app.ai.getView().conversations?.map((entry) => entry.id)).toEqual(app.ids);
+    await app.ai.reorderPinnedConversations([...app.ids].reverse());
+    expect(app.ai.getView().conversations?.map((entry) => entry.id)).toEqual([...app.ids].reverse());
+    app.ai.dispose();
+  });
+
+  it('waits for pending drafts and ordering before shutdown and copies the requested order', async () => {
+    const app = await histories(2);
+    for (const id of app.ids) await app.ai.setConversationPinned(id, true);
+    const commit = vi.mocked(app.storage.commit).getMockImplementation()!;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(app.storage.commit).mockImplementationOnce(async (...args) => { await gate; return commit(...args); });
+    app.ai.saveAssistantSession(session(app.ai, '最新'));
+    const order = [...app.ids].reverse();
+    const sorting = app.ai.reorderPinnedConversations(order);
+    order.reverse();
+    let closed = false;
+    const closing = app.ai.flushAssistantSession().then(() => { closed = true; });
+    await vi.waitFor(() => expect(app.ai.getView().conversationBusy).toBe(true));
+    expect(closed).toBe(false);
+    release();
+    await Promise.all([sorting, closing]);
+    expect(app.ai.getView().conversations?.map((entry) => entry.id)).toEqual([...app.ids].reverse());
+    expect(app.ai.getAssistantSession()?.draft).toBe('最新草稿');
     app.ai.dispose();
   });
 
@@ -175,9 +294,12 @@ describe('pinned AI conversation histories', () => {
     await app.ai.renameConversation(privateId, 'SECRET');
     await app.ai.createConversation();
     await save(app.ai, '公开');
+    const publicId = app.ai.getView().activeConversationId!;
+    await app.ai.setConversationPinned(publicId, true);
     await app.library.lockVault(vault.id);
     const ciphertext = app.snapshot().aiConversations?.entries.find((entry) => entry.id === privateId)?.session;
     await app.ai.setConversationPinned(privateId, true);
+    await app.ai.reorderPinnedConversations([privateId, publicId]);
     expect(app.ai.getView().conversations?.[0]).toMatchObject({ id: privateId, title: '加密会话', pinned: true, locked: true });
     expect((await app.ai.searchConversations(''))[0]).toMatchObject({ id: privateId, pinned: true });
     expect(await app.ai.searchConversations('SECRET')).toEqual([]);

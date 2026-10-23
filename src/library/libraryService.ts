@@ -511,6 +511,9 @@ export class LibraryService {
       if (entries.some((entry) => entry.pinned !== undefined && typeof entry.pinned !== 'boolean')) {
         throw new Error('本地会话置顶状态格式无效，原始记录未修改。');
       }
+      if (entries.some((entry) => entry.pinOrder !== undefined && (!Number.isSafeInteger(entry.pinOrder) || entry.pinOrder < 0))) {
+        throw new Error('本地会话置顶顺序格式无效，原始记录未修改。');
+      }
       if (entries.some((entry) => entry.selection !== undefined && (!entry.selection
         || (entry.selection.providerId !== null && typeof entry.selection.providerId !== 'string')
         || typeof entry.selection.model !== 'string'))) throw new Error('本地会话模型选择格式无效，原始记录未修改。');
@@ -591,10 +594,26 @@ export class LibraryService {
       const history = tx.snapshot.aiConversations!;
       const entry = history.entries.find((item) => item.id === id);
       if (!entry) throw new Error('历史会话不存在。');
-      if (pinned && !entry.pinned && history.entries.filter((item) => item.pinned).length >= MAX_PINNED_AI_CONVERSATIONS) {
+      let ordered = history.entries.filter((item) => item.pinned).sort(compareAiConversations);
+      if (pinned && !entry.pinned && ordered.length >= MAX_PINNED_AI_CONVERSATIONS) {
         throw new Error(`最多置顶 ${MAX_PINNED_AI_CONVERSATIONS} 个会话，请先取消其他会话的置顶。`);
       }
+      if (pinned && !entry.pinned) ordered.push(entry);
+      if (!pinned) { ordered = ordered.filter((item) => item.id !== id); delete entry.pinOrder; }
       entry.pinned = pinned;
+      ordered.forEach((item, index) => { item.pinOrder = index; });
+    });
+  }
+
+  async reorderAiPinnedConversations(ids: readonly string[]): Promise<void> {
+    const order = [...ids];
+    await this.initializeAiConversations();
+    await this.mutate((tx) => {
+      const pinned = new Map(tx.snapshot.aiConversations!.entries.filter((entry) => entry.pinned).map((entry) => [entry.id, entry]));
+      if (order.length !== pinned.size || new Set(order).size !== order.length || order.some((id) => !pinned.has(id))) {
+        throw new Error('置顶会话列表已变化，请重新拖拽排序。');
+      }
+      order.forEach((id, index) => { pinned.get(id)!.pinOrder = index; });
     });
   }
 
@@ -625,7 +644,7 @@ export class LibraryService {
           const content = [title, ...visible?.messages.map((message) => message.content) ?? []].join(' ').replace(/\s+/g, ' ').toLocaleLowerCase();
           if (isLocked || !content.includes(needle)) return [];
         }
-        return [{ id: entry.id, title, updatedAt: entry.updatedAt, locked: isLocked, pinned: Boolean(entry.pinned),
+        return [{ id: entry.id, title, updatedAt: entry.updatedAt, locked: isLocked, pinned: Boolean(entry.pinned), pinOrder: entry.pinOrder,
           messageCount: visible ? visible.messages.length : entry.session?.kind === 'encrypted' || isLocked ? null : 0 }];
       }).sort(compareAiConversations);
     });

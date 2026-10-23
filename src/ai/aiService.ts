@@ -311,6 +311,11 @@ export class AiService {
     return this.changeConversation(() => this.library.setAiConversationPinned(id, pinned));
   }
 
+  reorderPinnedConversations(ids: readonly string[]): Promise<void> {
+    const order = [...ids];
+    return this.changeConversation(() => this.library.reorderAiPinnedConversations(order));
+  }
+
   private changeConversation(action: () => Promise<unknown>): Promise<void> {
     if (this.disposed) return Promise.reject(new Error('AI 会话已关闭。'));
     if (this.conversationBusy) return Promise.reject(new Error('请等待当前会话操作完成。'));
@@ -873,7 +878,7 @@ export class AiService {
         const locked = stored?.kind === 'encrypted' && stored.vaultIds.some((id) => !unlocked.includes(id));
         const session = stored?.kind === 'plain' ? stored.session : !locked && entry.id === history.activeId ? this.assistantSession : null;
         const messages = Array.isArray(session?.messages) ? session.messages : [];
-        return { id: entry.id, updatedAt: entry.updatedAt, locked: Boolean(locked), pinned: Boolean(entry.pinned),
+        return { id: entry.id, updatedAt: entry.updatedAt, locked: Boolean(locked), pinned: Boolean(entry.pinned), pinOrder: entry.pinOrder,
           title: aiConversationTitle(session, stored?.kind === 'encrypted'),
           messageCount: session ? messages.length : stored?.kind === 'encrypted' ? null : 0 };
       }).sort(compareAiConversations) ?? [],

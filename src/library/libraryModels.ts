@@ -146,8 +146,9 @@ export type AiConversation = {
   session: StoredAiAssistantSession | null;
   selection?: AiModelSelection;
   pinned?: boolean;
+  pinOrder?: number;
 };
-export type AiConversationSummary = { id: string; title: string; updatedAt: string; locked: boolean; messageCount: number | null; pinned?: boolean };
+export type AiConversationSummary = { id: string; title: string; updatedAt: string; locked: boolean; messageCount: number | null; pinned?: boolean; pinOrder?: number };
 export type AiConversationHistory = { activeId: string; entries: AiConversation[] };
 export const MAX_PINNED_AI_CONVERSATIONS = 10;
 
@@ -209,8 +210,10 @@ export function aiConversationTitle(session: Omit<AiAssistantSession, 'epoch'> |
     ?.content.replace(/\s+/g, ' ').trim().slice(0, 60) || (encrypted ? '加密会话' : '新对话');
 }
 
-export function compareAiConversations(a: Pick<AiConversation, 'pinned' | 'updatedAt'>, b: Pick<AiConversation, 'pinned' | 'updatedAt'>): number {
-  return Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt.localeCompare(a.updatedAt);
+export function compareAiConversations(a: Pick<AiConversation, 'pinned' | 'pinOrder' | 'updatedAt'>, b: Pick<AiConversation, 'pinned' | 'pinOrder' | 'updatedAt'>): number {
+  return Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))
+    || (a.pinned && b.pinned ? (a.pinOrder ?? Number.MAX_SAFE_INTEGER) - (b.pinOrder ?? Number.MAX_SAFE_INTEGER) : 0)
+    || b.updatedAt.localeCompare(a.updatedAt);
 }
 
 export function paperDocumentKey(id: string): string {
