@@ -61,6 +61,131 @@ async function createConversation() {
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 
 describe('AI conversation history UI', () => {
+  it('restores independent models of the same provider and routes follow-ups to the restored model', async () => {
+    const app = await setup();
+    const provider = app.library.getView().snapshot.ai.providers[0];
+    await app.ai.saveProvider({ ...provider, models: ['chat-model', 'fast-model'] });
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    ask('默认模型会话');
+    await screen.findByText('默认模型会话回答[S1]');
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '默认模型追问' } });
+    await createConversation();
+    fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'fast-model' } });
+    await screen.findByText('AI 厂商与模型已切换，可继续当前对话。');
+    ask('快模型会话');
+    await screen.findByText('快模型会话回答[S1]');
+    expect(app.completion.mock.calls.at(-1)![0].model).toBe('fast-model');
+    fireEvent.click(screen.getByRole('button', { name: '打开会话 默认模型会话' }));
+    await screen.findByText('默认模型会话回答[S1]');
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('chat-model');
+    expect(screen.getByLabelText('科研问题')).toHaveValue('默认模型追问');
+    fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
+    await screen.findByText('默认模型追问回答[S1]');
+    expect(app.completion.mock.calls.at(-1)![0].model).toBe('chat-model');
+    expect(app.completion.mock.calls.at(-1)![2].map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user']);
+    fireEvent.click(screen.getByRole('button', { name: '打开会话 快模型会话' }));
+    await screen.findByText('快模型会话回答[S1]');
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('fast-model');
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    app.ai.dispose();
+  });
+
+  it('restores different providers and models after restart without sharing their selections', async () => {
+    const app = await setup();
+    const one = app.library.getView().snapshot.ai.providers[0];
+    await app.ai.saveProvider({ ...one, models: ['chat-model', 'fast-model'] });
+    const two = await app.ai.saveProvider({ name: '第二厂商', baseUrl: 'https://second.example/v1', model: 'second-model', models: ['second-fast'] }, 'fixture-second-key', undefined, true);
+    const panel = render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'fast-model' } });
+    await screen.findByText('AI 厂商与模型已切换，可继续当前对话。');
+    ask('第一厂商会话');
+    await screen.findByText('第一厂商会话回答[S1]');
+    await createConversation();
+    fireEvent.change(screen.getByLabelText('AI 厂商'), { target: { value: two.id } });
+    await waitFor(() => expect(screen.getByLabelText('聊天模型')).toHaveValue('second-model'));
+    fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'second-fast' } });
+    await waitFor(() => expect(screen.getByLabelText('聊天模型')).toHaveValue('second-fast'));
+    ask('第二厂商会话');
+    await screen.findByText('第二厂商会话回答[S1]');
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    panel.unmount();
+    app.ai.dispose();
+    const restarted = services(app.storage);
+    render(<AiAssistant library={restarted.library} ai={restarted.ai} onOpenPaper={vi.fn()} />);
+    await screen.findByText('第二厂商会话回答[S1]');
+    expect(screen.getByLabelText('AI 厂商')).toHaveValue(two.id);
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('second-fast');
+    fireEvent.click(screen.getByRole('button', { name: '打开会话 第一厂商会话' }));
+    await screen.findByText('第一厂商会话回答[S1]');
+    expect(screen.getByLabelText('AI 厂商')).toHaveValue(one.id);
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('fast-model');
+    ask('继续第一厂商会话');
+    await screen.findByText('继续第一厂商会话回答[S1]');
+    expect(restarted.completion.mock.calls[0].slice(0, 2)).toEqual([expect.objectContaining({ id: one.id, model: 'fast-model', baseUrl: one.baseUrl }), 'fixture-key']);
+    fireEvent.click(screen.getByRole('button', { name: '打开会话 第二厂商会话' }));
+    await screen.findByText('第二厂商会话回答[S1]');
+    expect(screen.getByLabelText('AI 厂商')).toHaveValue(two.id);
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('second-fast');
+    await act(async () => { await restarted.ai.flushAssistantSession(); });
+    restarted.ai.dispose();
+  });
+
+  it('retains the saved model and chat when a selection update fails', async () => {
+    const app = await setup();
+    const provider = app.library.getView().snapshot.ai.providers[0];
+    await app.ai.saveProvider({ ...provider, models: ['chat-model', 'fast-model'] });
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    ask('保留的会话');
+    await screen.findByText('保留的会话回答[S1]');
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保留的草稿' } });
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    const before = app.snapshot().aiConversations;
+    vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('模型选择保存失败'));
+    fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'fast-model' } });
+    expect(await screen.findByRole('alert')).toHaveTextContent('模型选择保存失败');
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('chat-model');
+    expect(screen.getByLabelText('科研问题')).toHaveValue('保留的草稿');
+    expect(screen.getByText('保留的会话回答[S1]')).toBeInTheDocument();
+    expect(app.snapshot().aiConversations).toEqual(before);
+    app.ai.dispose();
+  });
+
+  it.each(['provider', 'model'] as const)('shows unavailable saved %s choices until the user explicitly chooses another', async (kind) => {
+    const app = await setup();
+    const one = app.library.getView().snapshot.ai.providers[0];
+    await app.ai.saveProvider({ ...one, models: ['chat-model', 'fast-model'] });
+    const two = await app.ai.saveProvider({ name: '第二厂商', baseUrl: 'https://second.example/v1', model: 'second-model' }, 'fixture-second-key');
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'fast-model' } });
+    await screen.findByText('AI 厂商与模型已切换，可继续当前对话。');
+    ask('原来的会话');
+    await screen.findByText('原来的会话回答[S1]');
+    await createConversation();
+    fireEvent.change(screen.getByLabelText('AI 厂商'), { target: { value: two.id } });
+    await waitFor(() => expect(screen.getByLabelText('AI 厂商')).toHaveValue(two.id));
+    ask('其他会话');
+    await screen.findByText('其他会话回答[S1]');
+    await act(async () => {
+      await app.ai.flushAssistantSession();
+      if (kind === 'provider') await app.ai.removeProvider(one.id);
+      else await app.ai.saveProvider({ ...one, models: ['chat-model'] });
+    });
+    fireEvent.click(screen.getByRole('button', { name: '打开会话 原来的会话' }));
+    await screen.findByText('原来的会话回答[S1]');
+    expect(screen.getByRole('alert')).toHaveTextContent(kind === 'provider' ? '厂商配置已删除' : '模型已不在厂商配置中');
+    expect(screen.getByLabelText('AI 厂商')).toHaveValue(one.id);
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('fast-model');
+    expect(screen.getByRole('button', { name: '检索并提问' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('AI 厂商'), { target: { value: two.id } });
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(screen.getByText('原来的会话回答[S1]')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '打开会话 其他会话' }));
+    await screen.findByText('其他会话回答[S1]');
+    expect(screen.getByLabelText('AI 厂商')).toHaveValue(two.id);
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('second-model');
+    app.ai.dispose();
+  });
+
   it('keeps separate transcripts, drafts and selected file contexts and follows up in the selected history', async () => {
     const app = await setup();
     render(<AiAssistant library={app.library} ai={app.ai} initialPaperId={app.first.id} onOpenPaper={vi.fn()} />);

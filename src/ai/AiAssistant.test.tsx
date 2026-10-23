@@ -122,7 +122,7 @@ describe('AI research assistant', () => {
     const save = library.saveAiSettings.bind(library);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    vi.spyOn(library, 'saveAiSettings').mockImplementationOnce(async (settings) => { await gate; await save(settings); });
+    vi.spyOn(library, 'saveAiSettings').mockImplementationOnce(async (...args) => { await gate; await save(...args); });
     render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'fast-model' } });
     expect(await screen.findByText('正在切换 AI 配置…')).toBeInTheDocument();

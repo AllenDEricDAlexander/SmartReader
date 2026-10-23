@@ -20,8 +20,9 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
   const libraryView = useSyncExternalStore(library.subscribe, library.getView);
   const activity = useSyncExternalStore(ai.subscribe, ai.getView);
   const settings = libraryView.snapshot.ai;
+  const currentProviderId = activity.conversationSelection ? activity.conversationSelection.providerId : settings.activeProviderId;
   const [draft, setDraft] = useState<ProviderDraft>(() => providerDraft(
-    settings.providers.find((provider) => provider.id === settings.activeProviderId),
+    settings.providers.find((provider) => provider.id === currentProviderId),
   ));
   const [apiKey, setApiKey] = useState('');
   const [keyMemory, setKeyMemory] = useState<'session' | 'device' | 'password'>('session');
@@ -37,8 +38,9 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
   const selectedInitially = useRef(libraryView.loaded);
   const selected = settings.providers.find((provider) => provider.id === draft.id);
   const hasKey = selected ? activity.keyProviderIds.includes(selected.id) : false;
-  const active = settings.providers.find((provider) => provider.id === settings.activeProviderId);
-  const activeReady = Boolean(active && activity.keyProviderIds.includes(active.id));
+  const active = settings.providers.find((provider) => provider.id === currentProviderId);
+  const activeReady = Boolean(active && providerModels(active).includes(activity.conversationSelection?.model ?? active.model)
+    && activity.keyProviderIds.includes(active.id));
   const dirty = !selected || draft.name !== selected.name || draft.baseUrl !== selected.baseUrl
     || draft.model !== selected.model || draft.models !== providerDraft(selected).models
     || draft.embeddingModel !== (selected.embeddingModel ?? '')
@@ -55,10 +57,10 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
   useEffect(() => {
     if (libraryView.loaded && !selectedInitially.current) {
       selectedInitially.current = true;
-      setDraft(providerDraft(settings.providers.find((provider) => provider.id === settings.activeProviderId)));
+      setDraft(providerDraft(settings.providers.find((provider) => provider.id === currentProviderId)));
       setKnowledgeDraft(settings.knowledge ?? { backend: 'local', milvusUrl: '' });
     }
-  }, [libraryView.loaded, settings]);
+  }, [libraryView.loaded, settings, currentProviderId]);
 
   function selectDraft(provider?: AiProviderProfile) {
     setDraft(providerDraft(provider));
@@ -121,7 +123,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
         <div className="panel-title"><Server size={18} /><h2 id="ai-settings-title">AI 厂商</h2></div>
         <span className="ai-status-badge">OpenAI 兼容接口</span>
       </div>
-      <p className="ai-muted">提前配置多个厂商及各自的聊天模型，使用自己的 Base URL 和 API Key；提问时可直接切换厂商与模型。</p>
+      <p className="ai-muted">提前配置多个厂商及各自的聊天模型，使用自己的 Base URL 和 API Key；提问时可切换选择，每个会话分别保存自己的厂商与模型。</p>
       <div className="ai-privacy-note">
         <ShieldCheck size={17} />
         <p>启用 AI 后，会将相关论文摘录、文献信息和问题发送至所选厂商。文件导入、本地索引和阅读无需 AI。</p>
@@ -139,7 +141,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
             <option value="">新增厂商</option>
             {settings.providers.map((provider) => (
               <option key={provider.id} value={provider.id}>
-                {provider.name}{provider.id === settings.activeProviderId ? ' · 当前使用' : ''}
+                {provider.name}{provider.id === currentProviderId ? ' · 当前会话使用' : ''}
               </option>
             ))}
           </select>
@@ -160,7 +162,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
               />
             </label>
             <label>
-              <span>模型名称 <small>当前使用</small></span>
+              <span>模型名称 <small>默认选项</small></span>
               <input
                 aria-label="模型名称" required maxLength={200} value={draft.model}
                 placeholder="填写厂商提供的模型名称"
@@ -236,7 +238,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
           ) : null}
           <div className="ai-form-actions">
             <button type="submit" className="primary-action">{busy === 'save' ? '保存中…' : '保存厂商配置'}</button>
-            {selected && selected.id !== settings.activeProviderId ? (
+            {selected && selected.id !== currentProviderId ? (
               <button
                 type="button" disabled={dirty}
                 onClick={() => void runAction('select', () => ai.selectProvider(selected.id), () => setNotice('已切换当前 AI 厂商。'))}

@@ -84,8 +84,14 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   const assistantHeader = useRef<HTMLElement | null>(null);
   const questionInput = useRef<HTMLTextAreaElement | null>(null);
   const followingTranscript = useRef(true);
-  const provider = libraryView.snapshot.ai.providers.find((item) => item.id === libraryView.snapshot.ai.activeProviderId);
-  const configured = Boolean(provider && activity.keyProviderIds.includes(provider.id));
+  const selection = activity.conversationSelection;
+  const selectedProviderId = selection ? selection.providerId : libraryView.snapshot.ai.activeProviderId;
+  const profile = libraryView.snapshot.ai.providers.find((item) => item.id === selectedProviderId);
+  const selectedModel = selection?.model ?? profile?.model ?? '';
+  const modelAvailable = Boolean(profile && providerModels(profile).includes(selectedModel));
+  const provider = profile ? { ...profile, model: selectedModel } : undefined;
+  const selectionUnavailable = Boolean(selectedProviderId && (!profile || !modelAvailable));
+  const configured = Boolean(provider && modelAvailable && activity.keyProviderIds.includes(provider.id));
   const busy = pending || activity.asking || addingFiles || buildingIndex || switching || changingKnowledge;
   useEffect(() => { onBusyChange(busy); return () => onBusyChange(false); }, [busy, onBusyChange]);
   const cloudKnowledge = libraryView.snapshot.ai.knowledge?.backend === 'milvus';
@@ -398,29 +404,36 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
           <div className="ai-form-grid" role="group" aria-label="AI 厂商与模型选择">
             <label>
               <span>AI 厂商</span>
-              <select aria-label="AI 厂商" value={provider?.id ?? ''}
+              <select aria-label="AI 厂商" value={selectedProviderId ?? ''}
                 disabled={busy || !libraryView.loaded || !libraryView.snapshot.ai.providers.length}
                 onChange={(event) => void selectConfiguration(event.target.value)}>
-                {!provider ? <option value="">请选择厂商</option> : null}
+                {!selectedProviderId ? <option value="" disabled>请选择厂商</option> : null}
+                {selectedProviderId && !profile ? <option value={selectedProviderId} disabled>原厂商已删除，请重新选择</option> : null}
                 {libraryView.snapshot.ai.providers.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
               </select>
             </label>
             <label>
               <span>聊天模型</span>
-              <select aria-label="聊天模型" value={provider?.model ?? ''} disabled={busy || !libraryView.loaded || !provider}
+              <select aria-label="聊天模型" value={selectedModel} disabled={busy || !libraryView.loaded || !provider}
                 onChange={(event) => { if (provider) void selectConfiguration(provider.id, event.target.value); }}>
-                {!provider ? <option value="">请先配置厂商与模型</option> : providerModels(provider).map((model) => <option key={model} value={model}>{model}</option>)}
+                {!profile ? <option value={selectedModel}>请先配置厂商与模型</option> : <>
+                  {!modelAvailable ? <option value={selectedModel} disabled>{selectedModel || '原模型'} · 不可用</option> : null}
+                  {providerModels(profile).map((model) => <option key={model} value={model}>{model}</option>)}
+                </>}
               </select>
             </label>
           </div>
-          <p className="ai-field-help">{switching ? '正在切换 AI 配置…' : '切换厂商或模型会保留当前聊天记录和上下文，可以继续追问。'}</p>
+          <p className="ai-field-help">{switching ? '正在切换 AI 配置…' : '厂商和模型按会话独立保存，切换会话时自动恢复；修改选择会保留当前聊天记录和上下文。'}</p>
           <p className="ai-field-help">聊天记录和草稿自动保存在本机，重启后可继续追问。</p>
           {activity.sessionError ? <div className="ai-form-actions">
             <p className="settings-error" role="alert">{activity.sessionError}</p>
             <button type="button" disabled={activity.sessionSaving}
               onClick={() => void ai.flushAssistantSession().catch(() => undefined)}>重试保存对话</button>
           </div> : null}
-          {!configured ? (
+          {selectionUnavailable ? <p className="settings-error" role="alert">{!profile
+            ? '此会话使用的厂商配置已删除，请重新选择厂商和模型。聊天记录与原选择仍然保留。'
+            : '此会话使用的模型已不在厂商配置中，请重新选择模型。聊天记录与原选择仍然保留。'}</p> : null}
+          {!configured && !selectionUnavailable ? (
             <div className="ai-setup-notice">
               <p>请先配置 AI 厂商，并输入或解锁 API Key。</p>
               {onOpenSettings ? <button type="button" onClick={onOpenSettings}>打开 AI 设置</button> : null}

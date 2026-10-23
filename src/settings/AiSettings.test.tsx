@@ -30,6 +30,42 @@ function fillProvider() {
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 
 describe('AI settings', () => {
+  it('opens the provider selected by the current conversation even when defaults point to another provider', async () => {
+    const { library, ai } = await setup();
+    const one = await ai.saveProvider({ name: '厂商甲', baseUrl: 'https://one.example/v1', model: 'one' }, 'fixture-one');
+    const first = ai.getView().activeConversationId!;
+    const two = await ai.saveProvider({ name: '厂商乙', baseUrl: 'https://two.example/v1', model: 'two' }, 'fixture-two');
+    await ai.createConversation();
+    await ai.selectProvider(two.id);
+    await ai.selectConversation(first);
+    expect(library.getView().snapshot.ai.activeProviderId).toBe(two.id);
+    render(<AiSettings library={library} ai={ai} />);
+    expect(screen.getByLabelText('选择厂商配置')).toHaveValue(one.id);
+    expect(screen.getByLabelText('厂商名称')).toHaveValue('厂商甲');
+    expect(screen.queryByRole('button', { name: '设为当前厂商' })).not.toBeInTheDocument();
+    ai.dispose();
+  });
+
+  it('preserves each conversation model when saving a new key for their shared provider', async () => {
+    const { library, ai, completion } = await setup();
+    const provider = await ai.saveProvider({ name: '共用厂商', baseUrl: 'https://one.example/v1', model: 'one', models: ['two'] }, 'fixture-old');
+    const first = ai.getView().activeConversationId!;
+    await ai.createConversation();
+    const second = ai.getView().activeConversationId!;
+    await ai.selectProvider(provider.id, 'two');
+    await ai.selectConversation(first);
+    render(<AiSettings library={library} ai={ai} />);
+    expect(screen.getByLabelText('模型名称')).toHaveValue('two');
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'fixture-new' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存厂商配置' }));
+    await screen.findByText('厂商配置已保存。');
+    expect(ai.getView().conversationSelection?.model).toBe('one');
+    expect(library.getView().snapshot.aiConversations?.entries.find((entry) => entry.id === second)?.selection?.model).toBe('two');
+    await ai.ask('继续', { grounding: 'direct' });
+    expect(completion.mock.calls.at(-1)!.slice(0, 2)).toEqual([expect.objectContaining({ id: provider.id, model: 'one' }), 'fixture-new']);
+    ai.dispose();
+  });
+
   it('saves, reopens and edits multiple chat model presets while sharing the provider key', async () => {
     const { library, ai } = await setup();
     const first = render(<AiSettings library={library} ai={ai} />);
