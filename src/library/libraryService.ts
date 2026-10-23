@@ -8,7 +8,7 @@ import {
   folderVaultId, mergeFolders, moveFolder, renameFolder,
 } from './libraryFolders';
 import {
-  aiConversationTitle, emptyLibrary, emptyMetadata, paperDocumentKey,
+  aiConversationTitle, compareAiConversations, emptyLibrary, emptyMetadata, MAX_PINNED_AI_CONVERSATIONS, paperDocumentKey,
   type AiAssistantSession, type AiConversation, type AiConversationSummary, type AiModelSelection, type AiSettings, type EncryptedData, type FolderVault, type LibraryPreferences, type LibraryReaderSession, type LibrarySnapshot, type StoredAiAssistantSession,
   type MetadataField, type Paper, type PaperMetadata,
 } from './libraryModels';
@@ -508,6 +508,9 @@ export class LibraryService {
       if (!Array.isArray(entries) || !entries.length || new Set(entries.map((entry) => entry.id)).size !== entries.length
         || entries.some((entry) => !entry.id || typeof entry.createdAt !== 'string' || typeof entry.updatedAt !== 'string')
         || !entries.some((entry) => entry.id === activeId)) throw new Error('本地会话列表格式无效，原始记录未修改。');
+      if (entries.some((entry) => entry.pinned !== undefined && typeof entry.pinned !== 'boolean')) {
+        throw new Error('本地会话置顶状态格式无效，原始记录未修改。');
+      }
       if (entries.some((entry) => entry.selection !== undefined && (!entry.selection
         || (entry.selection.providerId !== null && typeof entry.selection.providerId !== 'string')
         || typeof entry.selection.model !== 'string'))) throw new Error('本地会话模型选择格式无效，原始记录未修改。');
@@ -582,6 +585,19 @@ export class LibraryService {
     });
   }
 
+  async setAiConversationPinned(id: string, pinned: boolean): Promise<void> {
+    await this.initializeAiConversations();
+    await this.mutate((tx) => {
+      const history = tx.snapshot.aiConversations!;
+      const entry = history.entries.find((item) => item.id === id);
+      if (!entry) throw new Error('历史会话不存在。');
+      if (pinned && !entry.pinned && history.entries.filter((item) => item.pinned).length >= MAX_PINNED_AI_CONVERSATIONS) {
+        throw new Error(`最多置顶 ${MAX_PINNED_AI_CONVERSATIONS} 个会话，请先取消其他会话的置顶。`);
+      }
+      entry.pinned = pinned;
+    });
+  }
+
   async searchAiConversations(query: string, signal?: AbortSignal): Promise<AiConversationSummary[]> {
     signal?.throwIfAborted();
     await this.initializeAiConversations();
@@ -609,9 +625,9 @@ export class LibraryService {
           const content = [title, ...visible?.messages.map((message) => message.content) ?? []].join(' ').replace(/\s+/g, ' ').toLocaleLowerCase();
           if (isLocked || !content.includes(needle)) return [];
         }
-        return [{ id: entry.id, title, updatedAt: entry.updatedAt, locked: isLocked,
+        return [{ id: entry.id, title, updatedAt: entry.updatedAt, locked: isLocked, pinned: Boolean(entry.pinned),
           messageCount: visible ? visible.messages.length : entry.session?.kind === 'encrypted' || isLocked ? null : 0 }];
-      }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      }).sort(compareAiConversations);
     });
   }
 

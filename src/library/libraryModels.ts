@@ -145,9 +145,11 @@ export type AiConversation = {
   updatedAt: string;
   session: StoredAiAssistantSession | null;
   selection?: AiModelSelection;
+  pinned?: boolean;
 };
-export type AiConversationSummary = { id: string; title: string; updatedAt: string; locked: boolean; messageCount: number | null };
+export type AiConversationSummary = { id: string; title: string; updatedAt: string; locked: boolean; messageCount: number | null; pinned?: boolean };
 export type AiConversationHistory = { activeId: string; entries: AiConversation[] };
+export const MAX_PINNED_AI_CONVERSATIONS = 10;
 
 export type LibrarySnapshot = {
   schemaVersion: 1;
@@ -205,6 +207,10 @@ export function aiConversationTitle(session: Omit<AiAssistantSession, 'epoch'> |
   const messages = Array.isArray(session?.messages) ? session.messages : [];
   return (typeof session?.title === 'string' ? session.title : '') || messages.find((message) => message?.role === 'user' && typeof message.content === 'string')
     ?.content.replace(/\s+/g, ' ').trim().slice(0, 60) || (encrypted ? '加密会话' : '新对话');
+}
+
+export function compareAiConversations(a: Pick<AiConversation, 'pinned' | 'updatedAt'>, b: Pick<AiConversation, 'pinned' | 'updatedAt'>): number {
+  return Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt.localeCompare(a.updatedAt);
 }
 
 export function paperDocumentKey(id: string): string {

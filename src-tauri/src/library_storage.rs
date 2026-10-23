@@ -439,9 +439,9 @@ mod tests {
             first["session"]["title"] = json!("已重命名的科研讨论");
             history["aiConversations"] = json!({
                 "activeId": "second", "entries": [
-                    {"id": "first", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": first,
+                    {"id": "first", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": first, "pinned": true,
                         "selection": {"providerId": "provider-one", "model": "model-one"}},
-                    {"id": "second", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": null,
+                    {"id": "second", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": null, "pinned": false,
                         "selection": {"providerId": "provider-two", "model": "model-two"}}
                 ]
             });
@@ -451,6 +451,8 @@ mod tests {
             let connection = crate::db::open_database(&path).unwrap();
             let restored = read_snapshot(&connection).unwrap().data.unwrap();
             assert_eq!(restored["aiConversations"]["activeId"], "second");
+            assert_eq!(restored["aiConversations"]["entries"][0]["pinned"], true);
+            assert_eq!(restored["aiConversations"]["entries"][1]["pinned"], false);
             assert_eq!(
                 restored["aiConversations"]["entries"][0]["selection"]["model"],
                 "model-one"

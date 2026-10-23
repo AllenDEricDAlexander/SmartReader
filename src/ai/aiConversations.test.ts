@@ -52,6 +52,162 @@ async function save(ai: AiService, label: string) {
 
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 
+describe('pinned AI conversation histories', () => {
+  async function histories(count: number) {
+    const app = await setup();
+    const ids = [];
+    for (let index = 0; index < count; index += 1) {
+      if (index) await app.ai.createConversation();
+      await save(app.ai, `会话${index + 1}`);
+      ids.push(app.ai.getView().activeConversationId!);
+    }
+    return { ...app, ids };
+  }
+
+  it('puts pinned histories first in both navigation and search without changing their timestamps or payloads', async () => {
+    const app = await histories(4);
+    const before = app.snapshot().aiConversations!;
+    const order = app.ai.getView().conversations!.map((entry) => entry.id);
+    const pinned = order.slice(-2);
+    for (const id of pinned) await app.ai.setConversationPinned(id, true);
+    const expected = [...pinned, ...order.filter((id) => !pinned.includes(id))];
+    expect(app.ai.getView().conversations?.map((entry) => entry.id)).toEqual(expected);
+    expect((await app.ai.searchConversations('会话')).map((entry) => entry.id)).toEqual(expected);
+    for (const entry of app.snapshot().aiConversations!.entries) {
+      const original = before.entries.find((item) => item.id === entry.id)!;
+      expect(entry).toEqual(pinned.includes(entry.id) ? { ...original, pinned: true } : original);
+    }
+    for (const id of pinned) await app.ai.setConversationPinned(id, false);
+    expect(app.ai.getView().conversations?.map((entry) => entry.id)).toEqual(order);
+    expect((await app.ai.searchConversations('')).map((entry) => entry.id)).toEqual(order);
+    app.ai.dispose();
+  });
+
+  it('enforces ten pins atomically, permits unpinning at the limit and frees a slot on deletion', async () => {
+    const app = await histories(12);
+    for (const id of app.ids.slice(0, 9)) await app.library.setAiConversationPinned(id, true);
+    const attempts = await Promise.allSettled(app.ids.slice(9, 11).map((id) => app.library.setAiConversationPinned(id, true)));
+    expect(attempts.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.find((result) => result.status === 'rejected')).toMatchObject({ reason: expect.objectContaining({ message: expect.stringContaining('最多置顶 10 个会话') }) });
+    expect(app.snapshot().aiConversations?.entries.filter((entry) => entry.pinned)).toHaveLength(10);
+    await app.ai.setConversationPinned(app.ids[0], true);
+    const before = app.snapshot();
+    await expect(app.ai.setConversationPinned(app.ids[11], true)).rejects.toThrow('最多置顶 10 个会话');
+    expect(app.snapshot()).toEqual(before);
+    await app.ai.setConversationPinned(app.ids[0], false);
+    await app.ai.setConversationPinned(app.ids[11], true);
+    expect(app.snapshot().aiConversations?.entries.filter((entry) => entry.pinned)).toHaveLength(10);
+    await app.ai.deleteConversation(app.ids[1]);
+    await app.ai.setConversationPinned(app.ids[0], true);
+    expect(app.snapshot().aiConversations?.entries.filter((entry) => entry.pinned)).toHaveLength(10);
+    app.ai.dispose();
+  });
+
+  it('restores pins after restart without sharing names, models or drafts between conversations', async () => {
+    const app = await setup();
+    const provider = await app.ai.saveProvider({ name: '厂商', baseUrl: 'https://one.example/v1', model: 'one', models: ['two'] });
+    await save(app.ai, '第一份');
+    const first = app.ai.getView().activeConversationId!;
+    await app.ai.renameConversation(first, '常用课题');
+    await app.ai.setConversationPinned(first, true);
+    await app.ai.createConversation();
+    const second = app.ai.getView().activeConversationId!;
+    expect(app.ai.getView().conversations?.find((entry) => entry.id === second)?.pinned).toBe(false);
+    await app.ai.selectProvider(provider.id, 'two');
+    await save(app.ai, '第二份');
+    const active = app.ai.getAssistantSession();
+    await app.ai.setConversationPinned(first, false);
+    await app.ai.setConversationPinned(first, true);
+    expect(app.ai.getAssistantSession()).toEqual(active);
+    expect(app.ai.getView().conversationSelection?.model).toBe('two');
+    app.ai.dispose();
+    const restarted = services(app.storage);
+    await restarted.ai.loadAssistantSession();
+    expect(restarted.ai.getView().activeConversationId).toBe(second);
+    expect(restarted.ai.getAssistantSession()?.draft).toBe('第二份草稿');
+    expect(restarted.ai.getView().conversations?.[0]).toMatchObject({ id: first, title: '常用课题', pinned: true });
+    await restarted.ai.selectConversation(first);
+    expect(restarted.ai.getAssistantSession()).toMatchObject({ title: '常用课题', draft: '第一份草稿' });
+    expect(restarted.ai.getView().conversationSelection?.model).toBe('one');
+    restarted.ai.dispose();
+  });
+
+  it('loads older histories as unpinned without rewriting their records', async () => {
+    const app = await histories(2);
+    const before = app.snapshot();
+    expect(before.aiConversations?.entries.every((entry) => entry.pinned === undefined)).toBe(true);
+    const commits = vi.mocked(app.storage.commit).mock.calls.length;
+    app.ai.dispose();
+    const restarted = services(app.storage);
+    await restarted.ai.loadAssistantSession();
+    expect(restarted.ai.getView().conversations?.every((entry) => entry.pinned === false)).toBe(true);
+    expect(app.snapshot()).toEqual(before);
+    expect(app.storage.commit).toHaveBeenCalledTimes(commits);
+    restarted.ai.dispose();
+  });
+
+  it.each([true, false])('preserves records and permits retrying when saving pinned=%s fails', async (pinned) => {
+    const app = await histories(2);
+    const id = app.ids[0];
+    await app.ai.setConversationPinned(id, !pinned);
+    const before = app.snapshot();
+    const active = app.ai.getAssistantSession();
+    vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('disk full'));
+    await expect(app.ai.setConversationPinned(id, pinned)).rejects.toThrow('disk full');
+    expect(app.snapshot()).toEqual(before);
+    expect(app.ai.getAssistantSession()).toEqual(active);
+    expect(app.ai.getView().conversationBusy).toBe(false);
+    await app.ai.setConversationPinned(id, pinned);
+    expect(app.ai.getView().conversations?.find((entry) => entry.id === id)?.pinned).toBe(pinned);
+    await expect(app.ai.setConversationPinned('missing', true)).rejects.toThrow('历史会话不存在');
+    app.ai.dispose();
+  });
+
+  it('pins a locked encrypted history without decrypting its contents or changing the active conversation', async () => {
+    const app = await setup();
+    const paper = await app.library.importPdf(new TextEncoder().encode('%PDF-1.7\nprivate pin'), 'private.pdf');
+    const folder = await app.library.createFolder('私密');
+    await app.library.categorize([paper.id], [folder.id], 'move');
+    const vault = await app.library.encryptFolder(folder.id, 'private password');
+    const privateId = app.ai.getView().activeConversationId!;
+    app.ai.saveAssistantSession({ ...session(app.ai, 'PRIVATE'), selectedPaperIds: [paper.id] });
+    await app.ai.flushAssistantSession();
+    await app.ai.renameConversation(privateId, 'SECRET');
+    await app.ai.createConversation();
+    await save(app.ai, '公开');
+    await app.library.lockVault(vault.id);
+    const ciphertext = app.snapshot().aiConversations?.entries.find((entry) => entry.id === privateId)?.session;
+    await app.ai.setConversationPinned(privateId, true);
+    expect(app.ai.getView().conversations?.[0]).toMatchObject({ id: privateId, title: '加密会话', pinned: true, locked: true });
+    expect((await app.ai.searchConversations(''))[0]).toMatchObject({ id: privateId, pinned: true });
+    expect(await app.ai.searchConversations('SECRET')).toEqual([]);
+    expect(app.snapshot().aiConversations?.entries.find((entry) => entry.id === privateId)?.session).toEqual(ciphertext);
+    expect(app.ai.getAssistantSession()?.draft).toBe('公开草稿');
+    expect(JSON.stringify(app.snapshot())).not.toMatch(/PRIVATE|SECRET/);
+    await app.ai.setConversationPinned(privateId, false);
+    app.ai.dispose();
+  });
+
+  it('waits for a pending pin before shutdown and retains the latest draft', async () => {
+    const app = await histories(1);
+    const commit = vi.mocked(app.storage.commit).getMockImplementation()!;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(app.storage.commit).mockImplementationOnce(async (...args) => { await gate; return commit(...args); });
+    app.ai.saveAssistantSession(session(app.ai, '最新'));
+    const pinning = app.ai.setConversationPinned(app.ids[0], true);
+    let closed = false;
+    const closing = app.ai.flushAssistantSession().then(() => { closed = true; });
+    await vi.waitFor(() => expect(app.ai.getView().conversationBusy).toBe(true));
+    expect(closed).toBe(false);
+    release();
+    await Promise.all([pinning, closing]);
+    expect(app.snapshot().aiConversations?.entries[0].pinned).toBe(true);
+    expect(app.ai.getAssistantSession()?.draft).toBe('最新草稿');
+    app.ai.dispose();
+  });
+});
+
 describe('conversation names and local search', () => {
   it('keeps a custom name through autosaves, follow-ups and restart', async () => {
     const app = await setup();

@@ -1,5 +1,5 @@
 import { createVaultKey, decryptJson, deriveVaultKey, encryptJson } from '../library/libraryCrypto';
-import { aiConversationTitle, emptyMetadata, providerModels, type AiAssistantSession, type AiChatTurn, type AiConversationSummary, type AiModelSelection, type AiProviderProfile, type AiRetrieval, type AiSource, type MetadataField, type Paper, type PaperMetadata } from '../library/libraryModels';
+import { aiConversationTitle, compareAiConversations, emptyMetadata, providerModels, type AiAssistantSession, type AiChatTurn, type AiConversationSummary, type AiModelSelection, type AiProviderProfile, type AiRetrieval, type AiSource, type MetadataField, type Paper, type PaperMetadata } from '../library/libraryModels';
 import { errorMessage, LibraryService } from '../library/libraryService';
 import { failureStatus, normalizeBaseUrl, providerDetail, requestCompletion, streamCompletion, type AiMessage } from './openAiClient';
 import { KnowledgeService, type KnowledgeDependencies } from './knowledgeService';
@@ -305,6 +305,10 @@ export class AiService {
 
   searchConversations(query: string, signal?: AbortSignal): Promise<AiConversationSummary[]> {
     return this.library.searchAiConversations(query, signal);
+  }
+
+  setConversationPinned(id: string, pinned: boolean): Promise<void> {
+    return this.changeConversation(() => this.library.setAiConversationPinned(id, pinned));
   }
 
   private changeConversation(action: () => Promise<unknown>): Promise<void> {
@@ -869,10 +873,10 @@ export class AiService {
         const locked = stored?.kind === 'encrypted' && stored.vaultIds.some((id) => !unlocked.includes(id));
         const session = stored?.kind === 'plain' ? stored.session : !locked && entry.id === history.activeId ? this.assistantSession : null;
         const messages = Array.isArray(session?.messages) ? session.messages : [];
-        return { id: entry.id, updatedAt: entry.updatedAt, locked: Boolean(locked),
+        return { id: entry.id, updatedAt: entry.updatedAt, locked: Boolean(locked), pinned: Boolean(entry.pinned),
           title: aiConversationTitle(session, stored?.kind === 'encrypted'),
           messageCount: session ? messages.length : stored?.kind === 'encrypted' ? null : 0 };
-      }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) ?? [],
+      }).sort(compareAiConversations) ?? [],
     };
     for (const listener of this.listeners) listener();
   }
