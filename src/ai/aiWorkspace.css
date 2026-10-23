@@ -27,6 +27,7 @@
 }
 
 .ai-history-heading h2 { margin: 0; font-size: 15px; }
+.ai-history-pin-count { margin-left: auto; color: var(--sr-text-muted); font-size: 10px; white-space: nowrap; }
 .ai-new-conversation { justify-content: center; padding: 9px 12px; }
 .ai-history-panel > p { margin: 0; }
 .ai-history-search { display: flex; align-items: center; gap: 6px; padding: 8px; border: 1px solid var(--sr-border); border-radius: 8px; }
@@ -40,8 +41,10 @@
 .ai-history-select { flex: 1; display: grid; gap: 8px; min-width: 0; padding: 11px 9px; text-align: left; border: 0; background: transparent; }
 .ai-history-select strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .ai-history-select > span { color: var(--sr-text-muted); font-size: 10px; }
+.ai-history-pinned { display: inline-flex; align-items: center; gap: 3px; color: var(--sr-primary); white-space: nowrap; }
 .ai-history-actions { align-self: center; display: grid; flex-shrink: 0; }
 .ai-history-actions button { padding: 7px; border: 0; background: transparent; color: var(--sr-text-muted); }
+.ai-history-actions .ai-history-pin[aria-pressed="true"] { color: var(--sr-primary); }
 .ai-history-actions .ai-history-delete { color: var(--sr-danger); }
 .ai-history-confirm { padding: 10px; border: 1px solid var(--sr-border); border-radius: 8px; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .ai-history-rename { display: grid; gap: 10px; }

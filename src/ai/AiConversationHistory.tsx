@@ -1,12 +1,14 @@
-import { History, LockKeyhole, MessageSquarePlus, PencilLine, Search, Trash2, X } from 'lucide-react';
+import { History, LockKeyhole, MessageSquarePlus, PencilLine, Pin, PinOff, Search, Trash2, X } from 'lucide-react';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import type { AiConversationSummary } from '../library/libraryModels';
+import { MAX_PINNED_AI_CONVERSATIONS, type AiConversationSummary } from '../library/libraryModels';
 import { errorMessage } from '../library/libraryService';
 import type { AiService } from './aiService';
 
 export function AiConversationHistory({ ai, disabled }: { ai: AiService; disabled: boolean }) {
   const activity = useSyncExternalStore(ai.subscribe, ai.getView);
   const conversations = activity.conversations;
+  const pinnedCount = conversations?.filter((entry) => entry.pinned).length ?? 0;
+  const pinLimitReached = pinnedCount >= MAX_PINNED_AI_CONVERSATIONS;
   const [query, setQuery] = useState('');
   const [searchResult, setSearchResult] = useState<{
     source: AiConversationSummary[]; query: string; entries: AiConversationSummary[]; error?: string;
@@ -44,10 +46,13 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
   }
 
   return <aside className="ai-history-panel" aria-label="历史会话">
-    <div className="ai-history-heading"><History size={17} /><h2>历史会话</h2></div>
+    <div className="ai-history-heading"><History size={17} /><h2>历史会话</h2>
+      <span className="ai-history-pin-count">已置顶 {pinnedCount}/{MAX_PINNED_AI_CONVERSATIONS}</span>
+    </div>
     <button type="button" className="ai-new-conversation" disabled={disabled}
       onClick={() => void perform(async () => { await ai.createConversation(); setQuery(''); })}><MessageSquarePlus size={16} />新建对话</button>
     <p className="ai-muted">每个会话独立保存聊天、草稿和文献范围。</p>
+    {pinLimitReached ? <p className="ai-muted" role="status">置顶已达上限，请先取消其他会话的置顶。</p> : null}
     <label className="ai-history-search"><Search size={15} aria-hidden="true" />
       <input type="search" aria-label="搜索历史会话" placeholder="搜索标题或聊天内容" value={query} disabled={!activity.sessionLoaded}
         onChange={(event) => setQuery(event.target.value)} />
@@ -86,9 +91,17 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
           title={entry.title} aria-label={`打开会话 ${entry.title}`} aria-current={entry.id === activity.activeConversationId ? 'true' : undefined}
           onClick={() => void perform(() => ai.selectConversation(entry.id))}>
           <strong>{`${entry.title} · ${entry.locked ? '待解锁' : entry.messageCount === null ? '已加密' : `${Math.floor(entry.messageCount / 2)} 轮`}`}</strong>
-          <span>{entry.locked ? <LockKeyhole size={12} /> : null}<time dateTime={entry.updatedAt}>{new Date(entry.updatedAt).toLocaleString()}</time></span>
+          <span>{entry.pinned ? <span className="ai-history-pinned"><Pin size={12} aria-hidden="true" />置顶</span> : null}
+            {entry.locked ? <LockKeyhole size={12} /> : null}<time dateTime={entry.updatedAt}>{new Date(entry.updatedAt).toLocaleString()}</time>
+          </span>
         </button>
         <div className="ai-history-actions">
+          <button type="button" className="ai-history-pin" disabled={disabled || (!entry.pinned && pinLimitReached)}
+            aria-label={`${entry.pinned ? '取消置顶' : '置顶'}会话 ${entry.title}`} aria-pressed={Boolean(entry.pinned)}
+            title={!entry.pinned && pinLimitReached ? `最多置顶 ${MAX_PINNED_AI_CONVERSATIONS} 个会话，请先取消其他会话的置顶。` : entry.pinned ? '取消置顶' : '置顶到历史列表顶部'}
+            onClick={() => void perform(() => ai.setConversationPinned(entry.id, !entry.pinned))}>
+            {entry.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+          </button>
           <button type="button" disabled={disabled || entry.locked} aria-label={`重命名会话 ${entry.title}`}
             onClick={() => { setError(null); setPendingDelete(null); setPendingRename({ id: entry.id, name: entry.title }); }}><PencilLine size={14} /></button>
           <button type="button" className="ai-history-delete" disabled={disabled} aria-label={`删除会话 ${entry.title}`}

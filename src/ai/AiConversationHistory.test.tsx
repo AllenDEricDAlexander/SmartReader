@@ -61,6 +61,124 @@ async function createConversation() {
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 
 describe('AI conversation history UI', () => {
+  it('pins an older history above recent chats and search results, then restores it after restarting', async () => {
+    const app = await setup();
+    const panel = render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    ask('常用课题');
+    await screen.findByText('常用课题回答[S1]');
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '常用课题追问' } });
+    await createConversation();
+    ask('当前课题');
+    await screen.findByText('当前课题回答[S1]');
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '当前草稿' } });
+    const recentOrder = screen.getAllByRole('button', { name: /^打开会话 / }).map((button) => button.getAttribute('aria-label'));
+    expect(recentOrder).toEqual(['打开会话 当前课题', '打开会话 常用课题']);
+    fireEvent.click(screen.getByRole('button', { name: '置顶会话 常用课题', pressed: false }));
+    await screen.findByRole('button', { name: '取消置顶会话 常用课题', pressed: true });
+    expect(screen.getByText('已置顶 1/10')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 常用课题');
+    expect(screen.getByText('当前课题回答[S1]')).toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('当前草稿');
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: '课题' } });
+    await screen.findByText('找到 2 个会话');
+    expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 常用课题');
+    fireEvent.click(screen.getByRole('button', { name: '取消置顶会话 常用课题' }));
+    await screen.findByText('已置顶 0/10');
+    await screen.findByText('找到 2 个会话');
+    expect(screen.getAllByRole('button', { name: /^打开会话 / }).map((button) => button.getAttribute('aria-label'))).toEqual(recentOrder);
+    fireEvent.click(screen.getByRole('button', { name: '置顶会话 常用课题' }));
+    await screen.findByText('已置顶 1/10');
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    panel.unmount();
+    app.ai.dispose();
+    const restarted = services(app.storage);
+    render(<AiAssistant library={restarted.library} ai={restarted.ai} onOpenPaper={vi.fn()} />);
+    await screen.findByText('当前课题回答[S1]');
+    expect(screen.getByRole('button', { name: '取消置顶会话 常用课题', pressed: true })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 常用课题');
+    expect(screen.getByLabelText('科研问题')).toHaveValue('当前草稿');
+    fireEvent.click(screen.getByRole('button', { name: '打开会话 常用课题' }));
+    await screen.findByText('常用课题回答[S1]');
+    expect(screen.getByLabelText('科研问题')).toHaveValue('常用课题追问');
+    fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
+    await screen.findByText('常用课题追问回答[S1]');
+    const sent = restarted.completion.mock.calls[0][2];
+    expect(sent.map((message) => message.content)).toContain('常用课题');
+    expect(JSON.stringify(sent)).not.toContain('当前课题');
+    await createConversation();
+    expect(screen.getByRole('button', { name: '置顶会话 新对话', pressed: false })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 常用课题');
+    await act(async () => { await restarted.ai.flushAssistantSession(); });
+    restarted.ai.dispose();
+  });
+
+  it('counts all ten pins while searching and frees a slot when unpinning or deleting a pinned chat', async () => {
+    const app = await setup();
+    const ids = [];
+    for (let index = 1; index <= 12; index += 1) {
+      if (index > 1) await app.ai.createConversation();
+      const id = app.ai.getView().activeConversationId!;
+      ids.push(id);
+      await app.ai.renameConversation(id, `课题${index}`);
+      if (index <= 10) await app.ai.setConversationPinned(id, true);
+    }
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    expect(screen.getByText('已置顶 10/10')).toBeInTheDocument();
+    expect(screen.getByText('置顶已达上限，请先取消其他会话的置顶。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '置顶会话 课题11' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '取消置顶会话 课题1' })).toBeEnabled();
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: '课题11' } });
+    await screen.findByText('找到 1 个会话');
+    expect(screen.getByRole('button', { name: '置顶会话 课题11' })).toBeDisabled();
+    expect(screen.getByText('已置顶 10/10')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '清空会话搜索' }));
+    fireEvent.click(await screen.findByRole('button', { name: '取消置顶会话 课题1' }));
+    await screen.findByText('已置顶 9/10');
+    expect(screen.getByRole('button', { name: '置顶会话 课题11' })).toBeEnabled();
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: '课题11' } });
+    await screen.findByText('找到 1 个会话');
+    fireEvent.click(screen.getByRole('button', { name: '置顶会话 课题11' }));
+    await screen.findByText('已置顶 10/10');
+    await screen.findByText('找到 1 个会话');
+    expect(screen.getByRole('button', { name: '取消置顶会话 课题11' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '删除会话 课题11' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认删除会话' }));
+    await screen.findByText('已置顶 9/10');
+    await screen.findByText('没有匹配的会话。');
+    fireEvent.click(screen.getByRole('button', { name: '清空会话搜索' }));
+    expect(await screen.findByRole('button', { name: '置顶会话 课题12' })).toBeEnabled();
+    expect(app.ai.getView().activeConversationId).toBe(ids[11]);
+    expect(app.ai.getView().conversations?.filter((entry) => entry.pinned)).toHaveLength(9);
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    app.ai.dispose();
+  });
+
+  it.each([true, false])('keeps the original pin and chat on a failed pinned=%s update and supports retrying', async (pinned) => {
+    const app = await setup();
+    const id = app.ai.getView().activeConversationId!;
+    await app.ai.setConversationPinned(id, !pinned);
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    ask('保留的聊天');
+    await screen.findByText('保留的聊天回答[S1]');
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保留的草稿' } });
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    const before = app.snapshot().aiConversations;
+    const action = `${pinned ? '置顶' : '取消置顶'}会话 保留的聊天`;
+    vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('置顶状态保存失败'));
+    fireEvent.click(screen.getByRole('button', { name: action }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('置顶状态保存失败');
+    expect(screen.getByRole('button', { name: action, pressed: !pinned })).toBeEnabled();
+    expect(screen.getByText('保留的聊天回答[S1]')).toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('保留的草稿');
+    expect(app.snapshot().aiConversations).toEqual(before);
+    fireEvent.click(screen.getByRole('button', { name: action }));
+    await screen.findByRole('button', { name: `${pinned ? '取消置顶' : '置顶'}会话 保留的聊天`, pressed: pinned });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('保留的草稿');
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    app.ai.dispose();
+  });
+
   it('renames the current history and restores its name, model, draft and context after restarting', async () => {
     const app = await setup();
     const provider = app.library.getView().snapshot.ai.providers[0];
@@ -559,6 +677,10 @@ describe('AI conversation history UI', () => {
     expect(screen.getByText('公开会话回答')).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('公开草稿');
     expect(screen.queryByText('PRIVATE-QUESTION')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '置顶会话 加密会话' }));
+    await screen.findByRole('button', { name: '取消置顶会话 加密会话' });
+    expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 加密会话');
+    expect(screen.getByLabelText('科研问题')).toHaveValue('公开草稿');
     fireEvent.click(screen.getByRole('button', { name: '打开会话 加密会话' }));
     await screen.findByText(/已保存的对话涉及加密文献/);
     expect(screen.getByRole('button', { name: '新建对话' })).toBeEnabled();
@@ -566,6 +688,7 @@ describe('AI conversation history UI', () => {
     fireEvent.click(screen.getByRole('button', { name: '删除会话 加密会话' }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除会话' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: '打开会话 加密会话' })).not.toBeInTheDocument());
+    expect(screen.getByText('已置顶 0/10')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '打开会话 公开会话' })).toBeInTheDocument();
     expect(JSON.stringify(app.snapshot())).not.toContain('PRIVATE-');
     app.ai.dispose();
@@ -584,6 +707,7 @@ describe('AI conversation history UI', () => {
     expect(screen.getByRole('button', { name: '打开会话 已完成的问题' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '删除会话 已完成的问题' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '重命名会话 已完成的问题' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '置顶会话 已完成的问题' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '取消回答' }));
     await act(async () => { finish('迟到的回答'); });
     await waitFor(() => expect(screen.getByRole('button', { name: '新建对话' })).toBeEnabled());
