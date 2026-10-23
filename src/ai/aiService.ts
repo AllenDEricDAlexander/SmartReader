@@ -111,7 +111,7 @@ export class AiService {
       const excluded = papers.filter((paper) => paper.knowledgeExcluded && this.knowledgePaperIds.has(paper.id)).map((paper) => paper.id);
       this.knowledgePaperIds = new Set(papers.filter((paper) => !paper.knowledgeExcluded).map((paper) => paper.id));
       if (excluded.length) this.invalidateKnowledge(excluded, false);
-      if (!this.sessionLoaded || this.sessionLocked) void this.loadAssistantSession().catch(() => undefined);
+      if (!this.conversationBusy && (!this.sessionLoaded || this.sessionLocked)) void this.loadAssistantSession().catch(() => undefined);
       this.publish();
     });
     this.disposeIndexed = library.onIndexed((paperId) => {
@@ -176,7 +176,8 @@ export class AiService {
     const stored = history?.entries.find((entry) => entry.id === history.activeId)?.session;
     const referenced = new Set([...(stored?.paperIds ?? []), ...(this.assistantSession?.selectedPaperIds ?? []),
       ...this.assistantSession?.messages.flatMap((message) => message.sources?.map((source) => source.paperId) ?? []) ?? []]);
-    const affectsCurrent = ids.some((id) => referenced.has(id))
+    const affectsCurrent = ids.some((id) => referenced.has(id)
+      || this.assistantSession?.messages.some((message) => message.contextKey.includes(JSON.stringify(id))))
       || (this.assistantSession?.scope === 'all' && this.assistantSession.mode !== 'direct');
     if ((accessChanged && affectsCurrent) || this.answerController) {
       this.cancelAnswer();

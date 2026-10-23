@@ -327,7 +327,7 @@ describe('local AI conversation persistence', () => {
     restarted.ai.dispose();
   });
 
-  it('clears stored context on a new conversation and does not resurrect the previous chat after restart', async () => {
+  it('opens a separate new conversation while retaining the previous history after restart', async () => {
     const app = await setup();
     app.ai.saveAssistantSession(session(app.ai));
     await app.ai.flushAssistantSession();
@@ -341,6 +341,10 @@ describe('local AI conversation persistence', () => {
     await screen.findByLabelText('科研问题');
     expect(screen.queryByText('原来的问题')).not.toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('');
+    expect(app.snapshot().aiConversations?.entries).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: '打开会话 原来的问题' }));
+    await screen.findByText('原来的问题');
+    expect(screen.getByLabelText('科研问题')).toHaveValue('追问草稿');
     restarted.ai.dispose();
   });
 

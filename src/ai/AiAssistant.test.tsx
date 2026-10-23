@@ -407,7 +407,9 @@ describe('AI research assistant', () => {
     expect(messages.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user']);
     expect(messages[1].content).toBe('第一个问题');
     fireEvent.click(screen.getByRole('button', { name: '新建对话' }));
+    await waitFor(() => expect(screen.getByLabelText('科研问题')).toHaveValue(''));
     expect(screen.queryByText('第一个问题')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开会话 第一个问题' })).toBeInTheDocument();
     ai.dispose();
   });
 
@@ -470,6 +472,7 @@ describe('AI research assistant', () => {
     expect(request.map((message) => message.role)).toEqual(['system', 'user']);
     expect(JSON.parse(request[1].content).sources.every((source: { paperId: string }) => source.paperId === second.id)).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: '新建对话' }));
+    await act(async () => { await ai.flushAssistantSession(); });
     next.unmount();
     render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
     expect(screen.queryByText('旧论文问题')).not.toBeInTheDocument();

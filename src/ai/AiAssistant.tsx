@@ -1,8 +1,9 @@
-import { ArrowDown, BookOpen, FileSearch, MessageSquarePlus, Plus, Send, Settings, ShieldCheck, Sparkles, Square, Trash2 } from 'lucide-react';
+import { ArrowDown, BookOpen, FileSearch, Plus, Send, Settings, ShieldCheck, Sparkles, Square, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { errorMessage, type LibraryService } from '../library/libraryService';
 import { providerModels, type Paper } from '../library/libraryModels';
 import type { AiChatMessage, AiChatTurn, AiRetrieval, AiService, AiSource } from './aiService';
+import { AiConversationHistory } from './AiConversationHistory';
 import './aiWorkspace.css';
 
 type AiAssistantProps = {
@@ -24,23 +25,37 @@ const retrievalLabels: Record<AiRetrieval, string> = {
 export function AiAssistant(props: AiAssistantProps) {
   const { ai } = props;
   const activity = useSyncExternalStore(ai.subscribe, ai.getView);
+  const [contentBusy, setContentBusy] = useState(false);
+  const paperRequest = useRef<{ paperId?: string; conversationId?: string } | null>(null);
   useEffect(() => { void ai.loadAssistantSession().catch(() => undefined); }, [ai]);
-  if (!activity.sessionLoaded || activity.sessionLocked) {
-    return <section className="ai-assistant" aria-label="恢复 AI 对话">
+  const disabled = contentBusy || Boolean(activity.asking || activity.conversationBusy || !activity.sessionLoaded);
+  let content;
+  if (!activity.sessionLoaded || activity.sessionLocked || activity.conversationBusy) {
+    content = <section className="ai-assistant" aria-label="恢复 AI 对话">
       <div className="ai-assistant-body">
         {activity.sessionError ? <>
           <p className="settings-error" role="alert">{activity.sessionError}</p>
           <button type="button" onClick={() => void ai.loadAssistantSession().catch(() => undefined)}>重试恢复对话</button>
-        </> : <p role="status">{activity.sessionLocked
+        </> : <p role="status">{activity.conversationBusy ? '正在切换会话…' : activity.sessionLocked
           ? '已保存的对话涉及加密文献，请先在文献库解锁相关文件夹，聊天记录和上下文随后恢复。'
           : '正在恢复本地聊天记录…'}</p>}
       </div>
     </section>;
+  } else {
+    // A history selection restores its own file scope rather than repeating an earlier incoming paper request.
+    if (!paperRequest.current || paperRequest.current.paperId !== props.initialPaperId) {
+      paperRequest.current = { paperId: props.initialPaperId, conversationId: activity.activeConversationId };
+    }
+    content = <AiAssistantContent {...props} key={activity.activeConversationId} onBusyChange={setContentBusy}
+      initialPaperId={paperRequest.current.conversationId === activity.activeConversationId ? props.initialPaperId : undefined} />;
   }
-  return <AiAssistantContent {...props} />;
+  return <div className="ai-conversation-workspace">
+    <AiConversationHistory ai={ai} disabled={disabled} />
+    {content}
+  </div>;
 }
 
-function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdfs, initialPaperId }: AiAssistantProps) {
+function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdfs, initialPaperId, onBusyChange }: AiAssistantProps & { onBusyChange(busy: boolean): void }) {
   const libraryView = useSyncExternalStore(library.subscribe, library.getView);
   const activity = useSyncExternalStore(ai.subscribe, ai.getView);
   const session = ai.getAssistantSession();
@@ -72,6 +87,7 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   const provider = libraryView.snapshot.ai.providers.find((item) => item.id === libraryView.snapshot.ai.activeProviderId);
   const configured = Boolean(provider && activity.keyProviderIds.includes(provider.id));
   const busy = pending || activity.asking || addingFiles || buildingIndex || switching || changingKnowledge;
+  useEffect(() => { onBusyChange(busy); return () => onBusyChange(false); }, [busy, onBusyChange]);
   const cloudKnowledge = libraryView.snapshot.ai.knowledge?.backend === 'milvus';
   const encryptedIds = new Set(libraryView.snapshot.papers.filter((paper) => paper.kind === 'encrypted').map((paper) => paper.id));
   const knowledgePapers = libraryView.papers.filter((paper) => !paper.knowledgeExcluded);
@@ -111,6 +127,7 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
       if (mounted.current) setError(errorMessage(failure));
     });
     const stopLocked = library.onLocked((ids) => {
+      if (ai.getAssistantSession()) return;
       requestGeneration.current += 1;
       ownsRequest.current = false;
       setChat({ messages: [], epoch: ai.getView().answerEpoch });
@@ -337,15 +354,6 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
     setNotice('向量构建已取消。');
   }
 
-  function resetChat() {
-    if (busy) return;
-    requestGeneration.current += 1;
-    setChat({ messages: [], epoch: ai.getView().answerEpoch });
-    setDraft({ text: '', epoch: ai.getView().answerEpoch });
-    setError(null);
-    setNotice('已开始新的对话。');
-  }
-
   async function openSource(source: AiSource) {
     const epoch = ai.getView().answerEpoch;
     if (!library.getPaper(source.paperId)) return;
@@ -376,9 +384,6 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
             <button type="button" onClick={continueQuestion}><Send size={15} />继续提问</button>
           ) : null}
           {pending || activity.asking ? <button type="button" onClick={cancel}><Square size={14} />取消回答</button> : null}
-          <button type="button" onClick={resetChat} disabled={busy || !messages.length}>
-            <MessageSquarePlus size={16} />新建对话
-          </button>
           {onOpenSettings ? (
             <button type="button" onClick={onOpenSettings}><Settings size={16} />AI 设置</button>
           ) : null}

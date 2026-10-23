@@ -204,9 +204,26 @@ describe('independent local AI conversations', () => {
     await app.ai.selectConversation(privateId);
     expect(app.ai.getView().sessionLocked).toBe(true);
     await app.ai.createConversation();
+    expect(app.ai.getView()).toMatchObject({ sessionLoaded: true, sessionLocked: false });
     await app.ai.deleteConversation(privateId);
     expect(app.ai.getView().conversations?.some((entry) => entry.id === privateId)).toBe(false);
     expect(JSON.stringify(app.snapshot())).toContain('公开草稿');
+    app.ai.dispose();
+  });
+
+  it('invalidates protected context before its first pending save even when no sources were returned', async () => {
+    const app = await setup();
+    const paper = await app.library.importPdf(new TextEncoder().encode('%PDF-1.7\nprivate pending context'), 'private.pdf');
+    const folder = await app.library.createFolder('私密');
+    await app.library.categorize([paper.id], [folder.id], 'move');
+    const vault = await app.library.encryptFolder(folder.id, 'private password');
+    const saved = session(app.ai, 'PRIVATE');
+    saved.messages = saved.messages.map((message) => ({ ...message, contextKey: JSON.stringify([paper.id]) }));
+    app.ai.saveAssistantSession(saved);
+    await app.library.lockVault(vault.id);
+    await app.ai.flushAssistantSession();
+    expect(app.ai.getAssistantSession()).toBeNull();
+    expect(JSON.stringify(app.snapshot())).not.toContain('PRIVATE');
     app.ai.dispose();
   });
 });
