@@ -44,6 +44,126 @@ function ask(question = '注意力的结论是什么？') {
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 
 describe('AI research assistant', () => {
+  it.each(['library', 'direct'] as const)('keeps chat, drafts and follow-up context across provider and model switches in %s mode', async (mode) => {
+    const { library, ai, paper, completion } = await setup();
+    const first = library.getView().snapshot.ai.providers[0];
+    await ai.saveProvider({ ...first, models: ['selected-model', 'fast-model'] });
+    const second = await ai.saveProvider({ name: '第二厂商', baseUrl: 'https://second.example/v1', model: 'second-model', models: ['second-fast'] }, 'second-key');
+    render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    if (mode === 'direct') fireEvent.click(screen.getByRole('radio', { name: '直接与模型对话' }));
+    expect(screen.getByLabelText('AI 厂商')).toHaveValue(first.id);
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('selected-model');
+    completion.mockResolvedValueOnce('切换前的回答。');
+    ask('切换前的问题');
+    await screen.findByText('切换前的回答。');
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '使用快模型追问' } });
+    fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'fast-model' } });
+    await screen.findByText('AI 厂商与模型已切换，可继续当前对话。');
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('fast-model');
+    expect(screen.getByText('切换前的问题')).toBeInTheDocument();
+    expect(screen.getByText('切换前的回答。')).toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('使用快模型追问');
+    completion.mockResolvedValueOnce('快模型的回答。');
+    fireEvent.click(screen.getByRole('button', { name: mode === 'direct' ? '发送问题' : '检索并提问' }));
+    await screen.findByText('快模型的回答。');
+    expect(completion.mock.calls.at(-1)!.slice(0, 2)).toEqual([expect.objectContaining({ id: first.id, model: 'fast-model' }), 'session-key']);
+    const modelFollowup = completion.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
+    expect(modelFollowup.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user']);
+    expect(modelFollowup.slice(1, 3)).toEqual([{ role: 'user', content: '切换前的问题' }, { role: 'assistant', content: '切换前的回答。' }]);
+    expect(screen.getByText(`研究服务 · fast-model · ${mode === 'direct' ? '未检索文献' : '本地全文检索'}`)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '使用第二家继续追问' } });
+    fireEvent.change(screen.getByLabelText('AI 厂商'), { target: { value: second.id } });
+    await waitFor(() => expect(screen.getByLabelText('聊天模型')).toHaveValue('second-model'));
+    fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'second-fast' } });
+    await waitFor(() => expect(screen.getByLabelText('聊天模型')).toHaveValue('second-fast'));
+    expect(screen.getByLabelText('科研问题')).toHaveValue('使用第二家继续追问');
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' })).toBeChecked();
+    completion.mockResolvedValueOnce('第二厂商的回答。');
+    fireEvent.click(screen.getByRole('button', { name: mode === 'direct' ? '发送问题' : '检索并提问' }));
+    await screen.findByText('第二厂商的回答。');
+    expect(completion.mock.calls.at(-1)!.slice(0, 2)).toEqual([expect.objectContaining({ id: second.id, baseUrl: second.baseUrl, model: 'second-fast' }), 'second-key']);
+    const providerFollowup = completion.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
+    expect(providerFollowup.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user', 'assistant', 'user']);
+    expect(providerFollowup.slice(1, 5)).toEqual([
+      { role: 'user', content: '切换前的问题' }, { role: 'assistant', content: '切换前的回答。' },
+      { role: 'user', content: '使用快模型追问' }, { role: 'assistant', content: '快模型的回答。' },
+    ]);
+    fireEvent.change(screen.getByLabelText('AI 厂商'), { target: { value: first.id } });
+    await waitFor(() => expect(screen.getByLabelText('聊天模型')).toHaveValue('fast-model'));
+    fireEvent.change(screen.getByLabelText('AI 厂商'), { target: { value: second.id } });
+    await waitFor(() => expect(screen.getByLabelText('聊天模型')).toHaveValue('second-fast'));
+    expect(screen.getByText('切换前的问题')).toBeInTheDocument();
+    expect(screen.getByText('快模型的回答。')).toBeInTheDocument();
+    expect(screen.getByText('第二厂商的回答。')).toBeInTheDocument();
+    ai.dispose();
+  });
+
+  it('keeps the previous selection, completed answers and draft if a switch cannot be saved', async () => {
+    const { library, ai } = await setup();
+    const provider = library.getView().snapshot.ai.providers[0];
+    await ai.saveProvider({ ...provider, models: ['fast-model'] });
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    ask();
+    await screen.findByText('注意力可以改善记忆。[S1]');
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '尚未发送的草稿' } });
+    vi.spyOn(library, 'saveAiSettings').mockRejectedValueOnce(new Error('磁盘写入失败'));
+    fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'fast-model' } });
+    expect(await screen.findByRole('alert')).toHaveTextContent('磁盘写入失败');
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('selected-model');
+    expect(screen.getByText('注意力可以改善记忆。[S1]')).toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('尚未发送的草稿');
+    ai.dispose();
+  });
+
+  it('disables concurrent UI actions while a model switch is being persisted', async () => {
+    const { library, ai } = await setup();
+    const provider = library.getView().snapshot.ai.providers[0];
+    await ai.saveProvider({ ...provider, models: ['fast-model'] });
+    const save = library.saveAiSettings.bind(library);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(library, 'saveAiSettings').mockImplementationOnce(async (settings) => { await gate; await save(settings); });
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'fast-model' } });
+    expect(await screen.findByText('正在切换 AI 配置…')).toBeInTheDocument();
+    expect(screen.getByLabelText('AI 厂商')).toBeDisabled();
+    expect(screen.getByLabelText('聊天模型')).toBeDisabled();
+    expect(screen.getByLabelText('科研问题')).toBeDisabled();
+    await act(async () => { release(); });
+    await waitFor(() => expect(screen.getByLabelText('聊天模型')).toBeEnabled());
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('fast-model');
+    ai.dispose();
+  });
+
+  it('lets users return to a ready provider after choosing a preset without an unlocked key', async () => {
+    const { library, ai } = await setup();
+    const first = library.getView().snapshot.ai.providers[0];
+    const second = await ai.saveProvider({ name: '稍后配置密钥', baseUrl: 'https://later.example/v1', model: 'later-model' });
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('AI 厂商'), { target: { value: second.id } });
+    await waitFor(() => expect(screen.getByLabelText('聊天模型')).toHaveValue('later-model'));
+    expect(screen.getByText(/先配置 AI 厂商/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '检索并提问' })).toBeDisabled();
+    expect(screen.getByLabelText('AI 厂商')).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('AI 厂商'), { target: { value: first.id } });
+    await waitFor(() => expect(screen.getByLabelText('聊天模型')).toHaveValue('selected-model'));
+    expect(screen.queryByText(/先配置 AI 厂商/)).not.toBeInTheDocument();
+    ai.dispose();
+  });
+
+  it('shows the original model when opening a legacy provider without model presets', async () => {
+    const { library, ai } = await setup();
+    const { models: _models, ...legacy } = library.getView().snapshot.ai.providers[0];
+    await library.saveAiSettings({ ...library.getView().snapshot.ai, providers: [legacy] });
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    const selector = screen.getByLabelText('聊天模型');
+    expect(selector).toHaveValue('selected-model');
+    expect(selector.querySelectorAll('option')).toHaveLength(1);
+    ask();
+    await screen.findByText('注意力可以改善记忆。[S1]');
+    ai.dispose();
+  });
+
   it('answers from the selected paper and opens a verified citation at its page', async () => {
     const { library, ai, paper } = await setup();
     const onOpenPaper = vi.fn();
@@ -145,6 +265,8 @@ describe('AI research assistant', () => {
     render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
     ask();
     expect(screen.getByRole('button', { name: '取消回答' })).toBeInTheDocument();
+    expect(screen.getByLabelText('AI 厂商')).toBeDisabled();
+    expect(screen.getByLabelText('聊天模型')).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '取消回答' }));
     expect(cancel).toHaveBeenCalled();
     await act(async () => { finish({ text: '迟到的私密回答', sources: [{ label: 'S1', paperId: paper.id, page: 1, title: '论文', excerpt: '私密摘录' }], providerName: '研究服务' }); });
@@ -356,7 +478,45 @@ describe('AI research assistant', () => {
     ai.dispose();
   });
 
-  it.each(['lock', 'delete', 'forget key', 'switch provider'] as const)('discards saved sensitive conversation while unmounted on %s', async (operation) => {
+  it.each(['provider', 'model', 'edit model', 'configure key'] as const)('restores the saved conversation and can follow up after switching %s while unmounted', async (operation) => {
+    const { library, ai, paper, completion } = await setup();
+    const provider = library.getView().snapshot.ai.providers[0];
+    await ai.saveProvider({ ...provider, models: ['fast-model'] });
+    const other = await ai.saveProvider({ name: '另一厂商', baseUrl: 'https://other.example.com/v1', model: 'other-model' }, operation === 'configure key' ? undefined : 'other-key');
+    const first = render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    ask('保存的问题');
+    await screen.findByText('注意力可以改善记忆。[S1]');
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保存的追问草稿' } });
+    fireEvent.change(screen.getByLabelText('搜索知识库文件'), { target: { value: '认知神经' } });
+    first.unmount();
+    const previous = ai.getAssistantSession()!;
+    if (operation === 'provider') await ai.selectProvider(other.id);
+    else if (operation === 'model') await ai.selectProvider(provider.id, 'fast-model');
+    else if (operation === 'configure key') {
+      await ai.selectProvider(other.id);
+      await ai.saveProvider(other, 'other-key');
+    } else await ai.saveProvider({ ...provider, model: 'fast-model' });
+    expect(ai.getAssistantSession()).toEqual(previous);
+    render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    expect(screen.getByText('保存的问题')).toBeInTheDocument();
+    expect(screen.getByText('注意力可以改善记忆。[S1]')).toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('保存的追问草稿');
+    expect(screen.getByLabelText('搜索知识库文件')).toHaveValue('认知神经');
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 认知神经论文' })).toBeChecked();
+    completion.mockResolvedValueOnce('继续后的回答。[S1]');
+    fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
+    await screen.findByText('继续后的回答。[S1]');
+    expect(completion.mock.calls.at(-1)![0]).toMatchObject(operation === 'provider' || operation === 'configure key'
+      ? { id: other.id, model: 'other-model' } : { id: provider.id, model: 'fast-model' });
+    const request = completion.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
+    expect(request.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user']);
+    expect(request[1].content).toBe('保存的问题');
+    expect(request[2].content).toBe('注意力可以改善记忆。[S1]');
+    expect(JSON.parse(request[3].content).question).toBe('保存的追问草稿');
+    ai.dispose();
+  });
+
+  it.each(['lock', 'delete', 'forget key'] as const)('discards saved sensitive conversation while unmounted on %s', async (operation) => {
     const { library, ai, paper } = await setup();
     const folder = await library.createFolder('私密');
     await library.categorize([paper.id], [folder.id], 'move');
@@ -371,11 +531,7 @@ describe('AI research assistant', () => {
     const provider = library.getView().snapshot.ai.activeProviderId!;
     if (operation === 'lock') await library.lockVault(vault.id);
     else if (operation === 'delete') await library.deletePapers([paper.id]);
-    else if (operation === 'forget key') await ai.forgetKey(provider);
-    else {
-      const next = await ai.saveProvider({ name: '另一厂商', baseUrl: 'https://other.example.com/v1', model: 'other' }, 'another-key');
-      await ai.selectProvider(next.id);
-    }
+    else await ai.forgetKey(provider);
     expect(ai.getAssistantSession()).toBeNull();
     ai.saveAssistantSession(previous);
     expect(ai.getAssistantSession()).toBeNull();

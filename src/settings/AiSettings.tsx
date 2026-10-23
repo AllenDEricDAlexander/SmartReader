@@ -1,18 +1,19 @@
 import { KeyRound, Plus, Server, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import type { AiService } from '../ai/aiService';
-import type { AiProviderProfile } from '../library/libraryModels';
+import { providerModels, type AiProviderProfile } from '../library/libraryModels';
 import { errorMessage, type LibraryService } from '../library/libraryService';
 import '../ai/aiWorkspace.css';
 
 type AiSettingsProps = { library: LibraryService; ai: AiService };
-type ProviderDraft = { id?: string; name: string; baseUrl: string; model: string; embeddingModel: string; embeddingBaseUrl: string };
+type ProviderDraft = { id?: string; name: string; baseUrl: string; model: string; models: string; embeddingModel: string; embeddingBaseUrl: string };
 
 function providerDraft(provider?: AiProviderProfile): ProviderDraft {
   return provider
     ? { id: provider.id, name: provider.name, baseUrl: provider.baseUrl, model: provider.model,
+      models: providerModels(provider).filter((model) => model !== provider.model).join('\n'),
       embeddingModel: provider.embeddingModel ?? '', embeddingBaseUrl: provider.embeddingBaseUrl ?? '' }
-    : { name: '', baseUrl: '', model: '', embeddingModel: '', embeddingBaseUrl: '' };
+    : { name: '', baseUrl: '', model: '', models: '', embeddingModel: '', embeddingBaseUrl: '' };
 }
 
 export function AiSettings({ library, ai }: AiSettingsProps) {
@@ -39,7 +40,8 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
   const active = settings.providers.find((provider) => provider.id === settings.activeProviderId);
   const activeReady = Boolean(active && activity.keyProviderIds.includes(active.id));
   const dirty = !selected || draft.name !== selected.name || draft.baseUrl !== selected.baseUrl
-    || draft.model !== selected.model || draft.embeddingModel !== (selected.embeddingModel ?? '')
+    || draft.model !== selected.model || draft.models !== providerDraft(selected).models
+    || draft.embeddingModel !== (selected.embeddingModel ?? '')
     || draft.embeddingBaseUrl !== (selected.embeddingBaseUrl ?? '') || Boolean(apiKey);
 
   useEffect(() => {
@@ -103,7 +105,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
     }
     const remembered = keyMemory === 'device';
     void runAction('save', () => ai.saveProvider(
-      draft,
+      { ...draft, models: draft.models.split(/\r?\n/) },
       key || undefined,
       key && keyMemory === 'password' ? savePassword : undefined,
       key ? remembered : undefined,
@@ -119,7 +121,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
         <div className="panel-title"><Server size={18} /><h2 id="ai-settings-title">AI 厂商</h2></div>
         <span className="ai-status-badge">OpenAI 兼容接口</span>
       </div>
-      <p className="ai-muted">按需配置多个厂商，使用自己的 Base URL、模型和 API Key。</p>
+      <p className="ai-muted">提前配置多个厂商及各自的聊天模型，使用自己的 Base URL 和 API Key；提问时可直接切换厂商与模型。</p>
       <div className="ai-privacy-note">
         <ShieldCheck size={17} />
         <p>启用 AI 后，会将相关论文摘录、文献信息和问题发送至所选厂商。文件导入、本地索引和阅读无需 AI。</p>
@@ -158,12 +160,21 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
               />
             </label>
             <label>
-              <span>模型名称</span>
+              <span>模型名称 <small>当前使用</small></span>
               <input
                 aria-label="模型名称" required maxLength={200} value={draft.model}
                 placeholder="填写厂商提供的模型名称"
                 onChange={(event) => setDraft({ ...draft, model: event.target.value })}
               />
+            </label>
+            <label className="ai-full-width">
+              <span>其他可选模型</span>
+              <textarea
+                aria-label="其他可选模型" rows={3} value={draft.models} spellCheck={false}
+                placeholder="每行填写一个模型名称"
+                onChange={(event) => setDraft({ ...draft, models: event.target.value })}
+              />
+              <small className="ai-field-help">与当前模型共用此厂商的 Base URL 和 API Key，保存后可在 AI 问答页选择。无需为同一厂商重复配置密钥。</small>
             </label>
             <label className="ai-full-width">
               <span>Embedding 模型</span>
@@ -227,7 +238,7 @@ export function AiSettings({ library, ai }: AiSettingsProps) {
             <button type="submit" className="primary-action">{busy === 'save' ? '保存中…' : '保存厂商配置'}</button>
             {selected && selected.id !== settings.activeProviderId ? (
               <button
-                type="button"
+                type="button" disabled={dirty}
                 onClick={() => void runAction('select', () => ai.selectProvider(selected.id), () => setNotice('已切换当前 AI 厂商。'))}
               >
                 设为当前厂商

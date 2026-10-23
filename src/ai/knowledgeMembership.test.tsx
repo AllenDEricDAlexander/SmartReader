@@ -81,7 +81,7 @@ describe('AI knowledge membership', () => {
     const restarted = new AiService(reopened, completion);
     expect((await restarted.ask('普通问题')).retrieval).toBe('none');
     render(<AiAssistant library={reopened} ai={restarted} onOpenPaper={vi.fn()} />);
-    expect(screen.getByText('已移除文件（1）')).toBeInTheDocument();
+    expect(await screen.findByText('已移除文件（1）')).toBeInTheDocument();
     expect(reopened.getPaper(paper.id)?.knowledgeExcluded).toBe(true);
     expect(completion.mock.calls[0][2][1].content).toBe('普通问题');
     restarted.dispose();

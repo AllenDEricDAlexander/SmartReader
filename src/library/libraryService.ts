@@ -9,7 +9,7 @@ import {
 } from './libraryFolders';
 import {
   emptyLibrary, emptyMetadata, paperDocumentKey,
-  type AiSettings, type FolderVault, type LibraryPreferences, type LibraryReaderSession, type LibrarySnapshot,
+  type AiAssistantSession, type AiSettings, type EncryptedData, type FolderVault, type LibraryPreferences, type LibraryReaderSession, type LibrarySnapshot,
   type MetadataField, type Paper, type PaperMetadata,
 } from './libraryModels';
 import { LibrarySearchIndex } from './librarySearch';
@@ -493,6 +493,68 @@ export class LibraryService {
     await this.mutate((tx) => { tx.snapshot.ai = structuredClone(settings); });
   }
 
+  async loadAiAssistantSession(): Promise<Omit<AiAssistantSession, 'epoch'> | null> {
+    return this.exclusive(async () => {
+      await this.initialize();
+      const stored = this.snapshot.aiSession;
+      if (!stored) return null;
+      if (!Array.isArray(stored.paperIds) || !['plain', 'encrypted'].includes(stored.kind)) {
+        throw new Error('本地聊天记录格式无效，原始记录未修改。');
+      }
+      let session: unknown;
+      if (stored.kind === 'plain') session = structuredClone(stored.session);
+      else {
+        let content: unknown = stored.encrypted;
+        for (const id of [...stored.vaultIds].reverse()) {
+          const key = this.keys.get(id);
+          if (!key) throw new Error('请先解锁对话涉及的加密文件夹。');
+          content = await decryptJson(key, content as EncryptedData, `ai-session:${id}`);
+        }
+        session = content;
+      }
+      if (!validAiSession(session)) throw new Error('本地聊天记录格式无效，原始记录未修改。');
+      return session;
+    });
+  }
+
+  async saveAiAssistantSession(session: AiAssistantSession | null, access = this.captureAccess()): Promise<void> {
+    await this.mutate(async (tx) => {
+      if (!session) { tx.snapshot.aiSession = null; return; }
+      const selectedPaperIds = session.selectedPaperIds.filter((id) => this.canAccess(id, access));
+      const initialPaperId = session.initialPaperId && this.canAccess(session.initialPaperId, access) ? session.initialPaperId : undefined;
+      const ids = new Set([...selectedPaperIds, ...(initialPaperId ? [initialPaperId] : [])]);
+      for (const message of session.messages) {
+        for (const source of message.sources ?? []) ids.add(source.paperId);
+        if (message.contextKey !== 'direct') {
+          const context: unknown = JSON.parse(message.contextKey);
+          if (!Array.isArray(context) || context.some((id) => typeof id !== 'string')) throw new Error('对话文献范围无效。');
+          for (const id of context) ids.add(id);
+        }
+      }
+      if (session.scope === 'all' && session.mode !== 'direct') {
+        for (const paper of this.view.papers) if (!paper.knowledgeExcluded) ids.add(paper.id);
+      }
+      const vaultIds = new Set<string>();
+      for (const id of ids) {
+        if (!this.canAccess(id, access)) throw new Error('文献访问状态已变化，对话未保存。');
+        const record = tx.snapshot.papers.find((paper) => paper.id === id);
+        if (record?.kind === 'encrypted') vaultIds.add(record.vaultId);
+      }
+      const { epoch: _epoch, ...saved } = structuredClone({ ...session, selectedPaperIds, initialPaperId });
+      if (!vaultIds.size) tx.snapshot.aiSession = { kind: 'plain', paperIds: [...ids], session: saved };
+      else {
+        let encrypted: EncryptedData | undefined;
+        // Every referenced vault must be unlocked to read a conversation spanning multiple vaults.
+        for (const id of vaultIds) {
+          const key = this.keys.get(id);
+          if (!key) throw new Error('请先解锁对话涉及的加密文件夹。');
+          encrypted = await encryptJson(key, encrypted ?? saved, `ai-session:${id}`);
+        }
+        tx.snapshot.aiSession = { kind: 'encrypted', paperIds: [...ids], vaultIds: [...vaultIds], encrypted: encrypted! };
+      }
+    });
+  }
+
   async saveBookmark(id: string, bookmark: Bookmark): Promise<Bookmark> {
     return this.mutate(async (tx) => {
       const paper = this.requirePaper(id, tx);
@@ -564,6 +626,17 @@ export class LibraryService {
         snapshot: structuredClone(this.snapshot), decrypted: new Map(this.decrypted), blobs: [], indexChanged: false,
       };
       const result = await operation(tx);
+      const session = this.snapshot.aiSession;
+      if (session && Array.isArray(session.paperIds)) {
+        const previousPapers = new Map(this.snapshot.papers.map((paper) => [paper.id, paper]));
+        const nextPapers = new Map(tx.snapshot.papers.map((paper) => [paper.id, paper]));
+        if (session.paperIds.some((id) => {
+          const before = previousPapers.get(id);
+          const after = nextPapers.get(id);
+          return !after || before?.kind !== after.kind
+            || (before?.kind === 'encrypted' && after.kind === 'encrypted' && before.vaultId !== after.vaultId);
+        })) tx.snapshot.aiSession = null;
+      }
       tx.snapshot.updatedAt = new Date().toISOString();
       const revision = await this.storage.commit(this.revision, tx.snapshot, tx.blobs);
       this.revision = revision;
@@ -661,6 +734,26 @@ function normalizeMetadata(updates: Partial<PaperMetadata>): Partial<PaperMetada
     if (!/^10\.\d{4,9}\/\S+$/i.test(result.doi)) throw new Error('DOI 格式应为 10.xxxx/xxx。');
   }
   return result;
+}
+
+function validAiSession(value: unknown): value is Omit<AiAssistantSession, 'epoch'> {
+  if (!value || typeof value !== 'object') return false;
+  const session = value as AiAssistantSession;
+  return typeof session.draft === 'string' && typeof session.fileQuery === 'string'
+    && ['all', 'selected'].includes(session.scope) && [null, 'library', 'direct'].includes(session.mode)
+    && (session.initialPaperId === undefined || typeof session.initialPaperId === 'string')
+    && Array.isArray(session.selectedPaperIds) && session.selectedPaperIds.every((id) => typeof id === 'string')
+    && Array.isArray(session.messages) && session.messages.every((message) => message
+      && Number.isSafeInteger(message.id) && ['user', 'assistant'].includes(message.role)
+      && typeof message.content === 'string' && typeof message.contextKey === 'string' && !message.streaming
+      && ['reasoning', 'providerName', 'model', 'error'].every((field) => {
+        const text = message[field as keyof typeof message];
+        return text === undefined || typeof text === 'string';
+      })
+      && (message.retrieval === undefined || ['local-vector', 'milvus-vector', 'fulltext', 'none'].includes(message.retrieval))
+      && (message.sources === undefined || (Array.isArray(message.sources) && message.sources.every((source) => source
+        && typeof source.label === 'string' && typeof source.paperId === 'string' && typeof source.title === 'string'
+        && typeof source.excerpt === 'string' && Number.isSafeInteger(source.page) && source.page > 0))));
 }
 
 export function errorMessage(error: unknown): string {

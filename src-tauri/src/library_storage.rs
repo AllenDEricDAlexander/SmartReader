@@ -393,6 +393,48 @@ mod tests {
     }
 
     #[test]
+    fn restores_saved_chat_context_after_reopening_the_sqlite_file() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory =
+            std::env::temp_dir().join(format!("smartreader-chat-{}-{stamp}", std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("chat.sqlite3");
+        let saved = json!({
+            "schemaVersion": 1, "papers": [], "folders": [],
+            "ai": {"providers": [], "activeProviderId": null, "autoEnrich": false},
+            "aiSession": {
+                "kind": "plain", "paperIds": [],
+                "session": {
+                    "messages": [
+                        {"id": 1, "role": "user", "contextKey": "direct", "content": "前一个问题"},
+                        {"id": 2, "role": "assistant", "contextKey": "direct", "content": "前一个回答", "model": "configured-model"}
+                    ],
+                    "draft": "继续追问", "scope": "all", "selectedPaperIds": [],
+                    "fileQuery": "", "mode": "direct"
+                }
+            }
+        });
+        {
+            let mut connection = crate::db::open_database(&path).unwrap();
+            let frame = binary_frame(
+                json!({"expectedRevision": 0, "data": saved, "blobs": []}),
+                &[],
+            );
+            assert_eq!(write_binary_frame(&mut connection, frame).unwrap(), 1);
+        }
+        {
+            let connection = crate::db::open_database(&path).unwrap();
+            let restored = read_snapshot(&connection).unwrap();
+            assert_eq!(restored.revision, 1);
+            assert_eq!(restored.data, Some(saved));
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     #[ignore = "started only by scripts/qa/verify-knowledge.ts"]
     fn native_knowledge_qa_bridge() {
         use crate::ai_http::AiHttpState;

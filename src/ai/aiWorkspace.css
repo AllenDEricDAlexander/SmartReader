@@ -96,6 +96,7 @@
 
 .ai-settings input:not([type="checkbox"]),
 .ai-settings select,
+.ai-settings textarea,
 .ai-assistant select,
 .ai-assistant textarea {
   min-width: 0;
@@ -109,8 +110,14 @@
 }
 
 .ai-settings input::placeholder,
+.ai-settings textarea::placeholder,
 .ai-assistant textarea::placeholder {
   color: var(--sr-text-faint, #94a3b8);
+}
+
+.ai-settings textarea {
+  resize: vertical;
+  line-height: 1.8;
 }
 
 .ai-provider-fields {

@@ -30,6 +30,44 @@ function fillProvider() {
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 
 describe('AI settings', () => {
+  it('saves, reopens and edits multiple chat model presets while sharing the provider key', async () => {
+    const { library, ai } = await setup();
+    const first = render(<AiSettings library={library} ai={ai} />);
+    fillProvider();
+    fireEvent.change(screen.getByLabelText('其他可选模型'), { target: { value: ' fast-model \n\ndeep-model\nfast-model\nuser-selected-model' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存厂商配置' }));
+    await screen.findByText('厂商配置已保存。');
+    const provider = library.getView().snapshot.ai.providers[0];
+    expect(provider.models).toEqual(['user-selected-model', 'fast-model', 'deep-model']);
+    expect(ai.hasApiKey(provider.id)).toBe(true);
+    first.unmount();
+    render(<AiSettings library={library} ai={ai} />);
+    expect(screen.getByLabelText('其他可选模型')).toHaveValue('fast-model\ndeep-model');
+    expect(screen.getByLabelText('API Key')).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('其他可选模型'), { target: { value: 'deep-model' } });
+    expect(screen.getByRole('button', { name: '验证连接' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '保存厂商配置' }));
+    await screen.findByText('厂商配置已保存。');
+    expect(library.getView().snapshot.ai.providers[0].models).toEqual(['user-selected-model', 'deep-model']);
+    expect(ai.hasApiKey(provider.id)).toBe(true);
+    ai.dispose();
+  });
+
+  it('preconfigures providers and models without requiring a key before they are used', async () => {
+    const { library, ai } = await setup();
+    render(<AiSettings library={library} ai={ai} />);
+    fillProvider();
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('其他可选模型'), { target: { value: 'fast-model' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存厂商配置' }));
+    await screen.findByText('厂商配置已保存。');
+    const provider = library.getView().snapshot.ai.providers[0];
+    expect(provider.models).toEqual(['user-selected-model', 'fast-model']);
+    expect(ai.hasApiKey(provider.id)).toBe(false);
+    expect(screen.getByRole('button', { name: '验证连接' })).toBeDisabled();
+    ai.dispose();
+  });
+
   it.each(['阿里云', 'aliyun'])('preserves an unset embedding model when opening and saving %s settings', async (name) => {
     const { library, ai, completion } = await setup();
     await ai.saveProvider({ name, baseUrl: 'https://api.example.com/v1', model: 'chat-model' }, 'session-key');

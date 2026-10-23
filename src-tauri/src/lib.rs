@@ -1,4 +1,5 @@
 mod ai_http;
+mod app_lifecycle;
 mod db;
 mod file_commands;
 mod knowledge_vectors;
@@ -33,11 +34,21 @@ pub fn run() {
             let database = db::setup_database(app.handle())?;
             app.manage(database);
             app.manage(ai_http::AiHttpState::new());
+            app.manage(app_lifecycle::ShutdownState::default());
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if app_lifecycle::request_shutdown(window.app_handle(), "close") {
+                    api.prevent_close();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            app_lifecycle::enable_shutdown_handler,
+            app_lifecycle::complete_shutdown,
             window_appearance::set_window_background_color,
             db::save_document,
             db::get_document,
@@ -86,6 +97,13 @@ pub fn run() {
             knowledge_vectors::write_knowledge_cache,
             knowledge_vectors::search_knowledge_scope,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running SmartReader");
+        .build(tauri::generate_context!())
+        .expect("error while building SmartReader")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if app_lifecycle::request_shutdown(app, "exit") {
+                    api.prevent_exit();
+                }
+            }
+        });
 }

@@ -205,8 +205,9 @@ describe('desktop research App integration', () => {
     const messages = app.completion.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
     expect(messages.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user']);
     expect(messages[1].content).toBe(contentToken);
-    expect(JSON.stringify(app.snapshot())).not.toContain('Selected knowledge evidence');
-    expect(JSON.stringify(app.snapshot())).not.toContain('A follow-up after reading the citation');
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    expect(JSON.stringify(app.snapshot())).toContain('Selected knowledge evidence');
+    expect(JSON.stringify(app.snapshot())).toContain('A follow-up after reading the citation');
     app.ai.dispose();
   });
   it('imports a native PDF into the managed reader and persists bookmarks, editable notes and favorites only in the library', async () => {

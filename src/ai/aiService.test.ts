@@ -38,10 +38,167 @@ const profile = { name: '兼容厂商', baseUrl: 'https://example.org/v1', model
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 
 describe('research AI service', () => {
-  it('keeps assistant navigation state only in memory and discards it when the service closes', async () => {
+  it('normalizes model presets and preserves them when an existing caller saves without a model list', async () => {
+    const { ai, library } = setup();
+    const provider = await ai.saveProvider({ ...profile, models: [' research-model ', 'fast-model', '', 'fast-model', ' deep-model '] });
+    expect(provider.models).toEqual(['research-model', 'fast-model', 'deep-model']);
+    await ai.saveProvider({ ...profile, id: provider.id, name: '修改后的厂商' });
+    expect(library.getView().snapshot.ai.providers[0].models).toEqual(provider.models);
+    await expect(ai.saveProvider({ ...profile, id: provider.id, models: ['x'.repeat(201)] })).rejects.toThrow('200');
+    expect(library.getView().snapshot.ai.providers[0].models).toEqual(provider.models);
+    ai.dispose();
+  });
+
+  it('routes chat and enrichment to the selected model and restores each provider selection after restart', async () => {
+    const { ai, library, completion, storage } = setup();
+    const first = await ai.saveProvider({ ...profile, models: ['research-model', 'fast-model'] }, 'first-device-key', undefined, true);
+    const second = await ai.saveProvider({ name: '第二家', baseUrl: 'https://second.example/v1', model: 'second-model', models: ['second-model', 'second-fast'] }, 'second-device-key', undefined, true);
+    await ai.selectProvider(first.id, 'fast-model');
+    const answer = await ai.ask('Hello', { grounding: 'direct' });
+    expect(answer).toMatchObject({ providerName: first.name, model: 'fast-model' });
+    expect(completion.mock.calls.at(-1)!.slice(0, 2)).toEqual([expect.objectContaining({ id: first.id, model: 'fast-model', baseUrl: first.baseUrl }), 'first-device-key']);
+    await ai.selectProvider(second.id, 'second-fast');
+    const paper = await library.importPdf(pdf, 'paper.pdf');
+    await ai.enrich(paper.id);
+    expect(completion.mock.calls.at(-1)!.slice(0, 2)).toEqual([expect.objectContaining({ id: second.id, model: 'second-fast', baseUrl: second.baseUrl }), 'second-device-key']);
+    await ai.selectProvider(first.id);
+    expect(library.getView().snapshot.ai.providers.find((item) => item.id === first.id)?.model).toBe('fast-model');
+    ai.dispose();
+    const restoredLibrary = new LibraryService(storage);
+    const restored = new AiService(restoredLibrary, completion);
+    await restoredLibrary.initialize();
+    expect(restoredLibrary.getView().snapshot.ai.activeProviderId).toBe(first.id);
+    expect(restoredLibrary.getView().snapshot.ai.providers.map((item) => item.model)).toEqual(['fast-model', 'second-fast']);
+    await restored.testConnection();
+    expect(completion.mock.calls.at(-1)!.slice(0, 2)).toEqual([expect.objectContaining({ id: first.id, model: 'fast-model' }), 'first-device-key']);
+    restored.dispose();
+  });
+
+  it('accepts legacy single-model providers and rejects unconfigured selections without changing state', async () => {
+    const { ai, library, storage } = setup();
+    const provider = await ai.saveProvider(profile, 'session-key');
+    const { models: _models, ...legacy } = provider;
+    await library.saveAiSettings({ ...library.getView().snapshot.ai, providers: [legacy] });
+    const epoch = ai.getView().answerEpoch;
+    const commit = vi.spyOn(storage, 'commit');
+    await ai.selectProvider(provider.id, provider.model);
+    await expect(ai.selectProvider(provider.id, 'unknown-model')).rejects.toThrow('不在厂商配置中');
+    await expect(ai.selectProvider(provider.id, '')).rejects.toThrow('不在厂商配置中');
+    await expect(ai.selectProvider('missing')).rejects.toThrow('不存在');
+    expect(commit).not.toHaveBeenCalled();
+    expect(ai.getView().answerEpoch).toBe(epoch);
+    expect(library.getView().snapshot.ai.providers).toEqual([legacy]);
+    ai.dispose();
+  });
+
+  it('keeps the current selection, key and conversation epoch when persisting a switch fails', async () => {
+    const { ai, library, storage } = setup();
+    const first = await ai.saveProvider(profile, 'first-key');
+    const second = await ai.saveProvider({ ...profile, name: '第二家', models: ['research-model', 'fast-model'] }, 'second-key');
+    const before = structuredClone(library.getView().snapshot.ai);
+    const epoch = ai.getView().answerEpoch;
+    vi.spyOn(storage, 'commit').mockRejectedValueOnce(new Error('磁盘写入失败'));
+    await expect(ai.selectProvider(second.id, 'fast-model')).rejects.toThrow('磁盘写入失败');
+    expect(library.getView().snapshot.ai).toEqual(before);
+    expect(ai.getView().answerEpoch).toBe(epoch);
+    expect(ai.hasApiKey(first.id) && ai.hasApiKey(second.id)).toBe(true);
+    await ai.selectProvider(second.id, 'fast-model');
+    expect(library.getView().snapshot.ai.activeProviderId).toBe(second.id);
+    expect(library.getView().snapshot.ai.providers.find((item) => item.id === second.id)?.model).toBe('fast-model');
+    expect(ai.getView().answerEpoch).toBe(epoch);
+    ai.dispose();
+  });
+
+  it('serializes model switches with other provider changes without losing either selection', async () => {
+    const { ai, library } = setup();
+    const first = await ai.saveProvider({ ...profile, models: ['fast-model'] }, 'first-key');
+    const second = await ai.saveProvider({ ...profile, name: '第二家', models: ['second-model'] }, 'second-key');
+    await Promise.all([
+      ai.selectProvider(first.id, 'fast-model'),
+      ai.saveProvider({ ...profile, name: '第三家' }, 'third-key'),
+      ai.selectProvider(second.id, 'second-model'),
+    ]);
+    const settings = library.getView().snapshot.ai;
+    expect(settings.providers).toHaveLength(3);
+    expect(settings.activeProviderId).toBe(second.id);
+    expect(settings.providers.find((item) => item.id === first.id)?.model).toBe('fast-model');
+    expect(settings.providers.find((item) => item.id === second.id)?.model).toBe('second-model');
+    ai.dispose();
+  });
+
+  it('cancels and discards an old in-flight answer when its model changes', async () => {
+    const { ai, completion } = setup();
+    const provider = await ai.saveProvider({ ...profile, models: ['fast-model'] }, 'session-key');
+    let finish!: (text: string) => void;
+    completion.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const answering = ai.ask('Hello', { grounding: 'direct' });
+    const cancelled = expect(answering).rejects.toThrow('回答已取消');
+    await vi.waitFor(() => expect(completion).toHaveBeenCalledOnce());
+    const signal = completion.mock.calls[0][3].signal as AbortSignal;
+    await ai.selectProvider(provider.id, 'fast-model');
+    expect(signal.aborted).toBe(true);
+    finish('The old model answer');
+    await cancelled;
+    ai.dispose();
+  });
+
+  it('refreshes retrieval state without clearing the shared conversation when switching providers and models', async () => {
+    const { ai, library } = setup();
+    const first = await ai.saveProvider({ ...profile, models: ['fast-model'] }, 'first-key');
+    const second = await ai.saveProvider({ ...profile, name: '第二家', embeddingModel: 'other-embedding' }, 'second-key');
+    const session = {
+      epoch: ai.getView().answerEpoch,
+      messages: [
+        { id: 1, contextKey: 'direct', role: 'user' as const, content: 'Previous question' },
+        { id: 2, contextKey: 'direct', role: 'assistant' as const, content: 'Previous answer' },
+      ],
+      draft: 'Follow-up draft', scope: 'all' as const, selectedPaperIds: [], fileQuery: '', mode: 'direct' as const,
+    };
+    ai.saveAssistantSession(session);
+    const clear = vi.spyOn(KnowledgeService.prototype, 'clear');
+    try {
+      await ai.selectProvider(first.id, 'fast-model');
+      expect(ai.getAssistantSession()).toEqual(session);
+      await ai.selectProvider(second.id);
+      expect(ai.getAssistantSession()).toEqual(session);
+      expect(ai.getView().answerEpoch).toBe(session.epoch);
+      expect(clear).toHaveBeenCalledTimes(2);
+      expect(library.getView().snapshot.ai.activeProviderId).toBe(second.id);
+    } finally { clear.mockRestore(); ai.dispose(); }
+  });
+
+  it('ignores late streaming output after a model switch while retaining the existing conversation epoch', async () => {
+    const { library, ai: previous, completion } = setup();
+    const provider = await previous.saveProvider({ ...profile, models: ['fast-model'] }, 'device-key', undefined, true);
+    previous.dispose();
+    let finish!: () => void;
+    const streaming = vi.fn((_provider: unknown, _key: unknown, _messages: unknown, options: { onDelta?(text: string): void; onReasoning?(text: string): void } = {}) =>
+      new Promise<string>((resolve) => {
+        finish = () => {
+          options.onDelta?.('Late answer');
+          options.onReasoning?.('Late reasoning');
+          resolve('Late answer');
+        };
+      }));
+    const ai = new AiService(library, completion, {}, streaming);
+    const epoch = ai.getView().answerEpoch;
+    const onDelta = vi.fn();
+    const onReasoning = vi.fn();
+    const answering = ai.ask('Hello', { grounding: 'direct', onDelta, onReasoning });
+    const cancelled = expect(answering).rejects.toThrow('回答已取消');
+    await vi.waitFor(() => expect(streaming).toHaveBeenCalledOnce());
+    await ai.selectProvider(provider.id, 'fast-model');
+    finish();
+    await cancelled;
+    expect(ai.getView().answerEpoch).toBe(epoch);
+    expect(onDelta).not.toHaveBeenCalled();
+    expect(onReasoning).not.toHaveBeenCalled();
+    ai.dispose();
+  });
+
+  it('persists the current conversation and draft and restores them in a fresh service', async () => {
     const { library, ai, storage, completion, persisted } = setup();
     await ai.saveProvider(profile, 'session-key');
-    const commit = vi.spyOn(storage, 'commit');
     const session = {
       epoch: ai.getView().answerEpoch,
       messages: [{ id: 1, contextKey: 'direct', role: 'user' as const, content: 'Private session question' }],
@@ -49,14 +206,16 @@ describe('research AI service', () => {
     };
     ai.saveAssistantSession(session);
     expect(ai.getAssistantSession()).toEqual(session);
-    expect(commit).not.toHaveBeenCalled();
-    expect(persisted()).not.toContain('Private session');
+    await ai.flushAssistantSession();
+    expect(persisted()).toContain('Private session draft');
     ai.dispose();
     expect(ai.getAssistantSession()).toBeNull();
     ai.saveAssistantSession(session);
     expect(ai.getAssistantSession()).toBeNull();
-    const restarted = new AiService(library, completion);
-    expect(restarted.getAssistantSession()).toBeNull();
+    const restoredLibrary = new LibraryService(storage);
+    const restarted = new AiService(restoredLibrary, completion);
+    await restarted.loadAssistantSession();
+    expect(restarted.getAssistantSession()).toEqual(session);
     restarted.dispose();
   });
 

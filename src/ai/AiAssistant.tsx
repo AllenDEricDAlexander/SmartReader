@@ -1,7 +1,7 @@
 import { ArrowDown, BookOpen, FileSearch, MessageSquarePlus, Plus, Send, Settings, ShieldCheck, Sparkles, Square, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { errorMessage, type LibraryService } from '../library/libraryService';
-import type { Paper } from '../library/libraryModels';
+import { providerModels, type Paper } from '../library/libraryModels';
 import type { AiChatMessage, AiChatTurn, AiRetrieval, AiService, AiSource } from './aiService';
 import './aiWorkspace.css';
 
@@ -21,7 +21,26 @@ const retrievalLabels: Record<AiRetrieval, string> = {
   none: '未检索文献',
 };
 
-export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdfs, initialPaperId }: AiAssistantProps) {
+export function AiAssistant(props: AiAssistantProps) {
+  const { ai } = props;
+  const activity = useSyncExternalStore(ai.subscribe, ai.getView);
+  useEffect(() => { void ai.loadAssistantSession().catch(() => undefined); }, [ai]);
+  if (!activity.sessionLoaded || activity.sessionLocked) {
+    return <section className="ai-assistant" aria-label="恢复 AI 对话">
+      <div className="ai-assistant-body">
+        {activity.sessionError ? <>
+          <p className="settings-error" role="alert">{activity.sessionError}</p>
+          <button type="button" onClick={() => void ai.loadAssistantSession().catch(() => undefined)}>重试恢复对话</button>
+        </> : <p role="status">{activity.sessionLocked
+          ? '已保存的对话涉及加密文献，请先在文献库解锁相关文件夹，聊天记录和上下文随后恢复。'
+          : '正在恢复本地聊天记录…'}</p>}
+      </div>
+    </section>;
+  }
+  return <AiAssistantContent {...props} />;
+}
+
+function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdfs, initialPaperId }: AiAssistantProps) {
   const libraryView = useSyncExternalStore(library.subscribe, library.getView);
   const activity = useSyncExternalStore(ai.subscribe, ai.getView);
   const session = ai.getAssistantSession();
@@ -38,6 +57,7 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   const [chat, setChat] = useState<{ messages: AiChatMessage[]; epoch: number }>({ messages: session?.messages ?? [], epoch: activity.answerEpoch });
   const [mode, setMode] = useState<'library' | 'direct' | null>(newPaperScope ? 'library' : session?.mode ?? null);
   const [pending, setPending] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [showLatest, setShowLatest] = useState(false);
@@ -51,7 +71,7 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   const followingTranscript = useRef(true);
   const provider = libraryView.snapshot.ai.providers.find((item) => item.id === libraryView.snapshot.ai.activeProviderId);
   const configured = Boolean(provider && activity.keyProviderIds.includes(provider.id));
-  const busy = pending || activity.asking || addingFiles || buildingIndex || changingKnowledge;
+  const busy = pending || activity.asking || addingFiles || buildingIndex || switching || changingKnowledge;
   const cloudKnowledge = libraryView.snapshot.ai.knowledge?.backend === 'milvus';
   const encryptedIds = new Set(libraryView.snapshot.papers.filter((paper) => paper.kind === 'encrypted').map((paper) => paper.id));
   const knowledgePapers = libraryView.papers.filter((paper) => !paper.knowledgeExcluded);
@@ -80,8 +100,7 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
     ai.saveAssistantSession({
       epoch: activity.answerEpoch, draft: visibleDraft, scope, selectedPaperIds, fileQuery, mode,
       initialPaperId: initialSelection.current.id,
-      // Leaving the panel cancels its request. Keep only finished turns so the
-      // restored transcript cannot contain a stranded partial response.
+      // Keep completed turns when navigating away or restarting during a response.
       messages: messages.filter((message, index) => !message.streaming && !messages[index + 1]?.streaming),
     });
   }, [ai, activity.answerEpoch, visibleDraft, scope, selectedPaperIds, fileQuery, mode, messages, initialPaperId]);
@@ -203,6 +222,21 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
     }
   }
 
+  async function selectConfiguration(providerId: string, model?: string) {
+    if (busy || !libraryView.loaded) return;
+    setSwitching(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await ai.selectProvider(providerId, model);
+      if (mounted.current) setNotice('AI 厂商与模型已切换，可继续当前对话。');
+    } catch (failure) {
+      if (mounted.current) setError(errorMessage(failure));
+    } finally {
+      if (mounted.current) setSwitching(false);
+    }
+  }
+
   async function buildIndex() {
     if (busy || !vectorConfigured || !scopedCount) return;
     const generation = ++requestGeneration.current;
@@ -248,7 +282,7 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
       messages: [
         ...(current.epoch === epoch ? current.messages : []),
         { id: answerId - 1, contextKey, role: 'user', content: question },
-        { id: answerId, contextKey, role: 'assistant', content: '', streaming: true },
+        { id: answerId, contextKey, role: 'assistant', content: '', streaming: true, providerName: provider?.name, model: provider?.model },
       ],
     }));
     try {
@@ -261,7 +295,7 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
       });
       updateMessage(generation, epoch, answerId, (message) => ({
         ...message, streaming: false, content: result.text,
-        sources: result.sources, retrieval: result.retrieval, providerName: result.providerName,
+        sources: result.sources, retrieval: result.retrieval, providerName: result.providerName, model: result.model ?? message.model,
       }));
     } catch (failure) {
       // The failure belongs to this turn, so it is reported on that turn rather
@@ -356,6 +390,31 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
             <h2><FileSearch size={17} />检索问答</h2>
             <span className="ai-status-badge">{provider?.name ?? '尚未配置'}</span>
           </div>
+          <div className="ai-form-grid" role="group" aria-label="AI 厂商与模型选择">
+            <label>
+              <span>AI 厂商</span>
+              <select aria-label="AI 厂商" value={provider?.id ?? ''}
+                disabled={busy || !libraryView.loaded || !libraryView.snapshot.ai.providers.length}
+                onChange={(event) => void selectConfiguration(event.target.value)}>
+                {!provider ? <option value="">请选择厂商</option> : null}
+                {libraryView.snapshot.ai.providers.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>聊天模型</span>
+              <select aria-label="聊天模型" value={provider?.model ?? ''} disabled={busy || !libraryView.loaded || !provider}
+                onChange={(event) => { if (provider) void selectConfiguration(provider.id, event.target.value); }}>
+                {!provider ? <option value="">请先配置厂商与模型</option> : providerModels(provider).map((model) => <option key={model} value={model}>{model}</option>)}
+              </select>
+            </label>
+          </div>
+          <p className="ai-field-help">{switching ? '正在切换 AI 配置…' : '切换厂商或模型会保留当前聊天记录和上下文，可以继续追问。'}</p>
+          <p className="ai-field-help">聊天记录和草稿自动保存在本机，重启后可继续追问。</p>
+          {activity.sessionError ? <div className="ai-form-actions">
+            <p className="settings-error" role="alert">{activity.sessionError}</p>
+            <button type="button" disabled={activity.sessionSaving}
+              onClick={() => void ai.flushAssistantSession().catch(() => undefined)}>重试保存对话</button>
+          </div> : null}
           {!configured ? (
             <div className="ai-setup-notice">
               <p>请先配置 AI 厂商，并输入或解锁 API Key。</p>
@@ -494,7 +553,7 @@ export function AiAssistant({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
                 <div className="ai-chat-answer-main">
                   <div className="ai-section-heading">
                     <h2>回答</h2>
-                    <small>{[message.providerName, message.retrieval ? retrievalLabels[message.retrieval] : null].filter(Boolean).join(' · ')}</small>
+                    <small>{[message.providerName, message.model, message.retrieval ? retrievalLabels[message.retrieval] : null].filter(Boolean).join(' · ')}</small>
                   </div>
                   {message.reasoning ? (
                     <details className="ai-chat-reasoning">

@@ -79,6 +79,8 @@ export type AiProviderProfile = {
   name: string;
   baseUrl: string;
   model: string;
+  /** Chat model presets; older profiles use only `model`. */
+  models?: string[];
   embeddingModel?: string;
   embeddingBaseUrl?: string;
   savedKey: EncryptedSecret | null;
@@ -107,6 +109,35 @@ export type LibraryReaderSession = {
   openPaperIds: string[];
 };
 
+export type AiSource = { label: string; paperId: string; title: string; page: number; excerpt: string };
+export type AiRetrieval = 'local-vector' | 'milvus-vector' | 'fulltext' | 'none';
+export type AiChatTurn = { role: 'user' | 'assistant'; content: string };
+export type AiChatMessage = AiChatTurn & {
+  id: number;
+  contextKey: string;
+  reasoning?: string;
+  sources?: AiSource[];
+  retrieval?: AiRetrieval;
+  providerName?: string;
+  model?: string;
+  error?: string;
+  streaming?: boolean;
+};
+export type AiAssistantSession = {
+  epoch: number;
+  messages: AiChatMessage[];
+  draft: string;
+  scope: 'all' | 'selected';
+  selectedPaperIds: string[];
+  fileQuery: string;
+  mode: 'library' | 'direct' | null;
+  initialPaperId?: string;
+};
+export type StoredAiAssistantSession = { paperIds: string[] } & (
+  | { kind: 'plain'; session: Omit<AiAssistantSession, 'epoch'> }
+  | { kind: 'encrypted'; vaultIds: string[]; encrypted: EncryptedData }
+);
+
 export type LibrarySnapshot = {
   schemaVersion: 1;
   updatedAt: string;
@@ -119,6 +150,7 @@ export type LibrarySnapshot = {
   ai: AiSettings;
   nextDecorationId: number;
   readerSession?: LibraryReaderSession;
+  aiSession?: StoredAiAssistantSession | null;
 };
 
 export function emptyMetadata(title = ''): PaperMetadata {
@@ -151,6 +183,10 @@ export function emptyLibrary(): LibrarySnapshot {
     ai: { providers: [], activeProviderId: null, autoEnrich: false },
     nextDecorationId: -1,
   };
+}
+
+export function providerModels(provider: AiProviderProfile): string[] {
+  return [...new Set([...(provider.models ?? []), provider.model].map((model) => model.trim()).filter(Boolean))];
 }
 
 export function paperDocumentKey(id: string): string {
