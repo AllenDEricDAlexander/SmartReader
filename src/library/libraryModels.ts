@@ -202,7 +202,8 @@ export function providerModels(provider: AiProviderProfile): string[] {
 }
 
 export function aiConversationTitle(session: Omit<AiAssistantSession, 'epoch'> | null, encrypted = false): string {
-  return session?.title || session?.messages.find((message) => message?.role === 'user' && typeof message.content === 'string')
+  const messages = Array.isArray(session?.messages) ? session.messages : [];
+  return (typeof session?.title === 'string' ? session.title : '') || messages.find((message) => message?.role === 'user' && typeof message.content === 'string')
     ?.content.replace(/\s+/g, ' ').trim().slice(0, 60) || (encrypted ? '加密会话' : '新对话');
 }
 

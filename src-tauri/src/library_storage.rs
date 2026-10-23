@@ -431,11 +431,12 @@ mod tests {
             assert_eq!(restored.revision, 1);
             assert_eq!(restored.data, Some(saved.clone()));
             let mut history = saved.clone();
-            let first = history
+            let mut first = history
                 .as_object_mut()
                 .unwrap()
                 .remove("aiSession")
                 .unwrap();
+            first["session"]["title"] = json!("已重命名的科研讨论");
             history["aiConversations"] = json!({
                 "activeId": "second", "entries": [
                     {"id": "first", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": first,
@@ -465,9 +466,11 @@ mod tests {
                     .len(),
                 2
             );
+            let mut expected = saved["aiSession"].clone();
+            expected["session"]["title"] = json!("已重命名的科研讨论");
             assert_eq!(
                 restored["aiConversations"]["entries"][0]["session"],
-                saved["aiSession"]
+                expected
             );
         }
         std::fs::remove_dir_all(directory).unwrap();

@@ -29,14 +29,25 @@
 .ai-history-heading h2 { margin: 0; font-size: 15px; }
 .ai-new-conversation { justify-content: center; padding: 9px 12px; }
 .ai-history-panel > p { margin: 0; }
+.ai-history-search { display: flex; align-items: center; gap: 6px; padding: 8px; border: 1px solid var(--sr-border); border-radius: 8px; }
+.ai-history-search > svg { flex-shrink: 0; color: var(--sr-text-muted); }
+.ai-history-search input { width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--sr-text); font: inherit; font-size: 12px; }
+.ai-history-search input::-webkit-search-cancel-button { display: none; }
+.ai-history-search button { display: flex; flex-shrink: 0; padding: 0; border: 0; background: transparent; color: var(--sr-text-muted); }
 .ai-history-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .ai-history-list > li { display: flex; min-width: 0; border: 1px solid var(--sr-border); border-radius: 8px; }
 .ai-history-list > li.is-active { border-color: var(--sr-primary); background: var(--sr-primary-soft); }
 .ai-history-select { flex: 1; display: grid; gap: 8px; min-width: 0; padding: 11px 9px; text-align: left; border: 0; background: transparent; }
 .ai-history-select strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .ai-history-select > span { color: var(--sr-text-muted); font-size: 10px; }
-.ai-history-delete { align-self: center; flex-shrink: 0; padding: 8px; color: var(--sr-danger); border: 0; background: transparent; }
+.ai-history-actions { align-self: center; display: grid; flex-shrink: 0; }
+.ai-history-actions button { padding: 7px; border: 0; background: transparent; color: var(--sr-text-muted); }
+.ai-history-actions .ai-history-delete { color: var(--sr-danger); }
 .ai-history-confirm { padding: 10px; border: 1px solid var(--sr-border); border-radius: 8px; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.ai-history-rename { display: grid; gap: 10px; }
+.ai-history-rename label { display: grid; gap: 6px; }
+.ai-history-rename input { width: 100%; min-width: 0; padding: 7px; border: 1px solid var(--sr-border); border-radius: 6px; background: var(--sr-surface); color: var(--sr-text); font: inherit; }
+.ai-history-rename p { margin: 0; }
 
 @media (max-width: 900px) {
   .ai-conversation-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
