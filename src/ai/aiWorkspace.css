@@ -35,6 +35,12 @@
 .ai-history-search input { width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--sr-text); font: inherit; font-size: 12px; }
 .ai-history-search input::-webkit-search-cancel-button { display: none; }
 .ai-history-search button { display: flex; flex-shrink: 0; padding: 0; border: 0; background: transparent; color: var(--sr-text-muted); }
+.ai-history-groups { display: grid; gap: 8px; }
+.ai-history-groups > label { display: grid; gap: 6px; font-size: 12px; }
+.ai-history-groups select { width: 100%; min-width: 0; padding: 7px; border: 1px solid var(--sr-border); border-radius: 6px; background: var(--sr-surface); color: var(--sr-text); font-size: 12px; }
+.ai-history-group-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.ai-history-group-actions button { padding: 5px 7px; font-size: 11px; }
+.ai-history-groups p { margin: 0; }
 .ai-history-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .ai-history-list > li { display: flex; min-width: 0; border: 1px solid var(--sr-border); border-radius: 8px; }
 .ai-history-list > li.is-active { border-color: var(--sr-primary); background: var(--sr-primary-soft); }
@@ -44,6 +50,9 @@
 .ai-history-drag-handle { align-self: stretch; display: flex; align-items: center; justify-content: center; flex: 0 0 18px; padding: 0; border: 0; border-radius: 8px 0 0 8px; background: transparent; color: var(--sr-text-muted); cursor: grab; touch-action: none; user-select: none; }
 .ai-history-drag-handle:active { cursor: grabbing; }
 .ai-history-drag-handle:disabled { cursor: default; }
+.ai-history-content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.ai-history-content .ai-history-select { width: 100%; }
+.ai-history-membership { min-width: 0; max-width: 100%; margin: 0 8px 8px; padding: 4px; border: 1px solid var(--sr-border); border-radius: 5px; background: var(--sr-surface); color: var(--sr-text-muted); font-size: 11px; }
 .ai-history-select { flex: 1; display: grid; gap: 8px; min-width: 0; padding: 11px 9px; text-align: left; border: 0; background: transparent; }
 .ai-history-select strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .ai-history-select > span { color: var(--sr-text-muted); font-size: 10px; }

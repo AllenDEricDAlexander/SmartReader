@@ -58,6 +58,16 @@ async function createConversation() {
   await waitFor(() => expect(screen.getByLabelText('科研问题')).toHaveValue(''));
 }
 
+async function createGroup(ai: AiService, name: string) {
+  fireEvent.click(screen.getByRole('button', { name: '新建分组' }));
+  fireEvent.change(screen.getByLabelText('分组名称'), { target: { value: name } });
+  fireEvent.click(screen.getByRole('button', { name: '保存分组' }));
+  await waitFor(() => expect(screen.queryByLabelText('分组名称')).not.toBeInTheDocument());
+  const group = ai.getView().conversationGroups!.find((item) => item.name === name)!;
+  expect(screen.getByRole('combobox', { name: '筛选会话分组' })).toHaveValue(group.id);
+  return group;
+}
+
 let hitTest: ReturnType<typeof vi.fn<(x: number, y: number) => Element | null>>;
 
 function pointerEvent(node: Element, type: string, options: MouseEventInit = {}) {
@@ -104,6 +114,224 @@ beforeEach(() => {
 });
 
 describe('AI conversation history UI', () => {
+  it('manages groups and restores memberships after restarting while deleted-group chats keep their own follow-up context', async () => {
+    const app = await setup();
+    const provider = app.library.getView().snapshot.ai.providers[0];
+    await app.ai.saveProvider({ ...provider, models: ['chat-model', 'fast-model'] });
+    const panel = render(<AiAssistant library={app.library} ai={app.ai} initialPaperId={app.first.id} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'fast-model' } });
+    await screen.findByText('AI 厂商与模型已切换，可继续当前对话。');
+    ask('课题甲');
+    await screen.findByText('课题甲回答[S1]');
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '甲的追问' } });
+    const research = await createGroup(app.ai, '研究讨论');
+    expect(screen.getByLabelText('科研问题')).toHaveValue('甲的追问');
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 课题甲 到分组' }), { target: { value: research.id } });
+    await screen.findByText('会话分组已更新。');
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: research.id } });
+    await createConversation();
+    fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'chat-model' } });
+    await screen.findByText('AI 厂商与模型已切换，可继续当前对话。');
+    fireEvent.click(screen.getByRole('radio', { name: '指定文件（可多选）' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择知识库文件 论文乙' }));
+    ask('课题乙');
+    await screen.findByText('课题乙回答[S1]');
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '乙的草稿' } });
+    const archive = await createGroup(app.ai, '归档');
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 课题乙 到分组' }), { target: { value: archive.id } });
+    await screen.findByText('会话分组已更新。');
+    const first = app.ai.getView().conversations!.find((entry) => entry.title === '课题甲')!.id;
+    const second = app.ai.getView().activeConversationId!;
+    await act(async () => {
+      await app.ai.setConversationPinned(first, true); await app.ai.setConversationPinned(second, true);
+      await app.ai.reorderPinnedConversations([second, first]);
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: archive.id } });
+    fireEvent.click(screen.getByRole('button', { name: '重命名分组' }));
+    fireEvent.change(screen.getByLabelText('分组名称'), { target: { value: '已归档' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存分组' }));
+    await waitFor(() => expect(screen.queryByLabelText('分组名称')).not.toBeInTheDocument());
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: research.id } });
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    const before = app.snapshot().aiConversations!;
+    fireEvent.click(screen.getByRole('button', { name: '删除分组' }));
+    expect(screen.getByRole('group', { name: '确认删除会话分组' })).toHaveTextContent('聊天记录和上下文继续保留');
+    fireEvent.click(screen.getByRole('button', { name: '确认删除分组' }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选会话分组' })).toHaveValue('all'));
+    expect(screen.getByRole('combobox', { name: '移动会话 课题甲 到分组' })).toHaveValue('');
+    expect(screen.getByRole('combobox', { name: '移动会话 课题乙 到分组' })).toHaveValue(archive.id);
+    expect(screen.getByText('课题乙回答[S1]')).toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('乙的草稿');
+    for (const entry of app.snapshot().aiConversations!.entries) {
+      expect(entry).toEqual(entry.id === first ? { ...before.entries.find((item) => item.id === first), groupId: null } : before.entries.find((item) => item.id === entry.id));
+    }
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    panel.unmount(); app.ai.dispose();
+    const restarted = services(app.storage);
+    render(<AiAssistant library={restarted.library} ai={restarted.ai} onOpenPaper={vi.fn()} />);
+    await screen.findByText('课题乙回答[S1]');
+    expect(screen.getByRole('option', { name: '已归档（1）' })).toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('乙的草稿');
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('chat-model');
+    fireEvent.click(screen.getByRole('button', { name: '打开会话 课题甲' }));
+    await screen.findByText('课题甲回答[S1]');
+    expect(screen.getByLabelText('科研问题')).toHaveValue('甲的追问');
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('fast-model');
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 论文甲' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
+    await screen.findByText('甲的追问回答[S1]');
+    expect(restarted.completion.mock.calls[0][0].model).toBe('fast-model');
+    expect(restarted.completion.mock.calls[0][2].map((message) => message.content)).toContain('课题甲');
+    expect(JSON.stringify(restarted.completion.mock.calls[0][2])).not.toContain('课题乙');
+    expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 课题乙');
+    await act(async () => { await restarted.ai.flushAssistantSession(); });
+    restarted.ai.dispose();
+  });
+
+  it('filters groups and ungrouped chats, searches within the chosen group and creates new chats there', async () => {
+    const app = await namedConversations(['组内目标', '其他目标', '普通目标'], 2);
+    const one = await app.ai.createConversationGroup('研究');
+    const two = await app.ai.createConversationGroup('归档');
+    await app.ai.moveConversationToGroup(app.ids[0], one.id);
+    await app.ai.moveConversationToGroup(app.ids[1], two.id);
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: one.id } });
+    expect(screen.getByRole('button', { name: '打开会话 组内目标' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开会话 其他目标' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: '目标' } });
+    await screen.findByText('找到 1 个会话');
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: two.id } });
+    expect(screen.getByRole('button', { name: '打开会话 其他目标' })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: '' } });
+    expect(screen.getByRole('button', { name: '打开会话 普通目标' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '清空会话搜索' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: two.id } });
+    await createConversation();
+    expect(screen.getByRole('combobox', { name: '移动会话 新对话 到分组' })).toHaveValue(two.id);
+    expect(screen.getByRole('option', { name: '归档（2）' })).toBeInTheDocument();
+    expect(screen.getByText('已置顶 2/10')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '置顶会话 新对话' })).toHaveAttribute('aria-pressed', 'false');
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    app.ai.dispose();
+  });
+
+  it('moves active and inactive chats out of a filtered group and retries a failed membership change', async () => {
+    const app = await namedConversations(['历史会话', '当前会话'], 0);
+    const group = await app.ai.createConversationGroup('研究');
+    await app.ai.moveConversationToGroup(app.ids[0], group.id);
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保留草稿' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
+    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 历史会话 到分组' }), { target: { value: '' } });
+    await screen.findByText('该分组暂无会话。');
+    expect(screen.getByLabelText('科研问题')).toHaveValue('保留草稿');
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: '' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' }), { target: { value: group.id } });
+    await waitFor(() => expect(screen.queryByRole('button', { name: '打开会话 当前会话' })).not.toBeInTheDocument());
+    expect(app.ai.getView().activeConversationId).toBe(app.ids[1]);
+    expect(screen.getByLabelText('科研问题')).toHaveValue('保留草稿');
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    const before = app.snapshot().aiConversations;
+    vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('归属保存失败'));
+    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' }), { target: { value: '' } });
+    expect(await screen.findByRole('alert')).toHaveTextContent('归属保存失败');
+    expect(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' })).toHaveValue(group.id);
+    expect(app.snapshot().aiConversations).toEqual(before);
+    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' }), { target: { value: '' } });
+    await screen.findByText('该分组暂无会话。');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('保留草稿');
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    app.ai.dispose();
+  });
+
+  it.each(['create', 'rename', 'delete'] as const)('preserves groups and the active draft after a failed %s operation and permits retrying', async (operation) => {
+    const app = await namedConversations(['保留的聊天'], 0);
+    const group = await app.ai.createConversationGroup('原分组');
+    await app.ai.moveConversationToGroup(app.ids[0], group.id);
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保留草稿' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    const before = app.snapshot().aiConversations;
+    if (operation === 'delete') fireEvent.click(screen.getByRole('button', { name: '删除分组' }));
+    else {
+      fireEvent.click(screen.getByRole('button', { name: operation === 'create' ? '新建分组' : '重命名分组' }));
+      fireEvent.change(screen.getByLabelText('分组名称'), { target: { value: '新名称' } });
+    }
+    const submit = () => fireEvent.click(screen.getByRole('button', { name: operation === 'delete' ? '确认删除分组' : '保存分组' }));
+    vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('分组保存失败'));
+    submit();
+    expect(await screen.findByRole('alert')).toHaveTextContent('分组保存失败');
+    expect(app.snapshot().aiConversations).toEqual(before);
+    expect(screen.getByLabelText('科研问题')).toHaveValue('保留草稿');
+    if (operation !== 'delete') expect(screen.getByLabelText('分组名称')).toHaveValue('新名称');
+    submit();
+    if (operation === 'delete') await waitFor(() => expect(app.ai.getView().conversationGroups).toEqual([]));
+    else await waitFor(() => expect(screen.queryByLabelText('分组名称')).not.toBeInTheDocument());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(app.ai.getView().activeConversationId).toBe(app.ids[0]);
+    expect(screen.getByLabelText('科研问题')).toHaveValue('保留草稿');
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    app.ai.dispose();
+  });
+
+  it('validates group names, supports cancelling and protects the built-in history views', async () => {
+    const app = await setup();
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    expect(screen.getByRole('button', { name: '重命名分组' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '删除分组' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '新建分组' }));
+    expect(screen.getByLabelText('分组名称')).toHaveFocus();
+    expect(screen.getByLabelText('分组名称')).toHaveAttribute('maxlength', '100');
+    fireEvent.change(screen.getByLabelText('分组名称'), { target: { value: '  ' } });
+    expect(screen.getByRole('button', { name: '保存分组' })).toBeDisabled();
+    fireEvent.keyDown(screen.getByLabelText('分组名称'), { key: 'Escape' });
+    expect(screen.queryByLabelText('分组名称')).not.toBeInTheDocument();
+    const group = await createGroup(app.ai, '研究');
+    fireEvent.click(screen.getByRole('button', { name: '新建分组' }));
+    fireEvent.change(screen.getByLabelText('分组名称'), { target: { value: ' 研究 ' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存分组' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('同名会话分组');
+    fireEvent.click(within(screen.getByRole('form', { name: '新建会话分组' })).getByRole('button', { name: '取消' }));
+    fireEvent.click(screen.getByRole('button', { name: '删除分组' }));
+    fireEvent.click(within(screen.getByRole('group', { name: '确认删除会话分组' })).getByRole('button', { name: '取消' }));
+    expect(app.ai.getView().conversationGroups).toEqual([group]);
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: '' } });
+    expect(screen.getByRole('button', { name: '重命名分组' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '删除分组' })).toBeDisabled();
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    app.ai.dispose();
+  });
+
+  it('preserves global pin ordering and hidden memberships while dragging or using arrow keys within a group', async () => {
+    const app = await namedConversations(['组内甲', '隐藏置顶', '组内乙', '普通'], 3);
+    const group = await app.ai.createConversationGroup('研究');
+    const other = await app.ai.createConversationGroup('其他');
+    await app.ai.moveConversationToGroup(app.ids[0], group.id);
+    await app.ai.moveConversationToGroup(app.ids[2], group.id);
+    await app.ai.moveConversationToGroup(app.ids[1], other.id);
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
+    const handle = startDrag('组内乙');
+    aimDrag(handle, '组内甲');
+    pointerEvent(handle, 'pointerup');
+    await screen.findByText('置顶顺序已保存。');
+    expect(app.ai.getView().conversations?.filter((entry) => entry.pinned).map((entry) => entry.id)).toEqual([app.ids[2], app.ids[0], app.ids[1]]);
+    expect(app.ai.getView().conversations?.find((entry) => entry.id === app.ids[1])?.groupId).toBe(other.id);
+    fireEvent.keyDown(screen.getByRole('button', { name: '拖动排序置顶会话 组内乙' }), { key: 'ArrowDown' });
+    await waitFor(() => expect(app.ai.getView().conversations?.filter((entry) => entry.pinned).map((entry) => entry.id)).toEqual([app.ids[0], app.ids[2], app.ids[1]]));
+    expect(screen.getByText('已置顶 3/10')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开会话 隐藏置顶' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
+    expect(screen.getByRole('combobox', { name: '移动会话 隐藏置顶 到分组' })).toHaveValue(other.id);
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    app.ai.dispose();
+  });
+
   it('drags pinned chats into a durable order without changing their model, scope or follow-up context', async () => {
     const app = await setup();
     const provider = app.library.getView().snapshot.ai.providers[0];
@@ -289,7 +517,10 @@ describe('AI conversation history UI', () => {
 
   it('disables pointer and keyboard reordering while a response is in progress', async () => {
     const app = await namedConversations(['甲', '乙']);
+    const group = await app.ai.createConversationGroup('研究');
+    for (const id of app.ids) await app.ai.moveConversationToGroup(id, group.id);
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
     const reorder = vi.spyOn(app.ai, 'reorderPinnedConversations');
     let finish!: (answer: string) => void;
     app.completion.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
@@ -297,6 +528,9 @@ describe('AI conversation history UI', () => {
     await waitFor(() => expect(app.completion).toHaveBeenCalled());
     const handle = screen.getByRole('button', { name: '拖动排序置顶会话 甲' });
     expect(handle).toBeDisabled();
+    for (const name of ['新建分组', '重命名分组', '删除分组']) expect(screen.getByRole('button', { name })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: '移动会话 甲 到分组' })).toBeDisabled();
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
     pointerEvent(handle, 'pointerdown', { clientY: 20 });
     aimDrag(handle, '乙');
     pointerEvent(handle, 'pointerup');
@@ -360,7 +594,7 @@ describe('AI conversation history UI', () => {
     restarted.ai.dispose();
   });
 
-  it('counts all ten pins while searching and frees a slot when unpinning or deleting a pinned chat', async () => {
+  it('counts all ten pins across groups and search results and frees a slot when unpinning or deleting a pinned chat', async () => {
     const app = await setup();
     const ids = [];
     for (let index = 1; index <= 12; index += 1) {
@@ -370,7 +604,11 @@ describe('AI conversation history UI', () => {
       await app.ai.renameConversation(id, `课题${index}`);
       if (index <= 10) await app.ai.setConversationPinned(id, true);
     }
+    const group = await app.ai.createConversationGroup('筛选分组');
+    await app.ai.moveConversationToGroup(ids[0], group.id);
+    await app.ai.moveConversationToGroup(ids[10], group.id);
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
     expect(screen.getByText('已置顶 10/10')).toBeInTheDocument();
     expect(screen.getByText('置顶已达上限，请先取消其他会话的置顶。')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '置顶会话 课题11' })).toBeDisabled();
@@ -394,6 +632,7 @@ describe('AI conversation history UI', () => {
     await screen.findByText('已置顶 9/10');
     await screen.findByText('没有匹配的会话。');
     fireEvent.click(screen.getByRole('button', { name: '清空会话搜索' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
     expect(await screen.findByRole('button', { name: '置顶会话 课题12' })).toBeEnabled();
     expect(app.ai.getView().activeConversationId).toBe(ids[11]);
     expect(app.ai.getView().conversations?.filter((entry) => entry.pinned)).toHaveLength(9);
@@ -905,7 +1144,7 @@ describe('AI conversation history UI', () => {
     app.ai.dispose();
   });
 
-  it('hides locked private histories without disturbing a public conversation and permits sorting and deleting them without unlocking', async () => {
+  it('hides locked private histories without disturbing a public conversation and permits grouping, sorting and deleting them without unlocking', async () => {
     const app = await setup();
     const folder = await app.library.createFolder('私密');
     await app.library.categorize([app.first.id], [folder.id], 'move');
@@ -940,6 +1179,18 @@ describe('AI conversation history UI', () => {
     expect(JSON.stringify(app.snapshot())).not.toContain('PRIVATE-');
     fireEvent.click(screen.getByRole('button', { name: '取消置顶会话 公开会话' }));
     await screen.findByRole('button', { name: '置顶会话 公开会话' });
+    const ciphertext = app.snapshot().aiConversations!.entries.find((entry) => entry.session?.kind === 'encrypted')!.session;
+    const group = await createGroup(app.ai, '私密归档');
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 加密会话 到分组' }), { target: { value: group.id } });
+    await screen.findByText('会话分组已更新。');
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
+    fireEvent.click(screen.getByRole('button', { name: '删除分组' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认删除分组' }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选会话分组' })).toHaveValue('all'));
+    expect(screen.getByRole('combobox', { name: '移动会话 加密会话 到分组' })).toHaveValue('');
+    expect(app.snapshot().aiConversations!.entries.find((entry) => entry.session?.kind === 'encrypted')?.session).toEqual(ciphertext);
+    expect(screen.getByLabelText('科研问题')).toHaveValue('公开草稿');
     fireEvent.click(screen.getByRole('button', { name: '打开会话 加密会话' }));
     await screen.findByText(/已保存的对话涉及加密文献/);
     expect(screen.getByRole('button', { name: '新建对话' })).toBeEnabled();

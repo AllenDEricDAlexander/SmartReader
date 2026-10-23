@@ -3,10 +3,12 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { MAX_PINNED_AI_CONVERSATIONS, type AiConversationSummary } from '../library/libraryModels';
 import { errorMessage } from '../library/libraryService';
 import type { AiService } from './aiService';
+import { AiConversationGroups } from './AiConversationGroups';
 
 export function AiConversationHistory({ ai, disabled }: { ai: AiService; disabled: boolean }) {
   const activity = useSyncExternalStore(ai.subscribe, ai.getView);
   const conversations = activity.conversations;
+  const [groupFilter, setGroupFilter] = useState<string | null | undefined>(undefined);
   const pinnedCount = conversations?.filter((entry) => entry.pinned).length ?? 0;
   const pinnedOrder = conversations?.filter((entry) => entry.pinned).map((entry) => entry.id) ?? [];
   const pinLimitReached = pinnedCount >= MAX_PINNED_AI_CONVERSATIONS;
@@ -27,7 +29,9 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
   const historyList = useRef<HTMLUListElement>(null);
   const pointer = useRef({ x: 0, y: 0 });
   const currentSearch = searchResult?.source === conversations && searchResult?.query === query ? searchResult : null;
-  const entries = currentSearch?.entries ?? (query.trim() ? [] : conversations ?? []);
+  const matching = currentSearch?.entries ?? (query.trim() ? [] : conversations ?? []);
+  const entries = matching.filter((entry) => groupFilter === undefined || (entry.groupId ?? null) === groupFilter);
+  const visiblePinnedOrder = entries.filter((entry) => entry.pinned).map((entry) => entry.id);
   const target = entries.find((entry) => entry.id === pendingDelete) ?? conversations?.find((entry) => entry.id === pendingDelete);
   const renameTarget = conversations?.find((entry) => entry.id === pendingRename?.id);
 
@@ -48,8 +52,12 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
   }, [renameTarget]);
 
   useEffect(() => {
-    if (disabled) setDrag(null);
-  }, [disabled]);
+    setDrag(null);
+  }, [disabled, groupFilter]);
+
+  useEffect(() => {
+    setPendingDelete(null); setPendingRename(null);
+  }, [groupFilter]);
 
   useEffect(() => {
     const handle = focusId ? handles.current.get(focusId) : undefined;
@@ -113,8 +121,9 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
       <span className="ai-history-pin-count">已置顶 {pinnedCount}/{MAX_PINNED_AI_CONVERSATIONS}</span>
     </div>
     <button type="button" className="ai-new-conversation" disabled={disabled}
-      onClick={() => void perform(async () => { await ai.createConversation(); setQuery(''); })}><MessageSquarePlus size={16} />新建对话</button>
+      onClick={() => void perform(async () => { await ai.createConversation(groupFilter ?? null); setQuery(''); })}><MessageSquarePlus size={16} />新建对话</button>
     <p className="ai-muted">每个会话独立保存聊天、草稿和文献范围。</p>
+    <AiConversationGroups ai={ai} disabled={disabled} selectedId={groupFilter} onSelect={setGroupFilter} />
     {pinnedCount > 1 ? <p className="ai-muted">拖动置顶会话左侧手柄排序，也可聚焦手柄用 ↑ / ↓ 调整。</p> : null}
     {pinLimitReached ? <p className="ai-muted" role="status">置顶已达上限，请先取消其他会话的置顶。</p> : null}
     <label className="ai-history-search"><Search size={15} aria-hidden="true" />
@@ -126,6 +135,8 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
     {query.trim() && currentSearch && !currentSearch.error ? <p className="ai-muted" role="status">
       {entries.length ? `找到 ${entries.length} 个会话` : '没有匹配的会话。'}
     </p> : null}
+    {!query.trim() && groupFilter !== undefined && !entries.length && activity.sessionLoaded
+      ? <p className="ai-muted" role="status">该分组暂无会话。</p> : null}
     {conversations?.some((entry) => entry.locked) ? <p className="ai-muted">加密会话需解锁相关文件夹后才能重命名和搜索。</p> : null}
     {currentSearch?.error ? <div className="settings-error" role="alert">搜索会话失败：{currentSearch.error}
       <button type="button" onClick={() => { setSearchResult(null); setSearchRetry((value) => value + 1); }}>重试搜索</button>
@@ -155,12 +166,12 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
         entry.id === activity.activeConversationId && 'is-active', drag?.active && drag.id === entry.id && 'is-dragging',
         drag && drag.targetId === entry.id && (drag.order.indexOf(drag.id) < drag.order.indexOf(entry.id) ? 'drop-after' : 'drop-before'),
       ].filter(Boolean).join(' ')} data-ai-conversation-id={entry.id} data-ai-pinned={Boolean(entry.pinned)}>
-        {entry.pinned ? <button type="button" className="ai-history-drag-handle" disabled={disabled || pinnedCount < 2}
+        {entry.pinned ? <button type="button" className="ai-history-drag-handle" disabled={disabled || visiblePinnedOrder.length < 2}
           ref={(node) => { if (node) handles.current.set(entry.id, node); else handles.current.delete(entry.id); }}
           draggable={false} aria-label={`拖动排序置顶会话 ${entry.title}`} title="拖动排序，也可用上下方向键移动"
           onDragStart={(event) => event.preventDefault()}
           onPointerDown={(event) => {
-            if (disabled || pinnedCount < 2 || event.button !== 0 || event.isPrimary === false) return;
+            if (disabled || visiblePinnedOrder.length < 2 || event.button !== 0 || event.isPrimary === false) return;
             event.preventDefault(); event.stopPropagation();
             // Pointer capture keeps sorting compatible with Tauri's native file drops.
             event.currentTarget.setPointerCapture(event.pointerId);
@@ -191,17 +202,28 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
             if (event.key === 'Escape' && drag) { event.preventDefault(); event.stopPropagation(); setDrag(null); return; }
             if (disabled || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
             event.preventDefault(); event.stopPropagation();
-            const targetId = pinnedOrder[pinnedOrder.indexOf(entry.id) + (event.key === 'ArrowUp' ? -1 : 1)];
+            const targetId = visiblePinnedOrder[visiblePinnedOrder.indexOf(entry.id) + (event.key === 'ArrowUp' ? -1 : 1)];
             if (targetId) void movePinned(entry.id, targetId);
           }}><GripVertical size={14} aria-hidden="true" /></button> : null}
-        <button type="button" className="ai-history-select" disabled={disabled}
-          title={entry.title} aria-label={`打开会话 ${entry.title}`} aria-current={entry.id === activity.activeConversationId ? 'true' : undefined}
-          onClick={() => void perform(() => ai.selectConversation(entry.id))}>
-          <strong>{`${entry.title} · ${entry.locked ? '待解锁' : entry.messageCount === null ? '已加密' : `${Math.floor(entry.messageCount / 2)} 轮`}`}</strong>
-          <span>{entry.pinned ? <span className="ai-history-pinned"><Pin size={12} aria-hidden="true" />置顶</span> : null}
-            {entry.locked ? <LockKeyhole size={12} /> : null}<time dateTime={entry.updatedAt}>{new Date(entry.updatedAt).toLocaleString()}</time>
-          </span>
-        </button>
+        <div className="ai-history-content">
+          <button type="button" className="ai-history-select" disabled={disabled}
+            title={entry.title} aria-label={`打开会话 ${entry.title}`} aria-current={entry.id === activity.activeConversationId ? 'true' : undefined}
+            onClick={() => void perform(() => ai.selectConversation(entry.id))}>
+            <strong>{`${entry.title} · ${entry.locked ? '待解锁' : entry.messageCount === null ? '已加密' : `${Math.floor(entry.messageCount / 2)} 轮`}`}</strong>
+            <span>{entry.pinned ? <span className="ai-history-pinned"><Pin size={12} aria-hidden="true" />置顶</span> : null}
+              {entry.locked ? <LockKeyhole size={12} /> : null}<time dateTime={entry.updatedAt}>{new Date(entry.updatedAt).toLocaleString()}</time>
+            </span>
+          </button>
+          <select className="ai-history-membership" aria-label={`移动会话 ${entry.title} 到分组`} title="选择所属分组"
+            value={entry.groupId ?? ''} disabled={disabled} onChange={(event) => {
+              const groupId = event.target.value || null;
+              void perform(() => ai.moveConversationToGroup(entry.id, groupId))
+                .then((saved) => { if (saved) setNotice('会话分组已更新。'); });
+            }}>
+            <option value="">未分组</option>
+            {activity.conversationGroups?.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+          </select>
+        </div>
         <div className="ai-history-actions">
           <button type="button" className="ai-history-pin" disabled={disabled || (!entry.pinned && pinLimitReached)}
             aria-label={`${entry.pinned ? '取消置顶' : '置顶'}会话 ${entry.title}`} aria-pressed={Boolean(entry.pinned)}
