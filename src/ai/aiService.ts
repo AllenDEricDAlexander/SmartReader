@@ -42,6 +42,7 @@ export type AiActivity = {
   conversations?: AiConversationSummary[];
   conversationGroups?: AiConversationGroup[];
   conversationBusy?: boolean;
+  conversationSwitching?: boolean;
   conversationSelection?: AiModelSelection;
 };
 
@@ -71,6 +72,7 @@ export class AiService {
   private sessionSaving = false;
   private sessionError: string | undefined;
   private conversationBusy = false;
+  private conversationSwitching = false;
   private conversationWork: Promise<void> = Promise.resolve();
   private configQueue: Promise<unknown> = Promise.resolve();
   private secretEpochs = new Map<string, number>();
@@ -281,16 +283,17 @@ export class AiService {
   }
 
   createConversation(groupId: string | null = null): Promise<void> {
-    return this.changeConversation(() => this.library.createAiConversation(groupId));
+    return this.changeConversation(() => this.library.createAiConversation(groupId), true);
   }
 
   selectConversation(id: string): Promise<void> {
     if (this.library.getView().snapshot.aiConversations?.activeId === id) return Promise.resolve();
-    return this.changeConversation(() => this.library.selectAiConversation(id));
+    return this.changeConversation(() => this.library.selectAiConversation(id), true);
   }
 
   deleteConversation(id: string): Promise<void> {
-    return this.changeConversation(() => this.library.deleteAiConversation(id));
+    const switching = !this.sessionLoaded || this.library.getView().snapshot.aiConversations?.activeId === id;
+    return this.changeConversation(() => this.library.deleteAiConversation(id), switching);
   }
 
   renameConversation(id: string, title: string): Promise<void> {
@@ -344,10 +347,12 @@ export class AiService {
     return this.changeConversation(() => this.library.moveAiConversationToGroup(id, groupId));
   }
 
-  private changeConversation(action: () => Promise<unknown>): Promise<void> {
+  private changeConversation(action: () => Promise<unknown>, switching = false): Promise<void> {
     if (this.disposed) return Promise.reject(new Error('AI 会话已关闭。'));
     if (this.conversationBusy) return Promise.reject(new Error('请等待当前会话操作完成。'));
     this.conversationBusy = true;
+    // Metadata saves disable edits but keep the current transcript mounted.
+    this.conversationSwitching = switching;
     this.publish();
     const work = (async () => {
       await this.flushSessionWrites();
@@ -361,7 +366,7 @@ export class AiService {
       this.sessionLoaded = false;
       this.sessionLocked = false;
       await this.loadAssistantSession();
-    })().finally(() => { this.conversationBusy = false; this.publish(); });
+    })().finally(() => { this.conversationBusy = false; this.conversationSwitching = false; this.publish(); });
     this.conversationWork = work.catch(() => undefined);
     return work;
   }
@@ -900,6 +905,7 @@ export class AiService {
       sessionLoaded: this.sessionLoaded, sessionLocked: this.sessionLocked,
       sessionSaving: this.sessionSaving, sessionError: this.sessionError,
       activeConversationId: history?.activeId, conversationBusy: this.conversationBusy,
+      conversationSwitching: this.conversationSwitching,
       conversationSelection: this.conversationSelection(),
       conversationGroups: history?.groups ?? [],
       conversations: history?.entries.map((entry) => {

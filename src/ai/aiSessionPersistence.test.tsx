@@ -1,5 +1,5 @@
 import { webcrypto } from 'node:crypto';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyMetadata, type AiAssistantSession, type LibrarySnapshot } from '../library/libraryModels';
 import { LibraryService } from '../library/libraryService';
@@ -74,6 +74,116 @@ beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('local AI conversation persistence', () => {
+  it('keeps the transcript, reading position and open reasoning mounted during history metadata saves while blocking edits', async () => {
+    const app = await setup();
+    const inactiveId = app.ai.getView().activeConversationId!;
+    await app.ai.renameConversation(inactiveId, '另一会话');
+    await app.ai.setConversationPinned(inactiveId, true);
+    await app.ai.createConversation();
+    const activeId = app.ai.getView().activeConversationId!;
+    const group = await app.ai.createConversationGroup('研究');
+    await app.ai.createConversationGroup('归档');
+    const saved = session(app.ai);
+    saved.messages[1].reasoning = '需要保留展开状态的思考';
+    app.ai.saveAssistantSession(saved);
+    await app.ai.flushAssistantSession();
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    const input = screen.getByLabelText('科研问题');
+    const viewport = input.closest<HTMLElement>('section.ai-assistant')!;
+    const reasoning = screen.getByText('模型思考过程').closest('details')!;
+    reasoning.open = true;
+    Object.defineProperties(viewport, { scrollHeight: { configurable: true, value: 1800 }, clientHeight: { configurable: true, value: 400 } });
+    viewport.scrollTop = 140;
+    fireEvent.scroll(viewport);
+    const actions = [
+      () => app.ai.setConversationPinned(activeId, true),
+      () => app.ai.renameConversation(activeId, '正在阅读的会话'),
+      () => app.ai.reorderPinnedConversations([activeId, inactiveId]),
+      () => app.ai.createConversationGroup('参考'),
+      () => app.ai.renameConversationGroup(group.id, '重点研究'),
+      () => app.ai.reorderConversationGroups(app.ai.getView().conversationGroups!.map((item) => item.id).reverse()),
+      () => app.ai.moveConversationToGroup(activeId, group.id),
+      () => app.ai.setConversationGroupCollapsed(group.id, true),
+      () => app.ai.deleteConversationGroup(group.id),
+      () => app.ai.deleteConversation(inactiveId),
+    ];
+    const commit = vi.mocked(app.storage.commit).getMockImplementation()!;
+    for (const action of actions) {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const writes = vi.mocked(app.storage.commit).mockImplementationOnce(async (...args) => { await gate; return commit(...args); });
+      const before = writes.mock.calls.length;
+      let saving!: Promise<unknown>;
+      await act(async () => { saving = action(); });
+      await waitFor(() => expect(writes).toHaveBeenCalledTimes(before + 1));
+      expect(app.ai.getView()).toMatchObject({ conversationBusy: true, conversationSwitching: false });
+      expect(screen.getByLabelText('科研问题')).toBe(input);
+      expect(input).toBeDisabled();
+      expect(screen.getByLabelText('AI 厂商')).toBeDisabled();
+      expect(screen.getByRole('button', { name: '发送问题' })).toBeDisabled();
+      expect(screen.getByLabelText('科研问题').closest('section.ai-assistant')).toBe(viewport);
+      expect(viewport.scrollTop).toBe(140);
+      expect(reasoning).toBeInTheDocument();
+      expect(reasoning.open).toBe(true);
+      fireEvent.submit(input.closest('form')!);
+      expect(app.completion).not.toHaveBeenCalled();
+      await act(async () => { release(); await saving; });
+      expect(screen.getByLabelText('科研问题')).toBe(input);
+      expect(input).toBeEnabled();
+      expect(input).toHaveValue('追问草稿');
+      expect(viewport.scrollTop).toBe(140);
+      expect(reasoning.open).toBe(true);
+    }
+    vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('disk full'));
+    await act(async () => { await expect(app.ai.setConversationPinned(activeId, false)).rejects.toThrow('disk full'); });
+    expect(screen.getByLabelText('科研问题')).toBe(input);
+    expect(input).toBeEnabled();
+    expect(viewport.scrollTop).toBe(140);
+    expect(reasoning.open).toBe(true);
+    app.completion.mockResolvedValueOnce('元数据变更后继续回答');
+    fireEvent.click(screen.getByRole('button', { name: '发送问题' }));
+    await screen.findByText('元数据变更后继续回答');
+    expect(app.completion.mock.calls[0][2].slice(1, 3)).toEqual([
+      { role: 'user', content: '原来的问题' }, { role: 'assistant', content: '原来的回答' },
+    ]);
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    app.ai.dispose();
+  });
+
+  it.each(['select', 'delete-active'] as const)('hides the previous body until the target session is restored when histories %s', async (operation) => {
+    const app = await setup();
+    const firstId = app.ai.getView().activeConversationId!;
+    app.ai.saveAssistantSession(session(app.ai, '第一会话草稿'));
+    await app.ai.flushAssistantSession();
+    await app.ai.createConversation();
+    const secondId = app.ai.getView().activeConversationId!;
+    const second = session(app.ai, '第二会话草稿');
+    second.messages = second.messages.map((message) => ({ ...message, content: `第二会话${message.role}` }));
+    app.ai.saveAssistantSession(second);
+    await app.ai.flushAssistantSession();
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    const previousInput = screen.getByLabelText('科研问题');
+    const load = app.library.loadAiAssistantSession.bind(app.library);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const restoring = vi.spyOn(app.library, 'loadAiAssistantSession').mockImplementationOnce(async () => { await gate; return load(); });
+    let switching!: Promise<void>;
+    await act(async () => { switching = operation === 'select' ? app.ai.selectConversation(firstId) : app.ai.deleteConversation(secondId); });
+    await waitFor(() => expect(restoring).toHaveBeenCalledOnce());
+    expect(app.ai.getView()).toMatchObject({ activeConversationId: firstId, conversationBusy: true, conversationSwitching: true });
+    expect(screen.getByRole('status')).toHaveTextContent('正在切换会话');
+    expect(screen.queryByLabelText('科研问题')).not.toBeInTheDocument();
+    expect(screen.queryByText('第二会话assistant')).not.toBeInTheDocument();
+    await act(async () => { release(); await switching; });
+    expect(screen.getByLabelText('科研问题')).not.toBe(previousInput);
+    expect(screen.getByLabelText('科研问题')).toHaveValue('第一会话草稿');
+    expect(screen.getByText('原来的回答')).toBeInTheDocument();
+    expect(screen.queryByText('第二会话assistant')).not.toBeInTheDocument();
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    app.ai.dispose();
+  });
+
   it('restores chat, citations, reasoning, drafts, file scope and the selected model in a fresh app and continues the conversation', async () => {
     const app = await setup();
     const first = render(<AiAssistant library={app.library} ai={app.ai} initialPaperId={app.paper.id} onOpenPaper={vi.fn()} />);
@@ -129,7 +239,8 @@ describe('local AI conversation persistence', () => {
     expect(screen.getByRole('status')).toHaveTextContent('正在恢复本地聊天记录');
     expect(commit).not.toHaveBeenCalled();
     await act(async () => { release(); });
-    await screen.findByText('原来的问题');
+    await screen.findByLabelText('科研问题');
+    expect(within(screen.getByLabelText('AI 对话记录')).getByText('原来的问题')).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('追问草稿');
     expect(activeStoredSession(app.snapshot())).toEqual(saved);
     expect(commit).not.toHaveBeenCalled();
@@ -254,7 +365,7 @@ describe('local AI conversation persistence', () => {
     expect(request).toHaveLength(22);
     expect(JSON.stringify(request)).not.toContain('历史问题0');
     expect(JSON.stringify(request)).toContain('历史回答29');
-    expect(screen.getByText('历史问题0')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('AI 对话记录')).getByText('历史问题0')).toBeInTheDocument();
     await act(async () => { await restarted.ai.flushAssistantSession(); });
     restarted.ai.dispose();
   });
@@ -314,7 +425,8 @@ describe('local AI conversation persistence', () => {
     await act(async () => { await restarted.library.unlockVault(vaults[0], 'private password'); });
     expect(screen.getByText(/已保存的对话涉及加密文献/)).toBeInTheDocument();
     await act(async () => { await restarted.library.unlockVault(vaults[1], 'private password'); });
-    await screen.findByText('PRIVATE-user');
+    await screen.findByLabelText('科研问题');
+    expect(within(screen.getByLabelText('AI 对话记录')).getByText('PRIVATE-user')).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('PRIVATE-DRAFT');
     expect(restarted.ai.getAssistantSession()?.messages).toEqual(saved.messages);
     fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
@@ -339,11 +451,12 @@ describe('local AI conversation persistence', () => {
     const restarted = services(app.storage);
     render(<AiAssistant library={restarted.library} ai={restarted.ai} onOpenPaper={vi.fn()} />);
     await screen.findByLabelText('科研问题');
-    expect(screen.queryByText('原来的问题')).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText('科研问题').closest('section.ai-assistant')!).queryByText('原来的问题')).not.toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('');
     expect(app.snapshot().aiConversations?.entries).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: '打开会话 原来的问题' }));
-    await screen.findByText('原来的问题');
+    await screen.findByLabelText('科研问题');
+    expect(within(screen.getByLabelText('AI 对话记录')).getByText('原来的问题')).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('追问草稿');
     restarted.ai.dispose();
   });

@@ -30,7 +30,7 @@ export function AiAssistant(props: AiAssistantProps) {
   useEffect(() => { void ai.loadAssistantSession().catch(() => undefined); }, [ai]);
   const disabled = contentBusy || Boolean(activity.asking || activity.conversationBusy || !activity.sessionLoaded);
   let content;
-  if (!activity.sessionLoaded || activity.sessionLocked || activity.conversationBusy) {
+  if (!activity.sessionLoaded || activity.sessionLocked || activity.conversationSwitching) {
     content = <section className="ai-assistant" aria-label="恢复 AI 对话">
       <div className="ai-assistant-body">
         {activity.sessionError ? <>
@@ -92,7 +92,7 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   const provider = profile ? { ...profile, model: selectedModel } : undefined;
   const selectionUnavailable = Boolean(selectedProviderId && (!profile || !modelAvailable));
   const configured = Boolean(provider && modelAvailable && activity.keyProviderIds.includes(provider.id));
-  const busy = pending || activity.asking || addingFiles || buildingIndex || switching || changingKnowledge;
+  const busy = pending || activity.asking || activity.conversationBusy || addingFiles || buildingIndex || switching || changingKnowledge;
   useEffect(() => { onBusyChange(busy); return () => onBusyChange(false); }, [busy, onBusyChange]);
   const cloudKnowledge = libraryView.snapshot.ai.knowledge?.backend === 'milvus';
   const encryptedIds = new Set(libraryView.snapshot.papers.filter((paper) => paper.kind === 'encrypted').map((paper) => paper.id));
