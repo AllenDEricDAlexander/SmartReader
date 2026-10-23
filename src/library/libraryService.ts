@@ -8,8 +8,8 @@ import {
   folderVaultId, mergeFolders, moveFolder, renameFolder,
 } from './libraryFolders';
 import {
-  emptyLibrary, emptyMetadata, paperDocumentKey,
-  type AiAssistantSession, type AiConversation, type AiModelSelection, type AiSettings, type EncryptedData, type FolderVault, type LibraryPreferences, type LibraryReaderSession, type LibrarySnapshot, type StoredAiAssistantSession,
+  aiConversationTitle, emptyLibrary, emptyMetadata, paperDocumentKey,
+  type AiAssistantSession, type AiConversation, type AiConversationSummary, type AiModelSelection, type AiSettings, type EncryptedData, type FolderVault, type LibraryPreferences, type LibraryReaderSession, type LibrarySnapshot, type StoredAiAssistantSession,
   type MetadataField, type Paper, type PaperMetadata,
 } from './libraryModels';
 import { LibrarySearchIndex } from './librarySearch';
@@ -561,6 +561,60 @@ export class LibraryService {
     });
   }
 
+  async renameAiConversation(id: string, name: string): Promise<Omit<AiAssistantSession, 'epoch'>> {
+    const title = name.replace(/\s+/g, ' ').trim();
+    if (!title || title.length > 100) throw new Error('会话名称需为 1–100 个字符。');
+    await this.initializeAiConversations();
+    const access = this.captureAccess();
+    return this.mutate(async (tx) => {
+      const entry = tx.snapshot.aiConversations!.entries.find((item) => item.id === id);
+      if (!entry) throw new Error('历史会话不存在。');
+      const stored = entry.session;
+      if (stored?.paperIds.some((paperId) => !this.canAccess(paperId, access))) throw new Error('请先解锁对话涉及的加密文件夹。');
+      const session = stored ? await this.readAiAssistantSession(stored) : {
+        messages: [], draft: '', scope: 'all' as const, selectedPaperIds: [], fileQuery: '', mode: null,
+      };
+      const saved = { ...session, title };
+      entry.session = await this.storeAiAssistantSession(saved, stored?.paperIds ?? [], stored?.kind === 'encrypted' ? stored.vaultIds : []);
+      if (stored?.paperIds.some((paperId) => !this.canAccess(paperId, access))) throw new Error('文献访问状态已变化，名称未保存。');
+      entry.updatedAt = new Date().toISOString();
+      return saved;
+    });
+  }
+
+  async searchAiConversations(query: string, signal?: AbortSignal): Promise<AiConversationSummary[]> {
+    signal?.throwIfAborted();
+    await this.initializeAiConversations();
+    return this.exclusive(async () => {
+      signal?.throwIfAborted();
+      const access = this.captureAccess();
+      const needle = query.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+      const locked = (stored: StoredAiAssistantSession | null) => Boolean(stored && (
+        stored.paperIds.some((id) => !this.canAccess(id, access))
+        || (stored.kind === 'encrypted' && stored.vaultIds.some((id) => !this.keys.has(id)))
+      ));
+      const readable = [];
+      for (const entry of this.snapshot.aiConversations!.entries) {
+        signal?.throwIfAborted();
+        const session = entry.session && !locked(entry.session) ? await this.readAiAssistantSession(entry.session) : null;
+        readable.push({ entry, session });
+      }
+      signal?.throwIfAborted();
+      // Access may be revoked while decrypting another history. Check again before returning any titles or matches.
+      return readable.flatMap(({ entry, session }) => {
+        const isLocked = locked(entry.session);
+        const visible = isLocked ? null : session;
+        const title = aiConversationTitle(visible, isLocked || entry.session?.kind === 'encrypted');
+        if (needle) {
+          const content = [title, ...visible?.messages.map((message) => message.content) ?? []].join(' ').replace(/\s+/g, ' ').toLocaleLowerCase();
+          if (isLocked || !content.includes(needle)) return [];
+        }
+        return [{ id: entry.id, title, updatedAt: entry.updatedAt, locked: isLocked,
+          messageCount: visible ? visible.messages.length : entry.session?.kind === 'encrypted' || isLocked ? null : 0 }];
+      }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    });
+  }
+
   private defaultAiSelection(settings: AiSettings): AiModelSelection {
     const provider = settings.providers.find((profile) => profile.id === settings.activeProviderId);
     return { providerId: provider?.id ?? null, model: provider?.model ?? '' };
@@ -577,23 +631,37 @@ export class LibraryService {
       const history = this.snapshot.aiConversations;
       const stored = history ? history.entries.find((entry) => entry.id === (id ?? history.activeId))?.session : this.snapshot.aiSession;
       if (!stored) return null;
-      if (!validStoredAiSession(stored)) {
-        throw new Error('本地聊天记录格式无效，原始记录未修改。');
-      }
-      let session: unknown;
-      if (stored.kind === 'plain') session = structuredClone(stored.session);
-      else {
-        let content: unknown = stored.encrypted;
-        for (const id of [...stored.vaultIds].reverse()) {
-          const key = this.keys.get(id);
-          if (!key) throw new Error('请先解锁对话涉及的加密文件夹。');
-          content = await decryptJson(key, content as EncryptedData, `ai-session:${id}`);
-        }
-        session = content;
-      }
-      if (!validAiSession(session)) throw new Error('本地聊天记录格式无效，原始记录未修改。');
-      return session;
+      return this.readAiAssistantSession(stored);
     });
+  }
+
+  private async readAiAssistantSession(stored: StoredAiAssistantSession): Promise<Omit<AiAssistantSession, 'epoch'>> {
+    if (!validStoredAiSession(stored)) throw new Error('本地聊天记录格式无效，原始记录未修改。');
+    let session: unknown;
+    if (stored.kind === 'plain') session = structuredClone(stored.session);
+    else {
+      let content: unknown = stored.encrypted;
+      for (const id of [...stored.vaultIds].reverse()) {
+        const key = this.keys.get(id);
+        if (!key) throw new Error('请先解锁对话涉及的加密文件夹。');
+        content = await decryptJson(key, content as EncryptedData, `ai-session:${id}`);
+      }
+      session = content;
+    }
+    if (!validAiSession(session)) throw new Error('本地聊天记录格式无效，原始记录未修改。');
+    return session;
+  }
+
+  private async storeAiAssistantSession(session: Omit<AiAssistantSession, 'epoch'>, paperIds: string[], vaultIds: string[]): Promise<StoredAiAssistantSession> {
+    if (!vaultIds.length) return { kind: 'plain', paperIds, session };
+    let encrypted: EncryptedData | undefined;
+    // Every referenced vault must be unlocked to read a conversation spanning multiple vaults.
+    for (const id of vaultIds) {
+      const key = this.keys.get(id);
+      if (!key) throw new Error('请先解锁对话涉及的加密文件夹。');
+      encrypted = await encryptJson(key, encrypted ?? session, `ai-session:${id}`);
+    }
+    return { kind: 'encrypted', paperIds, vaultIds, encrypted: encrypted! };
   }
 
   async saveAiAssistantSession(session: AiAssistantSession | null, access = this.captureAccess(), conversationId?: string): Promise<void> {
@@ -625,17 +693,7 @@ export class LibraryService {
         if (record?.kind === 'encrypted') vaultIds.add(record.vaultId);
       }
       const { epoch: _epoch, ...saved } = structuredClone({ ...session, selectedPaperIds, initialPaperId });
-      if (!vaultIds.size) entry.session = { kind: 'plain', paperIds: [...ids], session: saved };
-      else {
-        let encrypted: EncryptedData | undefined;
-        // Every referenced vault must be unlocked to read a conversation spanning multiple vaults.
-        for (const id of vaultIds) {
-          const key = this.keys.get(id);
-          if (!key) throw new Error('请先解锁对话涉及的加密文件夹。');
-          encrypted = await encryptJson(key, encrypted ?? saved, `ai-session:${id}`);
-        }
-        entry.session = { kind: 'encrypted', paperIds: [...ids], vaultIds: [...vaultIds], encrypted: encrypted! };
-      }
+      entry.session = await this.storeAiAssistantSession(saved, [...ids], [...vaultIds]);
     });
   }
 
@@ -836,6 +894,7 @@ function validAiSession(value: unknown): value is Omit<AiAssistantSession, 'epoc
   if (!value || typeof value !== 'object') return false;
   const session = value as AiAssistantSession;
   return typeof session.draft === 'string' && typeof session.fileQuery === 'string'
+    && (session.title === undefined || (typeof session.title === 'string' && session.title.trim().length > 0 && session.title.length <= 100))
     && ['all', 'selected'].includes(session.scope) && [null, 'library', 'direct'].includes(session.mode)
     && (session.initialPaperId === undefined || typeof session.initialPaperId === 'string')
     && Array.isArray(session.selectedPaperIds) && session.selectedPaperIds.every((id) => typeof id === 'string')

@@ -125,6 +125,7 @@ export type AiChatMessage = AiChatTurn & {
 };
 export type AiAssistantSession = {
   epoch: number;
+  title?: string;
   messages: AiChatMessage[];
   draft: string;
   scope: 'all' | 'selected';
@@ -198,6 +199,11 @@ export function emptyLibrary(): LibrarySnapshot {
 
 export function providerModels(provider: AiProviderProfile): string[] {
   return [...new Set([...(provider.models ?? []), provider.model].map((model) => model.trim()).filter(Boolean))];
+}
+
+export function aiConversationTitle(session: Omit<AiAssistantSession, 'epoch'> | null, encrypted = false): string {
+  return session?.title || session?.messages.find((message) => message?.role === 'user' && typeof message.content === 'string')
+    ?.content.replace(/\s+/g, ' ').trim().slice(0, 60) || (encrypted ? '加密会话' : '新对话');
 }
 
 export function paperDocumentKey(id: string): string {

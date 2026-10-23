@@ -1,5 +1,5 @@
 import { createVaultKey, decryptJson, deriveVaultKey, encryptJson } from '../library/libraryCrypto';
-import { emptyMetadata, providerModels, type AiAssistantSession, type AiChatTurn, type AiConversationSummary, type AiModelSelection, type AiProviderProfile, type AiRetrieval, type AiSource, type MetadataField, type Paper, type PaperMetadata } from '../library/libraryModels';
+import { aiConversationTitle, emptyMetadata, providerModels, type AiAssistantSession, type AiChatTurn, type AiConversationSummary, type AiModelSelection, type AiProviderProfile, type AiRetrieval, type AiSource, type MetadataField, type Paper, type PaperMetadata } from '../library/libraryModels';
 import { errorMessage, LibraryService } from '../library/libraryService';
 import { failureStatus, normalizeBaseUrl, providerDetail, requestCompletion, streamCompletion, type AiMessage } from './openAiClient';
 import { KnowledgeService, type KnowledgeDependencies } from './knowledgeService';
@@ -236,6 +236,7 @@ export class AiService {
   saveAssistantSession(session: AiAssistantSession): void {
     if (this.disposed || !this.sessionLoaded || this.sessionLocked || this.conversationBusy || session.epoch !== this.answerEpoch) return;
     const saved = structuredClone(session);
+    if (this.assistantSession?.title) saved.title = this.assistantSession.title;
     saved.messages = saved.messages.filter((message, index) => !message.streaming && !saved.messages[index + 1]?.streaming);
     this.assistantSession = saved;
     if (sessionFingerprint(saved) !== this.sessionFingerprint) this.persistAssistantSession(saved);
@@ -289,6 +290,21 @@ export class AiService {
 
   deleteConversation(id: string): Promise<void> {
     return this.changeConversation(() => this.library.deleteAiConversation(id));
+  }
+
+  renameConversation(id: string, title: string): Promise<void> {
+    return this.changeConversation(async () => {
+      const session = await this.library.renameAiConversation(id, title);
+      if (id === this.library.getView().snapshot.aiConversations?.activeId) {
+        this.assistantSession = { ...session, epoch: this.answerEpoch };
+        this.pendingSession = undefined;
+        this.sessionFingerprint = sessionFingerprint(this.assistantSession);
+      }
+    });
+  }
+
+  searchConversations(query: string, signal?: AbortSignal): Promise<AiConversationSummary[]> {
+    return this.library.searchAiConversations(query, signal);
   }
 
   private changeConversation(action: () => Promise<unknown>): Promise<void> {
@@ -854,8 +870,7 @@ export class AiService {
         const session = stored?.kind === 'plain' ? stored.session : !locked && entry.id === history.activeId ? this.assistantSession : null;
         const messages = Array.isArray(session?.messages) ? session.messages : [];
         return { id: entry.id, updatedAt: entry.updatedAt, locked: Boolean(locked),
-          title: messages.find((message) => message?.role === 'user' && typeof message.content === 'string')?.content.replace(/\s+/g, ' ').trim().slice(0, 60)
-            || (stored?.kind === 'encrypted' ? '加密会话' : '新对话'),
+          title: aiConversationTitle(session, stored?.kind === 'encrypted'),
           messageCount: session ? messages.length : stored?.kind === 'encrypted' ? null : 0 };
       }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) ?? [],
     };
@@ -865,7 +880,7 @@ export class AiService {
 
 function sessionFingerprint(session: AiAssistantSession | null): string {
   return session ? JSON.stringify([session.messages, session.draft, session.scope, session.selectedPaperIds,
-    session.fileQuery, session.mode, session.initialPaperId]) : 'null';
+    session.fileQuery, session.mode, session.initialPaperId, session.title]) : 'null';
 }
 
 /**

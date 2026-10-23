@@ -52,6 +52,224 @@ async function save(ai: AiService, label: string) {
 
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 
+describe('conversation names and local search', () => {
+  it('keeps a custom name through autosaves, follow-ups and restart', async () => {
+    const app = await setup();
+    await save(app.ai, '原始');
+    const id = app.ai.getView().activeConversationId!;
+    const before = app.ai.getAssistantSession()!;
+    await app.ai.renameConversation(id, '  课题一\n  文献讨论  ');
+    expect(app.ai.getAssistantSession()).toEqual({ ...before, title: '课题一 文献讨论' });
+    expect(app.ai.getView().conversations?.find((entry) => entry.id === id)?.title).toBe('课题一 文献讨论');
+    app.ai.saveAssistantSession({ ...before, draft: '继续追问的草稿' });
+    await app.ai.flushAssistantSession();
+    app.ai.dispose();
+    const restarted = services(app.storage);
+    await restarted.ai.loadAssistantSession();
+    expect(restarted.ai.getAssistantSession()).toEqual({ ...before, draft: '继续追问的草稿', title: '课题一 文献讨论' });
+    expect((await restarted.ai.searchConversations('文献讨论')).map((entry) => entry.id)).toEqual([id]);
+    restarted.ai.dispose();
+  });
+
+  it('renames an inactive conversation without changing either model selection or the active draft', async () => {
+    const app = await setup();
+    const provider = await app.ai.saveProvider({ name: '厂商', baseUrl: 'https://one.example/v1', model: 'one', models: ['two'] });
+    await save(app.ai, '第一份');
+    const first = app.ai.getView().activeConversationId!;
+    const firstSession = await app.library.loadAiAssistantSession(first);
+    await app.ai.createConversation();
+    await app.ai.selectProvider(provider.id, 'two');
+    await save(app.ai, '第二份');
+    const before = app.snapshot();
+    const activeSession = app.ai.getAssistantSession();
+    await app.ai.renameConversation(first, '第一份的新名称');
+    const after = app.snapshot();
+    expect(after.ai).toEqual(before.ai);
+    expect(after.aiConversations?.activeId).toBe(before.aiConversations?.activeId);
+    expect(after.aiConversations?.entries.find((entry) => entry.id !== first)).toEqual(before.aiConversations?.entries.find((entry) => entry.id !== first));
+    expect(after.aiConversations?.entries.find((entry) => entry.id === first)?.selection).toEqual({ providerId: provider.id, model: 'one' });
+    expect(app.ai.getView().conversationSelection).toEqual({ providerId: provider.id, model: 'two' });
+    expect(app.ai.getAssistantSession()).toEqual(activeSession);
+    expect(await app.library.loadAiAssistantSession(first)).toEqual({ ...firstSession, title: '第一份的新名称' });
+    app.ai.dispose();
+  });
+
+  it('names an empty conversation without inheriting that name into a new conversation', async () => {
+    const app = await setup();
+    const first = app.ai.getView().activeConversationId!;
+    await app.ai.renameConversation(first, '待讨论的课题');
+    expect(app.ai.getAssistantSession()?.messages).toEqual([]);
+    await app.ai.createConversation();
+    expect(app.ai.getAssistantSession()).toBeNull();
+    expect(app.ai.getView().conversations?.find((entry) => entry.id !== first)?.title).toBe('新对话');
+    app.ai.dispose();
+    const restarted = services(app.storage);
+    await restarted.ai.loadAssistantSession();
+    await restarted.ai.selectConversation(first);
+    expect(restarted.ai.getAssistantSession()).toMatchObject({ title: '待讨论的课题', messages: [], draft: '' });
+    restarted.ai.dispose();
+  });
+
+  it.each(['', '  \n ', '字'.repeat(101)])('rejects an invalid name without changing saved data: %j', async (title) => {
+    const app = await setup();
+    await save(app.ai, '保留');
+    const before = app.snapshot();
+    const active = app.ai.getAssistantSession();
+    const commits = vi.mocked(app.storage.commit).mock.calls.length;
+    await expect(app.ai.renameConversation(app.ai.getView().activeConversationId!, title)).rejects.toThrow('1–100');
+    expect(app.snapshot()).toEqual(before);
+    expect(app.ai.getAssistantSession()).toEqual(active);
+    expect(app.storage.commit).toHaveBeenCalledTimes(commits);
+    await expect(app.ai.renameConversation('missing', '有效名称')).rejects.toThrow('历史会话不存在');
+    expect(app.storage.commit).toHaveBeenCalledTimes(commits);
+    app.ai.dispose();
+  });
+
+  it('retains the original name and context on a failed rename and permits retrying', async () => {
+    const app = await setup();
+    await save(app.ai, '原始');
+    const id = app.ai.getView().activeConversationId!;
+    const before = app.snapshot();
+    const active = app.ai.getAssistantSession();
+    vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('disk full'));
+    await expect(app.ai.renameConversation(id, '新名称')).rejects.toThrow('disk full');
+    expect(app.snapshot()).toEqual(before);
+    expect(app.ai.getAssistantSession()).toEqual(active);
+    expect(app.ai.getView().conversations?.[0].title).toBe('原始问题');
+    await app.ai.renameConversation(id, '新名称');
+    expect(app.ai.getView().conversations?.[0].title).toBe('新名称');
+    app.ai.dispose();
+  });
+
+  it('searches names and all completed question and answer text locally without changing the active history', async () => {
+    const app = await setup();
+    const first = app.ai.getView().activeConversationId!;
+    const one = session(app.ai, '第一份');
+    one.messages[1].content = 'An analysis of Neural   Networks and 上下文';
+    one.messages.push({ id: 3, role: 'user', content: '后来追问的关键词', contextKey: 'direct' });
+    one.draft = '未发送的独有草稿';
+    app.ai.saveAssistantSession(one);
+    await app.ai.flushAssistantSession();
+    await app.ai.renameConversation(first, '科研课题');
+    await app.ai.createConversation();
+    await save(app.ai, '第二份');
+    const second = app.ai.getView().activeConversationId!;
+    const before = app.snapshot();
+    for (const query of ['科研课题', '第一份问题', ' neural\n NETWORKS ', '上下文', '后来追问的关键词']) {
+      expect((await app.ai.searchConversations(query)).map((entry) => entry.id)).toEqual([first]);
+    }
+    expect((await app.ai.searchConversations('第二份回答')).map((entry) => entry.id)).toEqual([second]);
+    expect(await app.ai.searchConversations('不存在的记录')).toEqual([]);
+    expect(await app.ai.searchConversations('未发送的独有草稿')).toEqual([]);
+    expect(await app.ai.searchConversations('  \n ')).toHaveLength(2);
+    expect(app.snapshot()).toEqual(before);
+    expect(app.ai.getView().activeConversationId).toBe(second);
+    expect(app.ai.getAssistantSession()?.draft).toBe('第二份草稿');
+    expect(app.completion).not.toHaveBeenCalled();
+    app.ai.dispose();
+  });
+
+  it('encrypts custom names and searches private histories only after every required vault is unlocked', async () => {
+    const app = await setup();
+    const vaults = [];
+    const ids = [];
+    for (const label of ['one', 'two']) {
+      const paper = await app.library.importPdf(new TextEncoder().encode(`%PDF-1.7\n${label}`), `${label}.pdf`);
+      const folder = await app.library.createFolder(label);
+      await app.library.categorize([paper.id], [folder.id], 'move');
+      vaults.push(await app.library.encryptFolder(folder.id, 'private password'));
+      ids.push(paper.id);
+    }
+    const privateId = app.ai.getView().activeConversationId!;
+    app.ai.saveAssistantSession({ ...session(app.ai, 'PRIVATE'), selectedPaperIds: ids });
+    await app.ai.flushAssistantSession();
+    await app.ai.renameConversation(privateId, 'SECRET-NAME');
+    await app.ai.createConversation();
+    await save(app.ai, '公开');
+    expect((await app.ai.searchConversations('secret-name')).map((entry) => entry.id)).toEqual([privateId]);
+    expect((await app.ai.searchConversations('PRIVATE回答')).map((entry) => entry.id)).toEqual([privateId]);
+    expect(JSON.stringify(app.snapshot())).not.toMatch(/PRIVATE|SECRET-NAME/);
+    app.ai.dispose();
+    const restarted = services(app.storage);
+    await restarted.ai.loadAssistantSession();
+    const before = app.snapshot();
+    expect((await restarted.ai.searchConversations('')).find((entry) => entry.id === privateId)).toMatchObject({ title: '加密会话', locked: true });
+    expect(await restarted.ai.searchConversations('PRIVATE')).toEqual([]);
+    await expect(restarted.ai.renameConversation(privateId, '不会泄露')).rejects.toThrow('请先解锁');
+    expect(app.snapshot()).toEqual(before);
+    await restarted.library.unlockVault(vaults[0].id, 'private password');
+    expect(await restarted.ai.searchConversations('secret-name')).toEqual([]);
+    await restarted.library.unlockVault(vaults[1].id, 'private password');
+    expect((await restarted.ai.searchConversations('secret-name')).map((entry) => entry.id)).toEqual([privateId]);
+    await restarted.ai.renameConversation(privateId, 'SECRET-UPDATED');
+    expect((await restarted.library.loadAiAssistantSession(privateId))?.messages).toEqual(session(app.ai, 'PRIVATE').messages);
+    await restarted.library.lockVault(vaults[0].id);
+    expect(await restarted.ai.searchConversations('secret-updated')).toEqual([]);
+    expect(restarted.ai.getAssistantSession()?.draft).toBe('公开草稿');
+    expect(JSON.stringify(app.snapshot())).not.toMatch(/PRIVATE|SECRET-/);
+    restarted.ai.dispose();
+  });
+
+  it('discards private matches when a vault is locked during decryption', async () => {
+    const app = await setup();
+    const paper = await app.library.importPdf(new TextEncoder().encode('%PDF-1.7\nprivate search'), 'private.pdf');
+    const folder = await app.library.createFolder('私密');
+    await app.library.categorize([paper.id], [folder.id], 'move');
+    const vault = await app.library.encryptFolder(folder.id, 'private password');
+    app.ai.saveAssistantSession({ ...session(app.ai, 'PRIVATE'), selectedPaperIds: [paper.id] });
+    await app.ai.flushAssistantSession();
+    await app.ai.renameConversation(app.ai.getView().activeConversationId!, 'SECRET');
+    await app.ai.createConversation();
+    await save(app.ai, '公开');
+    const decrypt = crypto.subtle.decrypt.bind(crypto.subtle);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const spy = vi.spyOn(crypto.subtle, 'decrypt').mockImplementationOnce(async (...args) => { await gate; return decrypt(...args); });
+    try {
+      const searching = app.ai.searchConversations('PRIVATE');
+      await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+      const locking = app.library.lockVault(vault.id);
+      release();
+      expect(await searching).toEqual([]);
+      await locking;
+      expect(JSON.stringify(await app.ai.searchConversations(''))).not.toMatch(/PRIVATE|SECRET/);
+    } finally { release(); spy.mockRestore(); app.ai.dispose(); }
+  });
+
+  it('waits for the latest draft before renaming and flushes a pending rename before shutdown', async () => {
+    const app = await setup();
+    await save(app.ai, '初始');
+    const id = app.ai.getView().activeConversationId!;
+    const commit = vi.mocked(app.storage.commit).getMockImplementation()!;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(app.storage.commit).mockImplementationOnce(async (...args) => { await gate; return commit(...args); });
+    app.ai.saveAssistantSession(session(app.ai, '最新'));
+    const renaming = app.ai.renameConversation(id, '新名称');
+    let closed = false;
+    const closing = app.ai.flushAssistantSession().then(() => { closed = true; });
+    await vi.waitFor(() => expect(app.ai.getView().conversationBusy).toBe(true));
+    expect(closed).toBe(false);
+    release();
+    await Promise.all([renaming, closing]);
+    expect(await app.library.loadAiAssistantSession(id)).toMatchObject({ title: '新名称', draft: '最新草稿', messages: session(app.ai, '最新').messages });
+    app.ai.dispose();
+  });
+
+  it('cancels obsolete searches without writing or changing the current conversation', async () => {
+    const app = await setup();
+    await save(app.ai, '保留');
+    const before = app.snapshot();
+    const controller = new AbortController();
+    const searching = app.ai.searchConversations('保留', controller.signal);
+    controller.abort();
+    await expect(searching).rejects.toMatchObject({ name: 'AbortError' });
+    expect(app.snapshot()).toEqual(before);
+    expect(app.ai.getAssistantSession()?.draft).toBe('保留草稿');
+    app.ai.dispose();
+  });
+});
+
 describe('independent local AI conversations', () => {
   it('restores different models of the same provider without changing another conversation', async () => {
     const app = await setup();
