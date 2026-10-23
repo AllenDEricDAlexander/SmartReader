@@ -1,5 +1,5 @@
 import { createVaultKey, decryptJson, deriveVaultKey, encryptJson } from '../library/libraryCrypto';
-import { aiConversationTitle, compareAiConversations, emptyMetadata, providerModels, type AiAssistantSession, type AiChatTurn, type AiConversationSummary, type AiModelSelection, type AiProviderProfile, type AiRetrieval, type AiSource, type MetadataField, type Paper, type PaperMetadata } from '../library/libraryModels';
+import { aiConversationTitle, compareAiConversations, emptyMetadata, providerModels, type AiAssistantSession, type AiChatTurn, type AiConversationGroup, type AiConversationSummary, type AiModelSelection, type AiProviderProfile, type AiRetrieval, type AiSource, type MetadataField, type Paper, type PaperMetadata } from '../library/libraryModels';
 import { errorMessage, LibraryService } from '../library/libraryService';
 import { failureStatus, normalizeBaseUrl, providerDetail, requestCompletion, streamCompletion, type AiMessage } from './openAiClient';
 import { KnowledgeService, type KnowledgeDependencies } from './knowledgeService';
@@ -40,6 +40,7 @@ export type AiActivity = {
   sessionError?: string;
   activeConversationId?: string;
   conversations?: AiConversationSummary[];
+  conversationGroups?: AiConversationGroup[];
   conversationBusy?: boolean;
   conversationSelection?: AiModelSelection;
 };
@@ -279,8 +280,8 @@ export class AiService {
     do { pending = this.sessionQueue; await pending; } while (pending !== this.sessionQueue);
   }
 
-  createConversation(): Promise<void> {
-    return this.changeConversation(() => this.library.createAiConversation());
+  createConversation(groupId: string | null = null): Promise<void> {
+    return this.changeConversation(() => this.library.createAiConversation(groupId));
   }
 
   selectConversation(id: string): Promise<void> {
@@ -314,6 +315,24 @@ export class AiService {
   reorderPinnedConversations(ids: readonly string[]): Promise<void> {
     const order = [...ids];
     return this.changeConversation(() => this.library.reorderAiPinnedConversations(order));
+  }
+
+  async createConversationGroup(name: string): Promise<AiConversationGroup> {
+    let group!: AiConversationGroup;
+    await this.changeConversation(async () => { group = await this.library.createAiConversationGroup(name); });
+    return group;
+  }
+
+  renameConversationGroup(id: string, name: string): Promise<void> {
+    return this.changeConversation(() => this.library.renameAiConversationGroup(id, name));
+  }
+
+  deleteConversationGroup(id: string): Promise<void> {
+    return this.changeConversation(() => this.library.deleteAiConversationGroup(id));
+  }
+
+  moveConversationToGroup(id: string, groupId: string | null): Promise<void> {
+    return this.changeConversation(() => this.library.moveAiConversationToGroup(id, groupId));
   }
 
   private changeConversation(action: () => Promise<unknown>): Promise<void> {
@@ -873,12 +892,13 @@ export class AiService {
       sessionSaving: this.sessionSaving, sessionError: this.sessionError,
       activeConversationId: history?.activeId, conversationBusy: this.conversationBusy,
       conversationSelection: this.conversationSelection(),
+      conversationGroups: history?.groups ?? [],
       conversations: history?.entries.map((entry) => {
         const stored = entry.session;
         const locked = stored?.kind === 'encrypted' && stored.vaultIds.some((id) => !unlocked.includes(id));
         const session = stored?.kind === 'plain' ? stored.session : !locked && entry.id === history.activeId ? this.assistantSession : null;
         const messages = Array.isArray(session?.messages) ? session.messages : [];
-        return { id: entry.id, updatedAt: entry.updatedAt, locked: Boolean(locked), pinned: Boolean(entry.pinned), pinOrder: entry.pinOrder,
+        return { id: entry.id, updatedAt: entry.updatedAt, locked: Boolean(locked), pinned: Boolean(entry.pinned), pinOrder: entry.pinOrder, groupId: entry.groupId ?? null,
           title: aiConversationTitle(session, stored?.kind === 'encrypted'),
           messageCount: session ? messages.length : stored?.kind === 'encrypted' ? null : 0 };
       }).sort(compareAiConversations) ?? [],

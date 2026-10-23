@@ -438,11 +438,11 @@ mod tests {
                 .unwrap();
             first["session"]["title"] = json!("已重命名的科研讨论");
             history["aiConversations"] = json!({
-                "activeId": "second", "entries": [
+                "activeId": "second", "groups": [{"id": "research", "name": "研究讨论"}, {"id": "archive", "name": "归档"}], "entries": [
                     {"id": "first", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": first, "pinned": true, "pinOrder": 1,
-                        "selection": {"providerId": "provider-one", "model": "model-one"}},
+                        "groupId": "research", "selection": {"providerId": "provider-one", "model": "model-one"}},
                     {"id": "second", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": null, "pinned": false,
-                        "selection": {"providerId": "provider-two", "model": "model-two"}},
+                        "groupId": "archive", "selection": {"providerId": "provider-two", "model": "model-two"}},
                     {"id": "third", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": null, "pinned": true, "pinOrder": 0,
                         "selection": {"providerId": "provider-three", "model": "model-three"}}
                 ]
@@ -453,6 +453,15 @@ mod tests {
             let connection = crate::db::open_database(&path).unwrap();
             let restored = read_snapshot(&connection).unwrap().data.unwrap();
             assert_eq!(restored["aiConversations"]["activeId"], "second");
+            assert_eq!(restored["aiConversations"]["groups"][0]["name"], "研究讨论");
+            assert_eq!(
+                restored["aiConversations"]["entries"][0]["groupId"],
+                "research"
+            );
+            assert_eq!(
+                restored["aiConversations"]["entries"][1]["groupId"],
+                "archive"
+            );
             assert_eq!(restored["aiConversations"]["entries"][0]["pinned"], true);
             assert_eq!(restored["aiConversations"]["entries"][1]["pinned"], false);
             assert_eq!(restored["aiConversations"]["entries"][0]["pinOrder"], 1);

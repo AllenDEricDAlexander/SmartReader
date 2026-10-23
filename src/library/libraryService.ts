@@ -9,7 +9,7 @@ import {
 } from './libraryFolders';
 import {
   aiConversationTitle, compareAiConversations, emptyLibrary, emptyMetadata, MAX_PINNED_AI_CONVERSATIONS, paperDocumentKey,
-  type AiAssistantSession, type AiConversation, type AiConversationSummary, type AiModelSelection, type AiSettings, type EncryptedData, type FolderVault, type LibraryPreferences, type LibraryReaderSession, type LibrarySnapshot, type StoredAiAssistantSession,
+  type AiAssistantSession, type AiConversation, type AiConversationGroup, type AiConversationSummary, type AiModelSelection, type AiSettings, type EncryptedData, type FolderVault, type LibraryPreferences, type LibraryReaderSession, type LibrarySnapshot, type StoredAiAssistantSession,
   type MetadataField, type Paper, type PaperMetadata,
 } from './libraryModels';
 import { LibrarySearchIndex } from './librarySearch';
@@ -514,6 +514,14 @@ export class LibraryService {
       if (entries.some((entry) => entry.pinOrder !== undefined && (!Number.isSafeInteger(entry.pinOrder) || entry.pinOrder < 0))) {
         throw new Error('本地会话置顶顺序格式无效，原始记录未修改。');
       }
+      const groups = this.snapshot.aiConversations.groups;
+      if (groups !== undefined && (!Array.isArray(groups) || groups.some((group) => !group || typeof group.id !== 'string' || !group.id
+        || typeof group.name !== 'string' || !group.name.trim() || group.name.length > 100)
+        || new Set(groups.map((group) => group.id)).size !== groups.length)) {
+        throw new Error('本地会话分组格式无效，原始记录未修改。');
+      }
+      if (entries.some((entry) => entry.groupId != null && (typeof entry.groupId !== 'string'
+        || !groups?.some((group) => group.id === entry.groupId)))) throw new Error('本地会话分组归属无效，原始记录未修改。');
       if (entries.some((entry) => entry.selection !== undefined && (!entry.selection
         || (entry.selection.providerId !== null && typeof entry.selection.providerId !== 'string')
         || typeof entry.selection.model !== 'string'))) throw new Error('本地会话模型选择格式无效，原始记录未修改。');
@@ -535,12 +543,14 @@ export class LibraryService {
     });
   }
 
-  async createAiConversation(): Promise<string> {
+  async createAiConversation(groupId: string | null = null): Promise<string> {
     await this.initializeAiConversations();
     return this.mutate((tx) => {
       const history = tx.snapshot.aiConversations!;
+      if (groupId !== null && !history.groups?.some((group) => group.id === groupId)) throw new Error('会话分组不存在。');
       const selection = history.entries.find((item) => item.id === history.activeId)?.selection ?? this.defaultAiSelection(tx.snapshot.ai);
       const entry = this.newAiConversation(null, selection);
+      if (groupId !== null) entry.groupId = groupId;
       tx.snapshot.aiConversations!.entries.push(entry);
       tx.snapshot.aiConversations!.activeId = entry.id;
       return entry.id;
@@ -617,6 +627,54 @@ export class LibraryService {
     });
   }
 
+  async createAiConversationGroup(name: string): Promise<AiConversationGroup> {
+    await this.initializeAiConversations();
+    return this.mutate((tx) => {
+      const groups = tx.snapshot.aiConversations!.groups ??= [];
+      const group = { id: crypto.randomUUID(), name: this.aiConversationGroupName(name, groups) };
+      groups.push(group);
+      return { ...group };
+    });
+  }
+
+  async renameAiConversationGroup(id: string, name: string): Promise<void> {
+    await this.initializeAiConversations();
+    await this.mutate((tx) => {
+      const groups = tx.snapshot.aiConversations!.groups ?? [];
+      const group = groups.find((item) => item.id === id);
+      if (!group) throw new Error('会话分组不存在。');
+      group.name = this.aiConversationGroupName(name, groups, id);
+    });
+  }
+
+  async deleteAiConversationGroup(id: string): Promise<void> {
+    await this.initializeAiConversations();
+    await this.mutate((tx) => {
+      const history = tx.snapshot.aiConversations!;
+      if (!history.groups?.some((group) => group.id === id)) throw new Error('会话分组不存在。');
+      history.groups = history.groups.filter((group) => group.id !== id);
+      for (const entry of history.entries) if (entry.groupId === id) entry.groupId = null;
+    });
+  }
+
+  async moveAiConversationToGroup(id: string, groupId: string | null): Promise<void> {
+    await this.initializeAiConversations();
+    await this.mutate((tx) => {
+      const history = tx.snapshot.aiConversations!;
+      const entry = history.entries.find((item) => item.id === id);
+      if (!entry) throw new Error('历史会话不存在。');
+      if (groupId !== null && !history.groups?.some((group) => group.id === groupId)) throw new Error('会话分组不存在。');
+      entry.groupId = groupId;
+    });
+  }
+
+  private aiConversationGroupName(name: string, groups: AiConversationGroup[], ignoredId?: string): string {
+    const normalized = name.replace(/\s+/g, ' ').trim();
+    if (!normalized || normalized.length > 100) throw new Error('分组名称需为 1–100 个字符。');
+    if (groups.some((group) => group.id !== ignoredId && group.name === normalized)) throw new Error('已存在同名会话分组。');
+    return normalized;
+  }
+
   async searchAiConversations(query: string, signal?: AbortSignal): Promise<AiConversationSummary[]> {
     signal?.throwIfAborted();
     await this.initializeAiConversations();
@@ -644,7 +702,7 @@ export class LibraryService {
           const content = [title, ...visible?.messages.map((message) => message.content) ?? []].join(' ').replace(/\s+/g, ' ').toLocaleLowerCase();
           if (isLocked || !content.includes(needle)) return [];
         }
-        return [{ id: entry.id, title, updatedAt: entry.updatedAt, locked: isLocked, pinned: Boolean(entry.pinned), pinOrder: entry.pinOrder,
+        return [{ id: entry.id, title, updatedAt: entry.updatedAt, locked: isLocked, pinned: Boolean(entry.pinned), pinOrder: entry.pinOrder, groupId: entry.groupId ?? null,
           messageCount: visible ? visible.messages.length : entry.session?.kind === 'encrypted' || isLocked ? null : 0 }];
       }).sort(compareAiConversations);
     });

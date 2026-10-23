@@ -147,9 +147,11 @@ export type AiConversation = {
   selection?: AiModelSelection;
   pinned?: boolean;
   pinOrder?: number;
+  groupId?: string | null;
 };
-export type AiConversationSummary = { id: string; title: string; updatedAt: string; locked: boolean; messageCount: number | null; pinned?: boolean; pinOrder?: number };
-export type AiConversationHistory = { activeId: string; entries: AiConversation[] };
+export type AiConversationSummary = { id: string; title: string; updatedAt: string; locked: boolean; messageCount: number | null; pinned?: boolean; pinOrder?: number; groupId?: string | null };
+export type AiConversationGroup = { id: string; name: string };
+export type AiConversationHistory = { activeId: string; entries: AiConversation[]; groups?: AiConversationGroup[] };
 export const MAX_PINNED_AI_CONVERSATIONS = 10;
 
 export type LibrarySnapshot = {
