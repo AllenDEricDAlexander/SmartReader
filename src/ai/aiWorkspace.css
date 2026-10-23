@@ -41,6 +41,12 @@
 .ai-history-group-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .ai-history-group-actions button { padding: 5px 7px; font-size: 11px; }
 .ai-history-groups p { margin: 0; }
+.ai-group-order > summary { cursor: pointer; font-size: 12px; }
+.ai-group-order > p { margin: 8px 0; }
+.ai-group-order .ai-group-order-list { max-height: 180px; overflow: auto; }
+.ai-group-order-select { flex: 1; display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; padding: 8px; border: 0; background: transparent; text-align: left; font-size: 12px; }
+.ai-group-order-select > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-group-order-select > small { color: var(--sr-text-muted); }
 .ai-history-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .ai-history-list > li { display: flex; min-width: 0; border: 1px solid var(--sr-border); border-radius: 8px; }
 .ai-history-list > li.is-active { border-color: var(--sr-primary); background: var(--sr-primary-soft); }

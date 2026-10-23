@@ -94,6 +94,24 @@ function aimDrag(handle: Element, title: string | null) {
   return row;
 }
 
+function startGroupDrag(name: string) {
+  const handle = screen.getByRole('button', { name: `拖动排序分组 ${name}` });
+  Object.defineProperties(handle, {
+    setPointerCapture: { configurable: true, value: vi.fn() },
+    hasPointerCapture: { configurable: true, value: () => true },
+    releasePointerCapture: { configurable: true, value: vi.fn() },
+  });
+  pointerEvent(handle, 'pointerdown', { clientY: 20 });
+  return handle;
+}
+
+function aimGroupDrag(handle: Element, name: string | null) {
+  const row = name ? screen.getByRole('button', { name: `查看分组 ${name}` }).closest('li') : null;
+  hitTest.mockReturnValue(row);
+  pointerEvent(handle, 'pointermove');
+  return row;
+}
+
 async function namedConversations(names: string[], pinCount = names.length) {
   const app = await setup();
   const ids = [];
@@ -107,6 +125,14 @@ async function namedConversations(names: string[], pinCount = names.length) {
   return { ...app, ids };
 }
 
+async function groupedConversations() {
+  const app = await namedConversations(['历史会话', '当前会话']);
+  const groups = [];
+  for (const name of ['研究', '归档', '参考']) groups.push(await app.ai.createConversationGroup(name));
+  for (let index = 0; index < app.ids.length; index += 1) await app.ai.moveConversationToGroup(app.ids[index], groups[index].id);
+  return { ...app, groups };
+}
+
 beforeEach(() => {
   vi.stubGlobal('crypto', webcrypto);
   hitTest = vi.fn<(x: number, y: number) => Element | null>().mockReturnValue(null);
@@ -114,6 +140,146 @@ beforeEach(() => {
 });
 
 describe('AI conversation history UI', () => {
+  it('drags and keyboard-sorts groups consistently across selectors and restart while preserving membership and drafts', async () => {
+    const app = await groupedConversations();
+    const [one, two, three] = app.groups;
+    const panel = render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保留的草稿' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: two.id } });
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    const before = app.snapshot().aiConversations!;
+    fireEvent.click(screen.getByText('调整分组顺序'));
+    const handle = startGroupDrag('参考');
+    expect(aimGroupDrag(handle, '研究')).toHaveClass('drop-before');
+    pointerEvent(handle, 'pointerup');
+    await screen.findByText('分组顺序已保存。');
+    expect(app.snapshot().aiConversations).toEqual({ ...before, groups: [three, one, two] });
+    expect(screen.getByRole('combobox', { name: '筛选会话分组' })).toHaveValue(two.id);
+    expect(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' })).toHaveValue(two.id);
+    expect(within(screen.getByRole('combobox', { name: '筛选会话分组' })).getAllByRole('option').map((option) => (option as HTMLOptionElement).value)).toEqual(['all', '', three.id, one.id, two.id]);
+    expect(within(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' })).getAllByRole('option').map((option) => (option as HTMLOptionElement).value)).toEqual(['', three.id, one.id, two.id]);
+    fireEvent.keyDown(screen.getByRole('button', { name: '拖动排序分组 参考' }), { key: 'ArrowDown' });
+    await waitFor(() => expect(app.ai.getView().conversationGroups).toEqual([one, three, two]));
+    await waitFor(() => expect(screen.getByRole('button', { name: '拖动排序分组 参考' })).toHaveFocus());
+    fireEvent.keyDown(screen.getByRole('button', { name: '拖动排序分组 参考' }), { key: 'ArrowUp' });
+    await waitFor(() => expect(app.ai.getView().conversationGroups).toEqual([three, one, two]));
+    expect(screen.queryByRole('button', { name: '拖动排序分组 全部会话' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '拖动排序分组 未分组' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('保留的草稿');
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    panel.unmount(); app.ai.dispose();
+    const restarted = services(app.storage);
+    render(<AiAssistant library={restarted.library} ai={restarted.ai} onOpenPaper={vi.fn()} />);
+    await waitFor(() => expect(screen.getByLabelText('科研问题')).toHaveValue('保留的草稿'));
+    expect(restarted.ai.getView().conversationGroups).toEqual([three, one, two]);
+    expect(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' })).toHaveValue(two.id);
+    fireEvent.click(screen.getByText('调整分组顺序'));
+    expect(screen.getAllByRole('button', { name: /^查看分组 / }).map((button) => button.getAttribute('aria-label'))).toEqual(['查看分组 参考', '查看分组 研究', '查看分组 归档']);
+    await act(async () => { await restarted.ai.flushAssistantSession(); });
+    restarted.ai.dispose();
+  });
+
+  it('retains original group order and chat state when saving a drag fails and supports retrying', async () => {
+    const app = await groupedConversations();
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保留草稿' } });
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    const before = app.snapshot().aiConversations;
+    fireEvent.click(screen.getByText('调整分组顺序'));
+    vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('分组顺序保存失败'));
+    let handle = startGroupDrag('参考');
+    aimGroupDrag(handle, '研究');
+    pointerEvent(handle, 'pointerup');
+    expect(await screen.findByRole('alert')).toHaveTextContent('分组顺序保存失败');
+    expect(app.snapshot().aiConversations).toEqual(before);
+    expect(screen.getByLabelText('科研问题')).toHaveValue('保留草稿');
+    handle = startGroupDrag('参考');
+    aimGroupDrag(handle, '研究');
+    pointerEvent(handle, 'pointerup');
+    await screen.findByText('分组顺序已保存。');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(app.snapshot().aiConversations?.entries).toEqual(before?.entries);
+    expect(app.ai.getView().conversationGroups).toEqual([app.groups[2], app.groups[0], app.groups[1]]);
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    app.ai.dispose();
+  });
+
+  it('cancels group dragging on escape, pointer cancellation, a click, an invalid target or closing the editor', async () => {
+    const app = await groupedConversations();
+    const drop = vi.fn();
+    render(<div onDrop={drop}><AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} /></div>);
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    const before = app.snapshot().aiConversations;
+    const reorder = vi.spyOn(app.ai, 'reorderConversationGroups');
+    fireEvent.click(screen.getByText('调整分组顺序'));
+    let handle = startGroupDrag('研究');
+    aimGroupDrag(handle, '归档');
+    pointerEvent(handle, 'pointercancel');
+    handle = startGroupDrag('研究');
+    aimGroupDrag(handle, '归档');
+    fireEvent.keyDown(handle, { key: 'Escape' });
+    pointerEvent(handle, 'pointerup');
+    handle = startGroupDrag('研究');
+    pointerEvent(handle, 'pointerup', { clientY: 20 });
+    for (const target of ['研究', null]) {
+      handle = startGroupDrag('研究'); aimGroupDrag(handle, target); pointerEvent(handle, 'pointerup');
+    }
+    handle = startGroupDrag('研究');
+    hitTest.mockReturnValue(screen.getByRole('button', { name: '打开会话 当前会话' }).closest('li'));
+    pointerEvent(handle, 'pointermove'); pointerEvent(handle, 'pointerup');
+    handle = startGroupDrag('研究');
+    aimGroupDrag(handle, '归档');
+    const source = handle.closest('li')!;
+    fireEvent.click(screen.getByText('调整分组顺序'));
+    await waitFor(() => expect(source).not.toHaveClass('is-dragging'));
+    pointerEvent(handle, 'pointerup');
+    fireEvent.drop(source, { dataTransfer: { files: [new File(['%PDF-1.7'], 'drop.pdf')] } });
+    expect(drop).toHaveBeenCalledTimes(1);
+    expect(reorder).not.toHaveBeenCalled();
+    expect(app.snapshot().aiConversations).toEqual(before);
+    app.ai.dispose();
+  });
+
+  it('rejects stale group dragging when a new group appears', async () => {
+    const app = await groupedConversations();
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    const reorder = vi.spyOn(app.ai, 'reorderConversationGroups');
+    fireEvent.click(screen.getByText('调整分组顺序'));
+    const handle = startGroupDrag('参考');
+    aimGroupDrag(handle, '研究');
+    await act(async () => { await app.library.createAiConversationGroup('新增'); });
+    const beforeDrop = app.snapshot().aiConversations;
+    pointerEvent(handle, 'pointerup');
+    expect(await screen.findByRole('alert')).toHaveTextContent('会话分组列表已变化');
+    expect(reorder).not.toHaveBeenCalled();
+    expect(app.snapshot().aiConversations).toEqual(beforeDrop);
+    app.ai.dispose();
+  });
+
+  it('scrolls the group ordering list near its edge and stops after cancellation', async () => {
+    const app = await groupedConversations();
+    for (let index = 0; index < 5; index += 1) await app.ai.createConversationGroup(`其他${index}`);
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    fireEvent.click(screen.getByText('调整分组顺序'));
+    const list = screen.getByRole('list', { name: '分组排序' });
+    const bounds = vi.spyOn(list, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 200, left: 0, right: 240, x: 0, y: 0, width: 240, height: 200, toJSON: () => ({}) });
+    const frames: FrameRequestCallback[] = [];
+    let frameId = 0;
+    const request = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => { frames.push(callback); return ++frameId; });
+    const cancel = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => undefined);
+    try {
+      const handle = startGroupDrag('研究');
+      hitTest.mockReturnValue(screen.getByRole('button', { name: '查看分组 归档' }).closest('li'));
+      pointerEvent(handle, 'pointermove', { clientY: 195 });
+      expect(frames).toHaveLength(1);
+      act(() => { frames.shift()!(0); });
+      expect(list.scrollTop).toBe(10);
+      pointerEvent(handle, 'pointercancel');
+      expect(cancel).toHaveBeenCalledWith(frameId);
+    } finally { request.mockRestore(); cancel.mockRestore(); bounds.mockRestore(); app.ai.dispose(); }
+  });
+
   it('manages groups and restores memberships after restarting while deleted-group chats keep their own follow-up context', async () => {
     const app = await setup();
     const provider = app.library.getView().snapshot.ai.providers[0];
@@ -153,6 +319,15 @@ describe('AI conversation history UI', () => {
     fireEvent.change(screen.getByLabelText('分组名称'), { target: { value: '已归档' } });
     fireEvent.click(screen.getByRole('button', { name: '保存分组' }));
     await waitFor(() => expect(screen.queryByLabelText('分组名称')).not.toBeInTheDocument());
+    const beforeOrder = app.snapshot().aiConversations!;
+    fireEvent.click(screen.getByText('调整分组顺序'));
+    const groupHandle = startGroupDrag('已归档');
+    aimGroupDrag(groupHandle, '研究讨论');
+    pointerEvent(groupHandle, 'pointerup');
+    await screen.findByText('分组顺序已保存。');
+    expect(app.snapshot().aiConversations?.entries).toEqual(beforeOrder.entries);
+    expect(screen.getByRole('combobox', { name: '筛选会话分组' })).toHaveValue(archive.id);
+    expect(screen.getByLabelText('科研问题')).toHaveValue('乙的草稿');
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: research.id } });
     await act(async () => { await app.ai.flushAssistantSession(); });
     const before = app.snapshot().aiConversations!;
@@ -518,8 +693,10 @@ describe('AI conversation history UI', () => {
   it('disables pointer and keyboard reordering while a response is in progress', async () => {
     const app = await namedConversations(['甲', '乙']);
     const group = await app.ai.createConversationGroup('研究');
+    await app.ai.createConversationGroup('参考');
     for (const id of app.ids) await app.ai.moveConversationToGroup(id, group.id);
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    fireEvent.click(screen.getByText('调整分组顺序'));
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
     const reorder = vi.spyOn(app.ai, 'reorderPinnedConversations');
     let finish!: (answer: string) => void;
@@ -528,6 +705,7 @@ describe('AI conversation history UI', () => {
     await waitFor(() => expect(app.completion).toHaveBeenCalled());
     const handle = screen.getByRole('button', { name: '拖动排序置顶会话 甲' });
     expect(handle).toBeDisabled();
+    expect(screen.getByRole('button', { name: '拖动排序分组 研究' })).toBeDisabled();
     for (const name of ['新建分组', '重命名分组', '删除分组']) expect(screen.getByRole('button', { name })).toBeDisabled();
     expect(screen.getByRole('combobox', { name: '移动会话 甲 到分组' })).toBeDisabled();
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
