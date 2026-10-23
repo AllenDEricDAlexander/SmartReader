@@ -137,11 +137,13 @@ export type StoredAiAssistantSession = { paperIds: string[] } & (
   | { kind: 'plain'; session: Omit<AiAssistantSession, 'epoch'> }
   | { kind: 'encrypted'; vaultIds: string[]; encrypted: EncryptedData }
 );
+export type AiModelSelection = { providerId: string | null; model: string };
 export type AiConversation = {
   id: string;
   createdAt: string;
   updatedAt: string;
   session: StoredAiAssistantSession | null;
+  selection?: AiModelSelection;
 };
 export type AiConversationSummary = { id: string; title: string; updatedAt: string; locked: boolean; messageCount: number | null };
 export type AiConversationHistory = { activeId: string; entries: AiConversation[] };

@@ -9,7 +9,7 @@ import {
 } from './libraryFolders';
 import {
   emptyLibrary, emptyMetadata, paperDocumentKey,
-  type AiAssistantSession, type AiConversation, type AiSettings, type EncryptedData, type FolderVault, type LibraryPreferences, type LibraryReaderSession, type LibrarySnapshot, type StoredAiAssistantSession,
+  type AiAssistantSession, type AiConversation, type AiModelSelection, type AiSettings, type EncryptedData, type FolderVault, type LibraryPreferences, type LibraryReaderSession, type LibrarySnapshot, type StoredAiAssistantSession,
   type MetadataField, type Paper, type PaperMetadata,
 } from './libraryModels';
 import { LibrarySearchIndex } from './librarySearch';
@@ -489,8 +489,16 @@ export class LibraryService {
     });
   }
 
-  async saveAiSettings(settings: AiSettings): Promise<void> {
-    await this.mutate((tx) => { tx.snapshot.ai = structuredClone(settings); });
+  async saveAiSettings(settings: AiSettings, conversation?: { id: string; selection: AiModelSelection }): Promise<void> {
+    await this.mutate((tx) => {
+      tx.snapshot.ai = structuredClone(settings);
+      if (conversation) {
+        const entry = tx.snapshot.aiConversations?.entries.find((item) => item.id === conversation.id);
+        if (!entry) throw new Error('历史会话不存在，厂商与模型选择未保存。');
+        entry.selection = structuredClone(conversation.selection);
+        entry.updatedAt = new Date().toISOString();
+      }
+    });
   }
 
   async initializeAiConversations(): Promise<void> {
@@ -500,13 +508,22 @@ export class LibraryService {
       if (!Array.isArray(entries) || !entries.length || new Set(entries.map((entry) => entry.id)).size !== entries.length
         || entries.some((entry) => !entry.id || typeof entry.createdAt !== 'string' || typeof entry.updatedAt !== 'string')
         || !entries.some((entry) => entry.id === activeId)) throw new Error('本地会话列表格式无效，原始记录未修改。');
+      if (entries.some((entry) => entry.selection !== undefined && (!entry.selection
+        || (entry.selection.providerId !== null && typeof entry.selection.providerId !== 'string')
+        || typeof entry.selection.model !== 'string'))) throw new Error('本地会话模型选择格式无效，原始记录未修改。');
+      if (entries.some((entry) => entry.selection === undefined)) {
+        await this.mutate((tx) => {
+          const selection = this.defaultAiSelection(tx.snapshot.ai);
+          for (const entry of tx.snapshot.aiConversations!.entries) entry.selection ??= { ...selection };
+        });
+      }
       return;
     }
     await this.mutate((tx) => {
       if (tx.snapshot.aiConversations) return;
       const saved = tx.snapshot.aiSession ?? null;
       if (saved && !validStoredAiSession(saved)) throw new Error('本地聊天记录格式无效，原始记录未修改。');
-      const entry = this.newAiConversation(saved);
+      const entry = this.newAiConversation(saved, this.defaultAiSelection(tx.snapshot.ai));
       tx.snapshot.aiConversations = { activeId: entry.id, entries: [entry] };
       delete tx.snapshot.aiSession;
     });
@@ -515,7 +532,9 @@ export class LibraryService {
   async createAiConversation(): Promise<string> {
     await this.initializeAiConversations();
     return this.mutate((tx) => {
-      const entry = this.newAiConversation(null);
+      const history = tx.snapshot.aiConversations!;
+      const selection = history.entries.find((item) => item.id === history.activeId)?.selection ?? this.defaultAiSelection(tx.snapshot.ai);
+      const entry = this.newAiConversation(null, selection);
       tx.snapshot.aiConversations!.entries.push(entry);
       tx.snapshot.aiConversations!.activeId = entry.id;
       return entry.id;
@@ -535,15 +554,21 @@ export class LibraryService {
     await this.mutate((tx) => {
       const history = tx.snapshot.aiConversations!;
       if (!history.entries.some((entry) => entry.id === id)) throw new Error('历史会话不存在。');
+      const selection = history.entries.find((entry) => entry.id === history.activeId)?.selection ?? this.defaultAiSelection(tx.snapshot.ai);
       history.entries = history.entries.filter((entry) => entry.id !== id);
-      if (!history.entries.length) history.entries.push(this.newAiConversation(null));
+      if (!history.entries.length) history.entries.push(this.newAiConversation(null, selection));
       if (history.activeId === id) history.activeId = [...history.entries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0].id;
     });
   }
 
-  private newAiConversation(session: StoredAiAssistantSession | null): AiConversation {
+  private defaultAiSelection(settings: AiSettings): AiModelSelection {
+    const provider = settings.providers.find((profile) => profile.id === settings.activeProviderId);
+    return { providerId: provider?.id ?? null, model: provider?.model ?? '' };
+  }
+
+  private newAiConversation(session: StoredAiAssistantSession | null, selection: AiModelSelection): AiConversation {
     const now = new Date().toISOString();
-    return { id: crypto.randomUUID(), createdAt: now, updatedAt: now, session };
+    return { id: crypto.randomUUID(), createdAt: now, updatedAt: now, session, selection: { ...selection } };
   }
 
   async loadAiAssistantSession(id?: string): Promise<Omit<AiAssistantSession, 'epoch'> | null> {

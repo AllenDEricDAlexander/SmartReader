@@ -438,8 +438,10 @@ mod tests {
                 .unwrap();
             history["aiConversations"] = json!({
                 "activeId": "second", "entries": [
-                    {"id": "first", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": first},
-                    {"id": "second", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": null}
+                    {"id": "first", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": first,
+                        "selection": {"providerId": "provider-one", "model": "model-one"}},
+                    {"id": "second", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": null,
+                        "selection": {"providerId": "provider-two", "model": "model-two"}}
                 ]
             });
             write_snapshot(&mut connection, 1, history, vec![]).unwrap();
@@ -448,6 +450,14 @@ mod tests {
             let connection = crate::db::open_database(&path).unwrap();
             let restored = read_snapshot(&connection).unwrap().data.unwrap();
             assert_eq!(restored["aiConversations"]["activeId"], "second");
+            assert_eq!(
+                restored["aiConversations"]["entries"][0]["selection"]["model"],
+                "model-one"
+            );
+            assert_eq!(
+                restored["aiConversations"]["entries"][1]["selection"]["providerId"],
+                "provider-two"
+            );
             assert_eq!(
                 restored["aiConversations"]["entries"]
                     .as_array()
