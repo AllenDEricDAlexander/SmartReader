@@ -331,6 +331,11 @@ export class AiService {
     return this.changeConversation(() => this.library.deleteAiConversationGroup(id));
   }
 
+  reorderConversationGroups(ids: readonly string[]): Promise<void> {
+    const order = [...ids];
+    return this.changeConversation(() => this.library.reorderAiConversationGroups(order));
+  }
+
   moveConversationToGroup(id: string, groupId: string | null): Promise<void> {
     return this.changeConversation(() => this.library.moveAiConversationToGroup(id, groupId));
   }

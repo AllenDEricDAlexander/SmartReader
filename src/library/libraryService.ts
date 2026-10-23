@@ -657,6 +657,19 @@ export class LibraryService {
     });
   }
 
+  async reorderAiConversationGroups(ids: readonly string[]): Promise<void> {
+    const order = [...ids];
+    await this.initializeAiConversations();
+    await this.mutate((tx) => {
+      const history = tx.snapshot.aiConversations!;
+      const groups = new Map((history.groups ?? []).map((group) => [group.id, group]));
+      if (order.length !== groups.size || new Set(order).size !== order.length || order.some((id) => !groups.has(id))) {
+        throw new Error('会话分组列表已变化，请重新拖拽排序。');
+      }
+      history.groups = order.map((id) => groups.get(id)!);
+    });
+  }
+
   async moveAiConversationToGroup(id: string, groupId: string | null): Promise<void> {
     await this.initializeAiConversations();
     await this.mutate((tx) => {

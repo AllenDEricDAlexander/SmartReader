@@ -53,6 +53,118 @@ async function save(ai: AiService, label: string) {
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 
 describe('local AI conversation groups', () => {
+  it('persists manual group order without changing memberships, pinned order, chats or model choices', async () => {
+    const app = await setup();
+    const provider = await app.ai.saveProvider({ name: '厂商', baseUrl: 'https://one.example/v1', model: 'one', models: ['two'] });
+    const one = await app.ai.createConversationGroup('研究');
+    const two = await app.ai.createConversationGroup('归档');
+    const three = await app.ai.createConversationGroup('参考');
+    const first = app.ai.getView().activeConversationId!;
+    await save(app.ai, '甲');
+    await app.ai.moveConversationToGroup(first, one.id);
+    await app.ai.setConversationPinned(first, true);
+    await app.ai.createConversation(two.id);
+    const second = app.ai.getView().activeConversationId!;
+    await app.ai.selectProvider(provider.id, 'two');
+    await save(app.ai, '乙');
+    await app.ai.setConversationPinned(second, true);
+    const before = app.snapshot();
+    const active = app.ai.getAssistantSession();
+    const order = [three.id, one.id, two.id];
+    await app.ai.reorderConversationGroups(order);
+    expect(app.snapshot().aiConversations).toEqual({ ...before.aiConversations, groups: [three, one, two] });
+    expect(app.snapshot().ai).toEqual(before.ai);
+    expect(app.ai.getAssistantSession()).toEqual(active);
+    expect(app.ai.getView().conversationSelection?.model).toBe('two');
+    app.ai.dispose();
+    const restarted = services(app.storage);
+    await restarted.ai.loadAssistantSession();
+    expect(restarted.ai.getView().conversationGroups?.map((group) => group.id)).toEqual(order);
+    expect(restarted.ai.getView().activeConversationId).toBe(second);
+    expect(restarted.ai.getAssistantSession()?.draft).toBe('乙草稿');
+    expect(restarted.ai.getView().conversationSelection?.model).toBe('two');
+    await restarted.ai.selectConversation(first);
+    expect(restarted.ai.getAssistantSession()?.messages).toEqual(session(restarted.ai, '甲').messages);
+    expect(restarted.ai.getView().conversationSelection?.model).toBe('one');
+    expect(app.snapshot().aiConversations?.entries).toEqual(before.aiConversations?.entries);
+    restarted.ai.dispose();
+  });
+
+  it('keeps manual order through renames, appends new groups and preserves remaining order after deletion', async () => {
+    const app = await setup();
+    const one = await app.ai.createConversationGroup('一');
+    const two = await app.ai.createConversationGroup('二');
+    const three = await app.ai.createConversationGroup('三');
+    await app.ai.reorderConversationGroups([three.id, one.id, two.id]);
+    await app.ai.renameConversationGroup(three.id, '重命名');
+    const four = await app.ai.createConversationGroup('四');
+    expect(app.ai.getView().conversationGroups).toEqual([{ ...three, name: '重命名' }, one, two, four]);
+    await app.ai.deleteConversationGroup(one.id);
+    expect(app.ai.getView().conversationGroups?.map((group) => group.id)).toEqual([three.id, two.id, four.id]);
+    app.ai.dispose();
+  });
+
+  it('rejects missing, duplicate, unknown and stale group reorder requests without saving', async () => {
+    const app = await setup();
+    await save(app.ai, '保留');
+    const one = await app.ai.createConversationGroup('一');
+    const two = await app.ai.createConversationGroup('二');
+    const before = app.snapshot();
+    const active = app.ai.getAssistantSession();
+    const commits = vi.mocked(app.storage.commit).mock.calls.length;
+    for (const order of [[one.id], [one.id, one.id], [one.id, 'missing'], [one.id, 'all'], [one.id, ''], [one.id, two.id, two.id]]) {
+      await expect(app.ai.reorderConversationGroups(order)).rejects.toThrow('会话分组列表已变化');
+      expect(app.snapshot()).toEqual(before);
+      expect(app.ai.getAssistantSession()).toEqual(active);
+      expect(app.storage.commit).toHaveBeenCalledTimes(commits);
+    }
+    await app.ai.deleteConversationGroup(two.id);
+    const afterDelete = app.snapshot();
+    await expect(app.ai.reorderConversationGroups([two.id, one.id])).rejects.toThrow('会话分组列表已变化');
+    expect(app.snapshot()).toEqual(afterDelete);
+    app.ai.dispose();
+  });
+
+  it('retains original group order and conversation data on failure and permits retrying', async () => {
+    const app = await setup();
+    const one = await app.ai.createConversationGroup('一');
+    const two = await app.ai.createConversationGroup('二');
+    await save(app.ai, '保留');
+    const before = app.snapshot();
+    const active = app.ai.getAssistantSession();
+    vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('disk full'));
+    await expect(app.ai.reorderConversationGroups([two.id, one.id])).rejects.toThrow('disk full');
+    expect(app.snapshot()).toEqual(before);
+    expect(app.ai.getAssistantSession()).toEqual(active);
+    await app.ai.reorderConversationGroups([two.id, one.id]);
+    expect(app.ai.getView().conversationGroups).toEqual([two, one]);
+    app.ai.dispose();
+  });
+
+  it('copies the requested group order and waits for pending drafts and sorting before shutdown', async () => {
+    const app = await setup();
+    const one = await app.ai.createConversationGroup('一');
+    const two = await app.ai.createConversationGroup('二');
+    await save(app.ai, '原草稿');
+    const commit = vi.mocked(app.storage.commit).getMockImplementation()!;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(app.storage.commit).mockImplementationOnce(async (...args) => { await gate; return commit(...args); });
+    app.ai.saveAssistantSession(session(app.ai, '最新'));
+    const order = [two.id, one.id];
+    const sorting = app.ai.reorderConversationGroups(order);
+    order.reverse();
+    let closed = false;
+    const closing = app.ai.flushAssistantSession().then(() => { closed = true; });
+    await vi.waitFor(() => expect(app.ai.getView().conversationBusy).toBe(true));
+    expect(closed).toBe(false);
+    release();
+    await Promise.all([sorting, closing]);
+    expect(app.ai.getView().conversationGroups).toEqual([two, one]);
+    expect(app.ai.getAssistantSession()?.draft).toBe('最新草稿');
+    app.ai.dispose();
+  });
+
   it('persists group names and memberships and deletes a group without deleting chats or changing context', async () => {
     const app = await setup();
     const provider = await app.ai.saveProvider({ name: '厂商', baseUrl: 'https://one.example/v1', model: 'one', models: ['two'] }, 'fixture-key', undefined, true);
@@ -227,7 +339,10 @@ describe('local AI conversation groups', () => {
     await app.library.lockVault(vault.id);
     const before = app.snapshot().aiConversations!.entries.find((entry) => entry.id === privateId)!;
     const group = await app.ai.createConversationGroup('加密会话归档');
+    const other = await app.ai.createConversationGroup('其他');
     await app.ai.moveConversationToGroup(privateId, group.id);
+    await app.ai.reorderConversationGroups([other.id, group.id]);
+    expect(app.ai.getView().conversationGroups?.map((item) => item.id)).toEqual([other.id, group.id]);
     expect(app.ai.getView().conversations?.find((entry) => entry.id === privateId)).toMatchObject({ title: '加密会话', locked: true, groupId: group.id });
     await app.ai.deleteConversationGroup(group.id);
     expect(app.snapshot().aiConversations?.entries.find((entry) => entry.id === privateId)).toEqual({ ...before, groupId: null });
