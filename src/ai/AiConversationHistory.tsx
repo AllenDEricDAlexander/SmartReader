@@ -27,6 +27,11 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
   } | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const handles = useRef(new Map<string, HTMLButtonElement>());
+  const deleteButtons = useRef(new Map<string, HTMLButtonElement>());
+  const deleteConfirmation = useRef<HTMLDivElement>(null);
+  const deleteCancel = useRef<HTMLButtonElement>(null);
+  const deleteOrigin = useRef<{ id: string; scrollTop: number } | null>(null);
+  const historyPanel = useRef<HTMLElement>(null);
   const historyList = useRef<HTMLUListElement>(null);
   const pointer = useRef({ x: 0, y: 0 });
   const currentSearch = searchResult?.source === conversations && searchResult?.query === query ? searchResult : null;
@@ -67,6 +72,26 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
     const handle = focusId ? handles.current.get(focusId) : undefined;
     if (!disabled && handle) { handle.focus(); setFocusId(null); }
   }, [disabled, focusId, entries]);
+
+  useEffect(() => {
+    if (!target) return;
+    const frame = requestAnimationFrame(() => {
+      deleteConfirmation.current?.scrollIntoView?.({ block: 'nearest' });
+      deleteCancel.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [target?.id]);
+
+  function cancelDelete() {
+    const origin = deleteOrigin.current;
+    setPendingDelete(null);
+    requestAnimationFrame(() => {
+      if (!origin) return;
+      if (historyPanel.current) historyPanel.current.scrollTop = origin.scrollTop;
+      deleteButtons.current.get(origin.id)?.focus({ preventScroll: true });
+      deleteOrigin.current = null;
+    });
+  }
 
   function pinnedTargetAtPoint(x: number, y: number): string | undefined {
     const row = document.elementFromPoint(x, y)?.closest<HTMLLIElement>('li[data-ai-conversation-id][data-ai-pinned="true"]');
@@ -120,7 +145,7 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
     setFocusId(id);
   }
 
-  return <aside className="ai-history-panel" aria-label="历史会话">
+  return <aside className="ai-history-panel" aria-label="历史会话" ref={historyPanel}>
     <div className="ai-history-heading">
       <span className="ai-history-title"><History size={17} /><h2>历史会话</h2>
         <small>{pinnedCount}/{MAX_PINNED_AI_CONVERSATIONS}</small>
@@ -164,11 +189,12 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
         <button type="button" disabled={disabled} onClick={() => setPendingRename(null)}>取消</button>
       </div>
     </form> : null}
-    {target ? <div className="ai-history-confirm" role="group" aria-label="确认删除历史会话">
+    {target ? <div className="ai-history-confirm" role="group" aria-label="确认删除历史会话" ref={deleteConfirmation}>
       <p>删除“{target.title}”？该会话的聊天记录和上下文将从本机移除。</p>
       <div className="ai-form-actions">
-        <button type="button" disabled={disabled} onClick={() => void perform(() => ai.deleteConversation(target.id))}>确认删除会话</button>
-        <button type="button" disabled={disabled} onClick={() => setPendingDelete(null)}>取消</button>
+        <button type="button" disabled={disabled} onClick={() => void perform(() => ai.deleteConversation(target.id))
+          .then((saved) => { if (saved) deleteOrigin.current = null; })}>确认删除会话</button>
+        <button type="button" disabled={disabled} ref={deleteCancel} onClick={cancelDelete}>取消</button>
       </div>
     </div> : null}
     <ul className="ai-history-list" ref={historyList} id={historyListId}>
@@ -246,7 +272,12 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
               <button type="button" disabled={disabled || entry.locked} aria-label={`重命名会话 ${entry.title}`}
                 onClick={() => { setError(null); setPendingDelete(null); setPendingRename({ id: entry.id, name: entry.title }); }}><PencilLine size={14} /></button>
               <button type="button" className="ai-history-delete" disabled={disabled} aria-label={`删除会话 ${entry.title}`}
-                onClick={() => { setError(null); setPendingRename(null); setPendingDelete(entry.id); }}><Trash2 size={14} /></button>
+                ref={(node) => { if (node) deleteButtons.current.set(entry.id, node); else deleteButtons.current.delete(entry.id); }}
+                onClick={() => {
+                  setError(null); setPendingRename(null);
+                  deleteOrigin.current = { id: entry.id, scrollTop: historyPanel.current?.scrollTop ?? 0 };
+                  setPendingDelete(entry.id);
+                }}><Trash2 size={14} /></button>
             </div>
           </div>
         </div>

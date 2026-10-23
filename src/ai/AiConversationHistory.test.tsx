@@ -83,6 +83,7 @@ async function createGroup(ai: AiService, name: string) {
 }
 
 let hitTest: ReturnType<typeof vi.fn<(x: number, y: number) => Element | null>>;
+let scrollIntoView: ReturnType<typeof vi.fn>;
 
 function pointerEvent(node: Element, type: string, options: MouseEventInit = {}) {
   const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: 150, clientY: 120, ...options });
@@ -152,6 +153,8 @@ beforeEach(() => {
   vi.stubGlobal('crypto', webcrypto);
   hitTest = vi.fn<(x: number, y: number) => Element | null>().mockReturnValue(null);
   Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: hitTest });
+  scrollIntoView = vi.fn();
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
 });
 
 describe('AI conversation history UI', () => {
@@ -1457,6 +1460,7 @@ describe('AI conversation history UI', () => {
 
   it('supports cancellation and confirmation of deleting a history without clearing another conversation', async () => {
     const app = await setup();
+    const remove = vi.spyOn(app.ai, 'deleteConversation');
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
     ask('删除目标');
     await screen.findByText('删除目标回答[S1]');
@@ -1464,8 +1468,19 @@ describe('AI conversation history UI', () => {
     ask('当前会话');
     await screen.findByText('当前会话回答[S1]');
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保留草稿' } });
-    fireEvent.click(screen.getByRole('button', { name: '删除会话 删除目标' }));
-    fireEvent.click(within(screen.getByRole('group', { name: '确认删除历史会话' })).getByRole('button', { name: '取消' }));
+    const panel = screen.getByRole('complementary', { name: '历史会话' });
+    panel.scrollTop = 480;
+    const deleteButton = screen.getByRole('button', { name: '删除会话 删除目标' });
+    fireEvent.click(deleteButton);
+    const confirmation = screen.getByRole('group', { name: '确认删除历史会话' });
+    const cancel = within(confirmation).getByRole('button', { name: '取消' });
+    await waitFor(() => expect(cancel).toHaveFocus());
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(within(confirmation).getByRole('button', { name: '确认删除会话' })).not.toHaveFocus();
+    fireEvent.click(cancel);
+    await waitFor(() => expect(deleteButton).toHaveFocus());
+    expect(panel.scrollTop).toBe(480);
+    expect(remove).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '打开会话 删除目标' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '删除会话 删除目标' }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除会话' }));
