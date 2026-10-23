@@ -58,9 +58,257 @@ async function createConversation() {
   await waitFor(() => expect(screen.getByLabelText('科研问题')).toHaveValue(''));
 }
 
-beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
+let hitTest: ReturnType<typeof vi.fn<(x: number, y: number) => Element | null>>;
+
+function pointerEvent(node: Element, type: string, options: MouseEventInit = {}) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: 150, clientY: 120, ...options });
+  Object.defineProperties(event, { pointerId: { value: 1 }, isPrimary: { value: true } });
+  fireEvent(node, event);
+}
+
+function startDrag(title: string) {
+  const handle = screen.getByRole('button', { name: `拖动排序置顶会话 ${title}` });
+  Object.defineProperties(handle, {
+    setPointerCapture: { configurable: true, value: vi.fn() },
+    hasPointerCapture: { configurable: true, value: () => true },
+    releasePointerCapture: { configurable: true, value: vi.fn() },
+  });
+  pointerEvent(handle, 'pointerdown', { clientY: 20 });
+  return handle;
+}
+
+function aimDrag(handle: Element, title: string | null) {
+  const row = title ? screen.getByRole('button', { name: `打开会话 ${title}` }).closest('li') : null;
+  hitTest.mockReturnValue(row);
+  pointerEvent(handle, 'pointermove');
+  return row;
+}
+
+async function namedConversations(names: string[], pinCount = names.length) {
+  const app = await setup();
+  const ids = [];
+  for (let index = 0; index < names.length; index += 1) {
+    if (index) await app.ai.createConversation();
+    const id = app.ai.getView().activeConversationId!;
+    ids.push(id);
+    await app.ai.renameConversation(id, names[index]);
+    if (index < pinCount) await app.ai.setConversationPinned(id, true);
+  }
+  return { ...app, ids };
+}
+
+beforeEach(() => {
+  vi.stubGlobal('crypto', webcrypto);
+  hitTest = vi.fn<(x: number, y: number) => Element | null>().mockReturnValue(null);
+  Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: hitTest });
+});
 
 describe('AI conversation history UI', () => {
+  it('drags pinned chats into a durable order without changing their model, scope or follow-up context', async () => {
+    const app = await setup();
+    const provider = app.library.getView().snapshot.ai.providers[0];
+    await app.ai.saveProvider({ ...provider, models: ['chat-model', 'fast-model'] });
+    const panel = render(<AiAssistant library={app.library} ai={app.ai} initialPaperId={app.first.id} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'fast-model' } });
+    await screen.findByText('AI 厂商与模型已切换，可继续当前对话。');
+    ask('排序甲');
+    await screen.findByText('排序甲回答[S1]');
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '甲的追问' } });
+    fireEvent.click(screen.getByRole('button', { name: '置顶会话 排序甲' }));
+    await screen.findByRole('button', { name: '取消置顶会话 排序甲' });
+    await createConversation();
+    fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'chat-model' } });
+    await screen.findByText('AI 厂商与模型已切换，可继续当前对话。');
+    fireEvent.click(screen.getByRole('radio', { name: '指定文件（可多选）' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择知识库文件 论文乙' }));
+    ask('排序乙');
+    await screen.findByText('排序乙回答[S1]');
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '乙的草稿' } });
+    fireEvent.click(screen.getByRole('button', { name: '置顶会话 排序乙' }));
+    await screen.findByRole('button', { name: '取消置顶会话 排序乙' });
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    const before = app.snapshot().aiConversations!;
+    const handle = startDrag('排序乙');
+    expect(aimDrag(handle, '排序甲')).toHaveClass('drop-before');
+    pointerEvent(handle, 'pointerup');
+    await screen.findByText('置顶顺序已保存。');
+    expect(handle.releasePointerCapture).toHaveBeenCalledWith(1);
+    expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 排序乙');
+    expect(screen.getByText('排序乙回答[S1]')).toBeInTheDocument();
+    expect(screen.getByLabelText('科研问题')).toHaveValue('乙的草稿');
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('chat-model');
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 论文乙' })).toBeChecked();
+    for (const entry of app.snapshot().aiConversations!.entries) {
+      const original = before.entries.find((item) => item.id === entry.id)!;
+      expect(entry.session).toEqual(original.session);
+      expect(entry.selection).toEqual(original.selection);
+      expect(entry.updatedAt).toBe(original.updatedAt);
+    }
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    panel.unmount(); app.ai.dispose();
+    const restarted = services(app.storage);
+    render(<AiAssistant library={restarted.library} ai={restarted.ai} onOpenPaper={vi.fn()} />);
+    await screen.findByText('排序乙回答[S1]');
+    expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 排序乙');
+    expect(screen.getByLabelText('科研问题')).toHaveValue('乙的草稿');
+    fireEvent.click(screen.getByRole('button', { name: '打开会话 排序甲' }));
+    await screen.findByText('排序甲回答[S1]');
+    expect(screen.getByLabelText('科研问题')).toHaveValue('甲的追问');
+    expect(screen.getByLabelText('聊天模型')).toHaveValue('fast-model');
+    expect(screen.getByRole('checkbox', { name: '选择知识库文件 论文甲' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
+    await screen.findByText('甲的追问回答[S1]');
+    expect(restarted.completion.mock.calls[0][0].model).toBe('fast-model');
+    expect(restarted.completion.mock.calls[0][2].map((message) => message.content)).toContain('排序甲');
+    expect(JSON.stringify(restarted.completion.mock.calls[0][2])).not.toContain('排序乙');
+    expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 排序乙');
+    await act(async () => { await restarted.ai.flushAssistantSession(); });
+    restarted.ai.dispose();
+  });
+
+  it('reorders search results using the full pinned list and supports keyboard moves with focus restoration', async () => {
+    const app = await namedConversations(['目标甲', '隐藏会话', '目标乙', '普通会话'], 3);
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: '拖动排序置顶会话 普通会话' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: '目标' } });
+    await screen.findByText('找到 2 个会话');
+    const handle = startDrag('目标乙');
+    aimDrag(handle, '目标甲');
+    pointerEvent(handle, 'pointerup');
+    await screen.findByText('置顶顺序已保存。');
+    await screen.findByText('找到 2 个会话');
+    expect(app.ai.getView().conversations?.filter((entry) => entry.pinned).map((entry) => entry.id)).toEqual([app.ids[2], app.ids[0], app.ids[1]]);
+    expect(screen.getByText('已置顶 3/10')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '清空会话搜索' }));
+    const keyboard = await screen.findByRole('button', { name: '拖动排序置顶会话 目标甲' });
+    keyboard.focus();
+    fireEvent.keyDown(keyboard, { key: 'ArrowDown' });
+    await waitFor(() => expect(app.ai.getView().conversations?.filter((entry) => entry.pinned).map((entry) => entry.id)).toEqual([app.ids[2], app.ids[1], app.ids[0]]));
+    await waitFor(() => expect(screen.getByRole('button', { name: '拖动排序置顶会话 目标甲' })).toHaveFocus());
+    expect(screen.getAllByRole('button', { name: /^打开会话 / }).map((button) => button.getAttribute('aria-label'))).toEqual([
+      '打开会话 目标乙', '打开会话 隐藏会话', '打开会话 目标甲', '打开会话 普通会话',
+    ]);
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    app.ai.dispose();
+  });
+
+  it('leaves order unchanged on cancellation, a click, an invalid target or an external file drop', async () => {
+    const app = await namedConversations(['甲', '乙', '普通'], 2);
+    const externalDrop = vi.fn();
+    render(<div onDrop={externalDrop}><AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} /></div>);
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    const before = app.snapshot().aiConversations;
+    const reorder = vi.spyOn(app.ai, 'reorderPinnedConversations');
+    let handle = startDrag('甲');
+    aimDrag(handle, '乙');
+    pointerEvent(handle, 'pointercancel');
+    handle = startDrag('甲');
+    aimDrag(handle, '乙');
+    fireEvent.keyDown(handle, { key: 'Escape' });
+    pointerEvent(handle, 'pointerup');
+    handle = startDrag('甲');
+    pointerEvent(handle, 'pointerup', { clientY: 20 });
+    for (const target of ['甲', '普通', null]) {
+      handle = startDrag('甲');
+      aimDrag(handle, target);
+      pointerEvent(handle, 'pointerup');
+    }
+    fireEvent.drop(screen.getByRole('button', { name: '打开会话 乙' }).closest('li')!, { dataTransfer: { files: [new File(['%PDF-1.7'], 'drop.pdf')] } });
+    expect(externalDrop).toHaveBeenCalledTimes(1);
+    expect(reorder).not.toHaveBeenCalled();
+    expect(app.snapshot().aiConversations).toEqual(before);
+    expect(screen.queryByText('置顶顺序已保存。')).not.toBeInTheDocument();
+    app.ai.dispose();
+  });
+
+  it('keeps the original order and draft on a failed reorder and supports dragging again to retry', async () => {
+    const app = await namedConversations(['常用甲', '常用乙', '当前会话'], 2);
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '需要保留的草稿' } });
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    const before = app.snapshot().aiConversations;
+    vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('排序写入失败'));
+    let handle = startDrag('常用甲');
+    aimDrag(handle, '常用乙');
+    pointerEvent(handle, 'pointerup');
+    expect(await screen.findByRole('alert')).toHaveTextContent('排序写入失败');
+    expect(app.snapshot().aiConversations).toEqual(before);
+    expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 常用甲');
+    expect(screen.getByLabelText('科研问题')).toHaveValue('需要保留的草稿');
+    await waitFor(() => expect(screen.getByRole('button', { name: '拖动排序置顶会话 常用甲' })).toHaveFocus());
+    handle = startDrag('常用甲');
+    aimDrag(handle, '常用乙');
+    pointerEvent(handle, 'pointerup');
+    await screen.findByText('置顶顺序已保存。');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 常用乙');
+    expect(screen.getByLabelText('科研问题')).toHaveValue('需要保留的草稿');
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    app.ai.dispose();
+  });
+
+  it('rejects a stale drag after the pinned membership changes', async () => {
+    const app = await namedConversations(['甲', '乙', '新增会话'], 2);
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    const reorder = vi.spyOn(app.ai, 'reorderPinnedConversations');
+    const handle = startDrag('甲');
+    aimDrag(handle, '乙');
+    await act(async () => { await app.library.setAiConversationPinned(app.ids[2], true); });
+    const afterPin = app.snapshot().aiConversations;
+    pointerEvent(handle, 'pointerup');
+    expect(await screen.findByRole('alert')).toHaveTextContent('置顶会话列表已变化');
+    expect(reorder).not.toHaveBeenCalled();
+    expect(app.snapshot().aiConversations).toEqual(afterPin);
+    expect(screen.getByText('已置顶 3/10')).toBeInTheDocument();
+    app.ai.dispose();
+  });
+
+  it('scrolls near the list edge and stops the animation after cancelling', async () => {
+    const app = await namedConversations(['甲', '乙']);
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    const panel = screen.getByRole('complementary', { name: '历史会话' });
+    const bounds = vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 200, left: 0, right: 240, x: 0, y: 0, width: 240, height: 200, toJSON: () => ({}) });
+    const frames: FrameRequestCallback[] = [];
+    let frameId = 0;
+    const request = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => { frames.push(callback); return ++frameId; });
+    const cancel = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => undefined);
+    try {
+      const handle = startDrag('甲');
+      hitTest.mockReturnValue(screen.getByRole('button', { name: '打开会话 乙' }).closest('li'));
+      pointerEvent(handle, 'pointermove', { clientY: 195 });
+      expect(frames).toHaveLength(1);
+      act(() => { frames.shift()!(0); });
+      expect(panel.scrollTop).toBe(10);
+      expect(frames).toHaveLength(1);
+      pointerEvent(handle, 'pointercancel');
+      expect(cancel).toHaveBeenCalledWith(frameId);
+      expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 甲');
+    } finally { request.mockRestore(); cancel.mockRestore(); bounds.mockRestore(); app.ai.dispose(); }
+  });
+
+  it('disables pointer and keyboard reordering while a response is in progress', async () => {
+    const app = await namedConversations(['甲', '乙']);
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    const reorder = vi.spyOn(app.ai, 'reorderPinnedConversations');
+    let finish!: (answer: string) => void;
+    app.completion.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    ask('生成中的回答');
+    await waitFor(() => expect(app.completion).toHaveBeenCalled());
+    const handle = screen.getByRole('button', { name: '拖动排序置顶会话 甲' });
+    expect(handle).toBeDisabled();
+    pointerEvent(handle, 'pointerdown', { clientY: 20 });
+    aimDrag(handle, '乙');
+    pointerEvent(handle, 'pointerup');
+    fireEvent.keyDown(handle, { key: 'ArrowDown' });
+    expect(reorder).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '取消回答' }));
+    await act(async () => { finish('迟到的回答'); });
+    await waitFor(() => expect(handle).toBeEnabled());
+    await act(async () => { await app.ai.flushAssistantSession(); });
+    app.ai.dispose();
+  });
+
   it('pins an older history above recent chats and search results, then restores it after restarting', async () => {
     const app = await setup();
     const panel = render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
@@ -657,7 +905,7 @@ describe('AI conversation history UI', () => {
     app.ai.dispose();
   });
 
-  it('hides locked private histories without disturbing a public conversation and permits deleting them without unlocking', async () => {
+  it('hides locked private histories without disturbing a public conversation and permits sorting and deleting them without unlocking', async () => {
     const app = await setup();
     const folder = await app.library.createFolder('私密');
     await app.library.categorize([app.first.id], [folder.id], 'move');
@@ -681,6 +929,17 @@ describe('AI conversation history UI', () => {
     await screen.findByRole('button', { name: '取消置顶会话 加密会话' });
     expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 加密会话');
     expect(screen.getByLabelText('科研问题')).toHaveValue('公开草稿');
+    fireEvent.click(screen.getByRole('button', { name: '置顶会话 公开会话' }));
+    await screen.findByRole('button', { name: '取消置顶会话 公开会话' });
+    const handle = startDrag('公开会话');
+    aimDrag(handle, '加密会话');
+    pointerEvent(handle, 'pointerup');
+    await screen.findByText('置顶顺序已保存。');
+    expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 公开会话');
+    expect(screen.getByLabelText('科研问题')).toHaveValue('公开草稿');
+    expect(JSON.stringify(app.snapshot())).not.toContain('PRIVATE-');
+    fireEvent.click(screen.getByRole('button', { name: '取消置顶会话 公开会话' }));
+    await screen.findByRole('button', { name: '置顶会话 公开会话' });
     fireEvent.click(screen.getByRole('button', { name: '打开会话 加密会话' }));
     await screen.findByText(/已保存的对话涉及加密文献/);
     expect(screen.getByRole('button', { name: '新建对话' })).toBeEnabled();

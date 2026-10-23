@@ -38,6 +38,12 @@
 .ai-history-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .ai-history-list > li { display: flex; min-width: 0; border: 1px solid var(--sr-border); border-radius: 8px; }
 .ai-history-list > li.is-active { border-color: var(--sr-primary); background: var(--sr-primary-soft); }
+.ai-history-list > li.is-dragging { opacity: 0.55; }
+.ai-history-list > li.drop-before { box-shadow: inset 0 2px 0 var(--sr-primary); }
+.ai-history-list > li.drop-after { box-shadow: inset 0 -2px 0 var(--sr-primary); }
+.ai-history-drag-handle { align-self: stretch; display: flex; align-items: center; justify-content: center; flex: 0 0 18px; padding: 0; border: 0; border-radius: 8px 0 0 8px; background: transparent; color: var(--sr-text-muted); cursor: grab; touch-action: none; user-select: none; }
+.ai-history-drag-handle:active { cursor: grabbing; }
+.ai-history-drag-handle:disabled { cursor: default; }
 .ai-history-select { flex: 1; display: grid; gap: 8px; min-width: 0; padding: 11px 9px; text-align: left; border: 0; background: transparent; }
 .ai-history-select strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .ai-history-select > span { color: var(--sr-text-muted); font-size: 10px; }
