@@ -1,10 +1,10 @@
-import { GripVertical } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { errorMessage } from '../library/libraryService';
 import type { AiService } from './aiService';
 
-export function AiConversationGroups({ ai, disabled, selectedId, onSelect }: {
-  ai: AiService; disabled: boolean; selectedId: string | null | undefined; onSelect(id: string | null | undefined): void;
+export function AiConversationGroups({ ai, disabled, selectedId, onSelect, historyListId }: {
+  ai: AiService; disabled: boolean; selectedId: string | null | undefined; onSelect(id: string | null | undefined): void; historyListId: string;
 }) {
   const activity = useSyncExternalStore(ai.subscribe, ai.getView);
   const groups = activity.conversationGroups ?? [];
@@ -112,6 +112,15 @@ export function AiConversationGroups({ ai, disabled, selectedId, onSelect }: {
     } catch (failure) { setError(errorMessage(failure)); }
   }
 
+  async function setCollapsed(id: string, collapsed: boolean) {
+    if (disabled) return;
+    setError(null); setNotice(null);
+    try {
+      await ai.setConversationGroupCollapsed(id, collapsed);
+      setNotice(collapsed ? '分组已折叠。' : '分组已展开。');
+    } catch (failure) { setError(errorMessage(failure)); }
+  }
+
   return <section className="ai-history-groups" aria-label="会话分组管理">
     <label><span>会话分组</span><select aria-label="筛选会话分组" disabled={!activity.sessionLoaded || activity.conversationBusy}
       value={selectedId === undefined ? 'all' : selectedId ?? ''} onChange={(event) => {
@@ -130,6 +139,16 @@ export function AiConversationGroups({ ai, disabled, selectedId, onSelect }: {
         if (selected) { setError(null); setEditing(null); setPendingDelete(selected.id); }
       }}>删除分组</button>
     </div>
+    {groups.length ? <ul className="ai-group-collapse-list" aria-label="分组展开状态">
+      {groups.map((group) => <li key={group.id}>
+        <button type="button" disabled={disabled} className={selectedId === group.id ? 'is-active' : ''}
+          aria-label={`${group.collapsed ? '展开' : '折叠'}分组 ${group.name}`} aria-expanded={!group.collapsed}
+          aria-controls={historyListId} title={group.name} onClick={() => void setCollapsed(group.id, !group.collapsed)}>
+          {group.collapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+          <span>{group.name}</span><small>{count(group.id)}</small>
+        </button>
+      </li>)}
+    </ul> : null}
     {groups.length > 1 ? <details className="ai-group-order" ref={orderPanel}
       onToggle={(event) => { if (!event.currentTarget.open) setDrag(null); }}>
       <summary>调整分组顺序</summary>

@@ -41,6 +41,11 @@
 .ai-history-group-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .ai-history-group-actions button { padding: 5px 7px; font-size: 11px; }
 .ai-history-groups p { margin: 0; }
+.ai-group-collapse-list { display: grid; gap: 5px; max-height: 180px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.ai-group-collapse-list button { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 7px; border: 1px solid var(--sr-border); border-radius: 6px; background: transparent; text-align: left; font-size: 12px; }
+.ai-group-collapse-list button.is-active { border-color: var(--sr-primary); background: var(--sr-primary-soft); }
+.ai-group-collapse-list svg, .ai-group-collapse-list small { flex-shrink: 0; color: var(--sr-text-muted); }
+.ai-group-collapse-list span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-group-order > summary { cursor: pointer; font-size: 12px; }
 .ai-group-order > p { margin: 8px 0; }
 .ai-group-order .ai-group-order-list { max-height: 180px; overflow: auto; }

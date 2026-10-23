@@ -1,5 +1,5 @@
 import { GripVertical, History, LockKeyhole, MessageSquarePlus, PencilLine, Pin, PinOff, Search, Trash2, X } from 'lucide-react';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { MAX_PINNED_AI_CONVERSATIONS, type AiConversationSummary } from '../library/libraryModels';
 import { errorMessage } from '../library/libraryService';
 import type { AiService } from './aiService';
@@ -8,6 +8,7 @@ import { AiConversationGroups } from './AiConversationGroups';
 export function AiConversationHistory({ ai, disabled }: { ai: AiService; disabled: boolean }) {
   const activity = useSyncExternalStore(ai.subscribe, ai.getView);
   const conversations = activity.conversations;
+  const historyListId = useId();
   const [groupFilter, setGroupFilter] = useState<string | null | undefined>(undefined);
   const pinnedCount = conversations?.filter((entry) => entry.pinned).length ?? 0;
   const pinnedOrder = conversations?.filter((entry) => entry.pinned).map((entry) => entry.id) ?? [];
@@ -30,7 +31,10 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
   const pointer = useRef({ x: 0, y: 0 });
   const currentSearch = searchResult?.source === conversations && searchResult?.query === query ? searchResult : null;
   const matching = currentSearch?.entries ?? (query.trim() ? [] : conversations ?? []);
-  const entries = matching.filter((entry) => groupFilter === undefined || (entry.groupId ?? null) === groupFilter);
+  const collapsedGroups = new Set(activity.conversationGroups?.filter((group) => group.collapsed).map((group) => group.id));
+  const selectedCollapsed = groupFilter != null && collapsedGroups.has(groupFilter);
+  const entries = matching.filter((entry) => (groupFilter === undefined || (entry.groupId ?? null) === groupFilter)
+    && (Boolean(query.trim()) || !entry.groupId || !collapsedGroups.has(entry.groupId)));
   const visiblePinnedOrder = entries.filter((entry) => entry.pinned).map((entry) => entry.id);
   const target = entries.find((entry) => entry.id === pendingDelete) ?? conversations?.find((entry) => entry.id === pendingDelete);
   const renameTarget = conversations?.find((entry) => entry.id === pendingRename?.id);
@@ -123,7 +127,7 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
     <button type="button" className="ai-new-conversation" disabled={disabled}
       onClick={() => void perform(async () => { await ai.createConversation(groupFilter ?? null); setQuery(''); })}><MessageSquarePlus size={16} />新建对话</button>
     <p className="ai-muted">每个会话独立保存聊天、草稿和文献范围。</p>
-    <AiConversationGroups ai={ai} disabled={disabled} selectedId={groupFilter} onSelect={setGroupFilter} />
+    <AiConversationGroups ai={ai} disabled={disabled} selectedId={groupFilter} onSelect={setGroupFilter} historyListId={historyListId} />
     {pinnedCount > 1 ? <p className="ai-muted">拖动置顶会话左侧手柄排序，也可聚焦手柄用 ↑ / ↓ 调整。</p> : null}
     {pinLimitReached ? <p className="ai-muted" role="status">置顶已达上限，请先取消其他会话的置顶。</p> : null}
     <label className="ai-history-search"><Search size={15} aria-hidden="true" />
@@ -135,8 +139,11 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
     {query.trim() && currentSearch && !currentSearch.error ? <p className="ai-muted" role="status">
       {entries.length ? `找到 ${entries.length} 个会话` : '没有匹配的会话。'}
     </p> : null}
+    {query.trim() && collapsedGroups.size ? <p className="ai-muted">搜索也包含已折叠分组中的会话。</p> : null}
     {!query.trim() && groupFilter !== undefined && !entries.length && activity.sessionLoaded
-      ? <p className="ai-muted" role="status">该分组暂无会话。</p> : null}
+      ? <p className="ai-muted" role="status">{selectedCollapsed ? '该分组已折叠，展开后可查看会话。' : '该分组暂无会话。'}</p> : null}
+    {!query.trim() && groupFilter === undefined && !entries.length && matching.length && activity.sessionLoaded
+      ? <p className="ai-muted" role="status">会话所在分组已折叠，可展开分组查看。</p> : null}
     {conversations?.some((entry) => entry.locked) ? <p className="ai-muted">加密会话需解锁相关文件夹后才能重命名和搜索。</p> : null}
     {currentSearch?.error ? <div className="settings-error" role="alert">搜索会话失败：{currentSearch.error}
       <button type="button" onClick={() => { setSearchResult(null); setSearchRetry((value) => value + 1); }}>重试搜索</button>
@@ -161,7 +168,7 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
         <button type="button" disabled={disabled} onClick={() => setPendingDelete(null)}>取消</button>
       </div>
     </div> : null}
-    <ul className="ai-history-list" ref={historyList}>
+    <ul className="ai-history-list" ref={historyList} id={historyListId}>
       {entries.map((entry) => <li key={entry.id} className={[
         entry.id === activity.activeConversationId && 'is-active', drag?.active && drag.id === entry.id && 'is-dragging',
         drag && drag.targetId === entry.id && (drag.order.indexOf(drag.id) < drag.order.indexOf(entry.id) ? 'drop-after' : 'drop-before'),
