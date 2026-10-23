@@ -53,6 +53,112 @@ async function save(ai: AiService, label: string) {
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 
 describe('local AI conversation groups', () => {
+  it('saves each group collapse state independently and restores it without changing chats, memberships or selections', async () => {
+    const app = await setup();
+    const provider = await app.ai.saveProvider({ name: '厂商', baseUrl: 'https://one.example/v1', model: 'one', models: ['two'] });
+    const one = await app.ai.createConversationGroup('研究');
+    const two = await app.ai.createConversationGroup('归档');
+    const first = app.ai.getView().activeConversationId!;
+    await save(app.ai, '甲');
+    await app.ai.moveConversationToGroup(first, one.id);
+    await app.ai.setConversationPinned(first, true);
+    await app.ai.createConversation(two.id);
+    await app.ai.selectProvider(provider.id, 'two');
+    await save(app.ai, '乙');
+    const before = app.snapshot();
+    const active = app.ai.getAssistantSession();
+    await app.ai.setConversationGroupCollapsed(one.id, true);
+    await app.ai.setConversationGroupCollapsed(two.id, false);
+    expect(app.snapshot().aiConversations).toEqual({ ...before.aiConversations,
+      groups: [{ ...one, collapsed: true }, { ...two, collapsed: false }] });
+    expect(app.snapshot().ai).toEqual(before.ai);
+    expect(app.ai.getAssistantSession()).toEqual(active);
+    expect(app.ai.getView().conversationSelection?.model).toBe('two');
+    app.ai.dispose();
+    const restarted = services(app.storage);
+    await restarted.ai.loadAssistantSession();
+    expect(restarted.ai.getView().conversationGroups).toEqual([{ ...one, collapsed: true }, { ...two, collapsed: false }]);
+    expect(restarted.ai.getAssistantSession()?.draft).toBe('乙草稿');
+    await restarted.ai.selectConversation(first);
+    expect(restarted.ai.getAssistantSession()?.messages).toEqual(session(restarted.ai, '甲').messages);
+    expect(restarted.ai.getView().conversationSelection?.model).toBe('one');
+    restarted.ai.dispose();
+  });
+
+  it.each([true, false])('retains original data after a failed collapsed=%s save and permits retrying', async (collapsed) => {
+    const app = await setup();
+    const group = await app.ai.createConversationGroup('研究');
+    await save(app.ai, '保留');
+    await app.ai.moveConversationToGroup(app.ai.getView().activeConversationId!, group.id);
+    await app.ai.setConversationGroupCollapsed(group.id, !collapsed);
+    const before = app.snapshot();
+    const active = app.ai.getAssistantSession();
+    vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('disk full'));
+    await expect(app.ai.setConversationGroupCollapsed(group.id, collapsed)).rejects.toThrow('disk full');
+    expect(app.snapshot()).toEqual(before);
+    expect(app.ai.getAssistantSession()).toEqual(active);
+    await app.ai.setConversationGroupCollapsed(group.id, collapsed);
+    expect(app.ai.getView().conversationGroups?.[0].collapsed).toBe(collapsed);
+    expect(app.snapshot().aiConversations?.entries).toEqual(before.aiConversations?.entries);
+    const after = app.snapshot();
+    await expect(app.ai.setConversationGroupCollapsed('missing', true)).rejects.toThrow('会话分组不存在');
+    expect(app.snapshot()).toEqual(after);
+    app.ai.dispose();
+  });
+
+  it('keeps collapse state through sorting and renaming while new groups default to expanded', async () => {
+    const app = await setup();
+    const one = await app.ai.createConversationGroup('研究');
+    const two = await app.ai.createConversationGroup('归档');
+    await app.ai.setConversationGroupCollapsed(one.id, true);
+    await app.ai.reorderConversationGroups([two.id, one.id]);
+    await app.ai.renameConversationGroup(one.id, '重点研究');
+    const three = await app.ai.createConversationGroup('新分组');
+    expect(app.ai.getView().conversationGroups).toEqual([two, { ...one, name: '重点研究', collapsed: true }, three]);
+    expect(Boolean(three.collapsed)).toBe(false);
+    await app.ai.setConversationGroupCollapsed(one.id, false);
+    expect(app.ai.getView().conversationGroups?.[1].collapsed).toBe(false);
+    app.ai.dispose();
+  });
+
+  it('loads older groups as expanded without rewriting their saved data', async () => {
+    const app = await setup();
+    await app.ai.createConversationGroup('旧分组');
+    await save(app.ai, '保留');
+    const before = app.snapshot();
+    const commits = vi.mocked(app.storage.commit).mock.calls.length;
+    app.ai.dispose();
+    const restarted = services(app.storage);
+    await restarted.ai.loadAssistantSession();
+    expect(restarted.ai.getView().conversationGroups?.every((group) => !group.collapsed)).toBe(true);
+    expect(app.snapshot()).toEqual(before);
+    expect(app.storage.commit).toHaveBeenCalledTimes(commits);
+    restarted.ai.dispose();
+  });
+
+  it('waits for the latest draft and collapse state before shutdown and keeps it on later autosaves', async () => {
+    const app = await setup();
+    const group = await app.ai.createConversationGroup('研究');
+    await save(app.ai, '原草稿');
+    const commit = vi.mocked(app.storage.commit).getMockImplementation()!;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(app.storage.commit).mockImplementationOnce(async (...args) => { await gate; return commit(...args); });
+    app.ai.saveAssistantSession(session(app.ai, '最新'));
+    const collapsing = app.ai.setConversationGroupCollapsed(group.id, true);
+    let closed = false;
+    const closing = app.ai.flushAssistantSession().then(() => { closed = true; });
+    await vi.waitFor(() => expect(app.ai.getView().conversationBusy).toBe(true));
+    expect(closed).toBe(false);
+    release();
+    await Promise.all([collapsing, closing]);
+    expect(app.ai.getView().conversationGroups?.[0].collapsed).toBe(true);
+    expect(app.ai.getAssistantSession()?.draft).toBe('最新草稿');
+    await save(app.ai, '继续');
+    expect(app.snapshot().aiConversations?.groups?.[0].collapsed).toBe(true);
+    app.ai.dispose();
+  });
+
   it('persists manual group order without changing memberships, pinned order, chats or model choices', async () => {
     const app = await setup();
     const provider = await app.ai.saveProvider({ name: '厂商', baseUrl: 'https://one.example/v1', model: 'one', models: ['two'] });
@@ -341,6 +447,7 @@ describe('local AI conversation groups', () => {
     const group = await app.ai.createConversationGroup('加密会话归档');
     const other = await app.ai.createConversationGroup('其他');
     await app.ai.moveConversationToGroup(privateId, group.id);
+    await app.ai.setConversationGroupCollapsed(group.id, true);
     await app.ai.reorderConversationGroups([other.id, group.id]);
     expect(app.ai.getView().conversationGroups?.map((item) => item.id)).toEqual([other.id, group.id]);
     expect(app.ai.getView().conversations?.find((entry) => entry.id === privateId)).toMatchObject({ title: '加密会话', locked: true, groupId: group.id });

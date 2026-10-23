@@ -516,7 +516,8 @@ export class LibraryService {
       }
       const groups = this.snapshot.aiConversations.groups;
       if (groups !== undefined && (!Array.isArray(groups) || groups.some((group) => !group || typeof group.id !== 'string' || !group.id
-        || typeof group.name !== 'string' || !group.name.trim() || group.name.length > 100)
+        || typeof group.name !== 'string' || !group.name.trim() || group.name.length > 100
+        || (group.collapsed !== undefined && typeof group.collapsed !== 'boolean'))
         || new Set(groups.map((group) => group.id)).size !== groups.length)) {
         throw new Error('本地会话分组格式无效，原始记录未修改。');
       }
@@ -667,6 +668,15 @@ export class LibraryService {
         throw new Error('会话分组列表已变化，请重新拖拽排序。');
       }
       history.groups = order.map((id) => groups.get(id)!);
+    });
+  }
+
+  async setAiConversationGroupCollapsed(id: string, collapsed: boolean): Promise<void> {
+    await this.initializeAiConversations();
+    await this.mutate((tx) => {
+      const group = tx.snapshot.aiConversations!.groups?.find((item) => item.id === id);
+      if (!group) throw new Error('会话分组不存在。');
+      group.collapsed = collapsed;
     });
   }
 

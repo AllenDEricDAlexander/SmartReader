@@ -150,7 +150,7 @@ export type AiConversation = {
   groupId?: string | null;
 };
 export type AiConversationSummary = { id: string; title: string; updatedAt: string; locked: boolean; messageCount: number | null; pinned?: boolean; pinOrder?: number; groupId?: string | null };
-export type AiConversationGroup = { id: string; name: string };
+export type AiConversationGroup = { id: string; name: string; collapsed?: boolean };
 export type AiConversationHistory = { activeId: string; entries: AiConversation[]; groups?: AiConversationGroup[] };
 export const MAX_PINNED_AI_CONVERSATIONS = 10;
 

@@ -336,6 +336,10 @@ export class AiService {
     return this.changeConversation(() => this.library.reorderAiConversationGroups(order));
   }
 
+  setConversationGroupCollapsed(id: string, collapsed: boolean): Promise<void> {
+    return this.changeConversation(() => this.library.setAiConversationGroupCollapsed(id, collapsed));
+  }
+
   moveConversationToGroup(id: string, groupId: string | null): Promise<void> {
     return this.changeConversation(() => this.library.moveAiConversationToGroup(id, groupId));
   }
