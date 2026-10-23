@@ -9,7 +9,7 @@ import {
 } from './libraryFolders';
 import {
   emptyLibrary, emptyMetadata, paperDocumentKey,
-  type AiAssistantSession, type AiSettings, type EncryptedData, type FolderVault, type LibraryPreferences, type LibraryReaderSession, type LibrarySnapshot,
+  type AiAssistantSession, type AiConversation, type AiSettings, type EncryptedData, type FolderVault, type LibraryPreferences, type LibraryReaderSession, type LibrarySnapshot, type StoredAiAssistantSession,
   type MetadataField, type Paper, type PaperMetadata,
 } from './libraryModels';
 import { LibrarySearchIndex } from './librarySearch';
@@ -493,12 +493,66 @@ export class LibraryService {
     await this.mutate((tx) => { tx.snapshot.ai = structuredClone(settings); });
   }
 
-  async loadAiAssistantSession(): Promise<Omit<AiAssistantSession, 'epoch'> | null> {
+  async initializeAiConversations(): Promise<void> {
+    await this.initialize();
+    if (this.snapshot.aiConversations) {
+      const { entries, activeId } = this.snapshot.aiConversations;
+      if (!Array.isArray(entries) || !entries.length || new Set(entries.map((entry) => entry.id)).size !== entries.length
+        || entries.some((entry) => !entry.id || typeof entry.createdAt !== 'string' || typeof entry.updatedAt !== 'string')
+        || !entries.some((entry) => entry.id === activeId)) throw new Error('本地会话列表格式无效，原始记录未修改。');
+      return;
+    }
+    await this.mutate((tx) => {
+      if (tx.snapshot.aiConversations) return;
+      const saved = tx.snapshot.aiSession ?? null;
+      if (saved && !validStoredAiSession(saved)) throw new Error('本地聊天记录格式无效，原始记录未修改。');
+      const entry = this.newAiConversation(saved);
+      tx.snapshot.aiConversations = { activeId: entry.id, entries: [entry] };
+      delete tx.snapshot.aiSession;
+    });
+  }
+
+  async createAiConversation(): Promise<string> {
+    await this.initializeAiConversations();
+    return this.mutate((tx) => {
+      const entry = this.newAiConversation(null);
+      tx.snapshot.aiConversations!.entries.push(entry);
+      tx.snapshot.aiConversations!.activeId = entry.id;
+      return entry.id;
+    });
+  }
+
+  async selectAiConversation(id: string): Promise<void> {
+    await this.initializeAiConversations();
+    await this.mutate((tx) => {
+      if (!tx.snapshot.aiConversations!.entries.some((entry) => entry.id === id)) throw new Error('历史会话不存在。');
+      tx.snapshot.aiConversations!.activeId = id;
+    });
+  }
+
+  async deleteAiConversation(id: string): Promise<void> {
+    await this.initializeAiConversations();
+    await this.mutate((tx) => {
+      const history = tx.snapshot.aiConversations!;
+      if (!history.entries.some((entry) => entry.id === id)) throw new Error('历史会话不存在。');
+      history.entries = history.entries.filter((entry) => entry.id !== id);
+      if (!history.entries.length) history.entries.push(this.newAiConversation(null));
+      if (history.activeId === id) history.activeId = [...history.entries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0].id;
+    });
+  }
+
+  private newAiConversation(session: StoredAiAssistantSession | null): AiConversation {
+    const now = new Date().toISOString();
+    return { id: crypto.randomUUID(), createdAt: now, updatedAt: now, session };
+  }
+
+  async loadAiAssistantSession(id?: string): Promise<Omit<AiAssistantSession, 'epoch'> | null> {
     return this.exclusive(async () => {
       await this.initialize();
-      const stored = this.snapshot.aiSession;
+      const history = this.snapshot.aiConversations;
+      const stored = history ? history.entries.find((entry) => entry.id === (id ?? history.activeId))?.session : this.snapshot.aiSession;
       if (!stored) return null;
-      if (!Array.isArray(stored.paperIds) || !['plain', 'encrypted'].includes(stored.kind)) {
+      if (!validStoredAiSession(stored)) {
         throw new Error('本地聊天记录格式无效，原始记录未修改。');
       }
       let session: unknown;
@@ -517,9 +571,14 @@ export class LibraryService {
     });
   }
 
-  async saveAiAssistantSession(session: AiAssistantSession | null, access = this.captureAccess()): Promise<void> {
+  async saveAiAssistantSession(session: AiAssistantSession | null, access = this.captureAccess(), conversationId?: string): Promise<void> {
+    await this.initializeAiConversations();
     await this.mutate(async (tx) => {
-      if (!session) { tx.snapshot.aiSession = null; return; }
+      const history = tx.snapshot.aiConversations!;
+      const entry = history.entries.find((item) => item.id === (conversationId ?? history.activeId));
+      if (!entry) throw new Error('历史会话不存在，对话未保存。');
+      entry.updatedAt = new Date().toISOString();
+      if (!session) { entry.session = null; return; }
       const selectedPaperIds = session.selectedPaperIds.filter((id) => this.canAccess(id, access));
       const initialPaperId = session.initialPaperId && this.canAccess(session.initialPaperId, access) ? session.initialPaperId : undefined;
       const ids = new Set([...selectedPaperIds, ...(initialPaperId ? [initialPaperId] : [])]);
@@ -541,7 +600,7 @@ export class LibraryService {
         if (record?.kind === 'encrypted') vaultIds.add(record.vaultId);
       }
       const { epoch: _epoch, ...saved } = structuredClone({ ...session, selectedPaperIds, initialPaperId });
-      if (!vaultIds.size) tx.snapshot.aiSession = { kind: 'plain', paperIds: [...ids], session: saved };
+      if (!vaultIds.size) entry.session = { kind: 'plain', paperIds: [...ids], session: saved };
       else {
         let encrypted: EncryptedData | undefined;
         // Every referenced vault must be unlocked to read a conversation spanning multiple vaults.
@@ -550,7 +609,7 @@ export class LibraryService {
           if (!key) throw new Error('请先解锁对话涉及的加密文件夹。');
           encrypted = await encryptJson(key, encrypted ?? saved, `ai-session:${id}`);
         }
-        tx.snapshot.aiSession = { kind: 'encrypted', paperIds: [...ids], vaultIds: [...vaultIds], encrypted: encrypted! };
+        entry.session = { kind: 'encrypted', paperIds: [...ids], vaultIds: [...vaultIds], encrypted: encrypted! };
       }
     });
   }
@@ -626,16 +685,18 @@ export class LibraryService {
         snapshot: structuredClone(this.snapshot), decrypted: new Map(this.decrypted), blobs: [], indexChanged: false,
       };
       const result = await operation(tx);
-      const session = this.snapshot.aiSession;
-      if (session && Array.isArray(session.paperIds)) {
-        const previousPapers = new Map(this.snapshot.papers.map((paper) => [paper.id, paper]));
-        const nextPapers = new Map(tx.snapshot.papers.map((paper) => [paper.id, paper]));
-        if (session.paperIds.some((id) => {
+      const previousPapers = new Map(this.snapshot.papers.map((paper) => [paper.id, paper]));
+      const nextPapers = new Map(tx.snapshot.papers.map((paper) => [paper.id, paper]));
+      const protectionChanged = (session: StoredAiAssistantSession | null | undefined) =>
+        session && Array.isArray(session.paperIds) && session.paperIds.some((id) => {
           const before = previousPapers.get(id);
           const after = nextPapers.get(id);
           return !after || before?.kind !== after.kind
             || (before?.kind === 'encrypted' && after.kind === 'encrypted' && before.vaultId !== after.vaultId);
-        })) tx.snapshot.aiSession = null;
+        });
+      if (protectionChanged(this.snapshot.aiSession)) tx.snapshot.aiSession = null;
+      for (const entry of tx.snapshot.aiConversations?.entries ?? []) {
+        if (protectionChanged(entry.session)) entry.session = null;
       }
       tx.snapshot.updatedAt = new Date().toISOString();
       const revision = await this.storage.commit(this.revision, tx.snapshot, tx.blobs);
@@ -734,6 +795,16 @@ function normalizeMetadata(updates: Partial<PaperMetadata>): Partial<PaperMetada
     if (!/^10\.\d{4,9}\/\S+$/i.test(result.doi)) throw new Error('DOI 格式应为 10.xxxx/xxx。');
   }
   return result;
+}
+
+function validStoredAiSession(value: unknown): value is StoredAiAssistantSession {
+  if (!value || typeof value !== 'object') return false;
+  const stored = value as StoredAiAssistantSession;
+  if (!Array.isArray(stored.paperIds) || stored.paperIds.some((id) => typeof id !== 'string')) return false;
+  if (stored.kind === 'plain') return validAiSession(stored.session);
+  return stored.kind === 'encrypted' && Array.isArray(stored.vaultIds) && stored.vaultIds.length > 0
+    && stored.vaultIds.every((id) => typeof id === 'string')
+    && typeof stored.encrypted?.iv === 'string' && typeof stored.encrypted.data === 'string';
 }
 
 function validAiSession(value: unknown): value is Omit<AiAssistantSession, 'epoch'> {

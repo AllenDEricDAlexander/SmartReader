@@ -426,10 +426,39 @@ mod tests {
             assert_eq!(write_binary_frame(&mut connection, frame).unwrap(), 1);
         }
         {
-            let connection = crate::db::open_database(&path).unwrap();
+            let mut connection = crate::db::open_database(&path).unwrap();
             let restored = read_snapshot(&connection).unwrap();
             assert_eq!(restored.revision, 1);
-            assert_eq!(restored.data, Some(saved));
+            assert_eq!(restored.data, Some(saved.clone()));
+            let mut history = saved.clone();
+            let first = history
+                .as_object_mut()
+                .unwrap()
+                .remove("aiSession")
+                .unwrap();
+            history["aiConversations"] = json!({
+                "activeId": "second", "entries": [
+                    {"id": "first", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": first},
+                    {"id": "second", "createdAt": "2026-10-23", "updatedAt": "2026-10-23", "session": null}
+                ]
+            });
+            write_snapshot(&mut connection, 1, history, vec![]).unwrap();
+        }
+        {
+            let connection = crate::db::open_database(&path).unwrap();
+            let restored = read_snapshot(&connection).unwrap().data.unwrap();
+            assert_eq!(restored["aiConversations"]["activeId"], "second");
+            assert_eq!(
+                restored["aiConversations"]["entries"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                2
+            );
+            assert_eq!(
+                restored["aiConversations"]["entries"][0]["session"],
+                saved["aiSession"]
+            );
         }
         std::fs::remove_dir_all(directory).unwrap();
     }

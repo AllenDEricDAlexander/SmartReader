@@ -60,6 +60,11 @@ function session(ai: AiService, draft = '追问草稿'): AiAssistantSession {
   };
 }
 
+function activeStoredSession(snapshot: LibrarySnapshot) {
+  const history = snapshot.aiConversations;
+  return history ? history.entries.find((entry) => entry.id === history.activeId)?.session : snapshot.aiSession;
+}
+
 function ask(question: string) {
   fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: question } });
   fireEvent.click(screen.getByRole('button', { name: /^(检索并提问|发送问题)$/ }));
@@ -112,7 +117,7 @@ describe('local AI conversation persistence', () => {
     app.ai.saveAssistantSession(session(app.ai));
     await app.ai.flushAssistantSession();
     app.ai.dispose();
-    const saved = app.snapshot().aiSession;
+    const saved = activeStoredSession(app.snapshot());
     const load = app.storage.load.bind(app.storage);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -126,7 +131,7 @@ describe('local AI conversation persistence', () => {
     await act(async () => { release(); });
     await screen.findByText('原来的问题');
     expect(screen.getByLabelText('科研问题')).toHaveValue('追问草稿');
-    expect(app.snapshot().aiSession).toEqual(saved);
+    expect(activeStoredSession(app.snapshot())).toEqual(saved);
     expect(commit).not.toHaveBeenCalled();
     restarted.ai.dispose();
   });
@@ -135,13 +140,13 @@ describe('local AI conversation persistence', () => {
     const app = await setup();
     app.ai.saveAssistantSession(session(app.ai, '旧草稿'));
     await app.ai.flushAssistantSession();
-    const saved = app.snapshot().aiSession;
+    const saved = activeStoredSession(app.snapshot());
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
     const commit = vi.mocked(app.storage.commit).getMockImplementation()!;
     const failure = vi.spyOn(app.storage, 'commit').mockRejectedValue(new Error('disk full'));
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '最新草稿' } });
     expect(await screen.findByRole('alert')).toHaveTextContent('聊天记录未能保存到本地');
-    expect(app.snapshot().aiSession).toEqual(saved);
+    expect(activeStoredSession(app.snapshot())).toEqual(saved);
     failure.mockImplementation(commit);
     fireEvent.click(screen.getByRole('button', { name: '重试保存对话' }));
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
@@ -214,6 +219,7 @@ describe('local AI conversation persistence', () => {
     const stored = await app.storage.load();
     const damaged = { kind: 'plain', paperIds: 'invalid', session: { messages: 'invalid' } } as unknown as LibrarySnapshot['aiSession'];
     stored.data!.aiSession = damaged;
+    delete stored.data!.aiConversations;
     await app.storage.commit(stored.revision, stored.data!, []);
     const writes = vi.spyOn(app.storage, 'commit');
     writes.mockClear();
@@ -295,16 +301,16 @@ describe('local AI conversation persistence', () => {
     saved.messages = saved.messages.map((message) => ({ ...message, content: `PRIVATE-${message.role}`, contextKey: JSON.stringify([...saved.selectedPaperIds].sort()) }));
     app.ai.saveAssistantSession(saved);
     await app.ai.flushAssistantSession();
-    expect(app.snapshot().aiSession).toMatchObject({ kind: 'encrypted', vaultIds: vaults });
+    expect(activeStoredSession(app.snapshot())).toMatchObject({ kind: 'encrypted', vaultIds: vaults });
     expect(JSON.stringify(app.snapshot())).not.toContain('PRIVATE-');
-    const stored = app.snapshot().aiSession;
+    const stored = activeStoredSession(app.snapshot());
     app.ai.dispose();
 
     const restarted = services(app.storage);
     render(<AiAssistant library={restarted.library} ai={restarted.ai} onOpenPaper={vi.fn()} />);
     await screen.findByText(/已保存的对话涉及加密文献/);
     expect(screen.queryByText('PRIVATE-user')).not.toBeInTheDocument();
-    expect(app.snapshot().aiSession).toEqual(stored);
+    expect(activeStoredSession(app.snapshot())).toEqual(stored);
     await act(async () => { await restarted.library.unlockVault(vaults[0], 'private password'); });
     expect(screen.getByText(/已保存的对话涉及加密文献/)).toBeInTheDocument();
     await act(async () => { await restarted.library.unlockVault(vaults[1], 'private password'); });
@@ -353,10 +359,10 @@ describe('local AI conversation persistence', () => {
     if (operation === 'encrypt') await app.library.encryptFolder(folder.id, 'private password');
     else if (operation === 'delete') await app.library.deletePapers([app.paper.id]);
     else await app.library.lockVault(vault!.id);
-    if (operation !== 'lock') expect(app.snapshot().aiSession).toBeNull();
+    if (operation !== 'lock') expect(activeStoredSession(app.snapshot())).toBeNull();
     app.ai.saveAssistantSession(saved);
     await app.ai.flushAssistantSession();
-    expect(app.snapshot().aiSession).toBeNull();
+    expect(activeStoredSession(app.snapshot())).toBeNull();
     expect(JSON.stringify(app.snapshot())).not.toContain('PRIVATE-HISTORY-DRAFT');
     app.ai.dispose();
   });

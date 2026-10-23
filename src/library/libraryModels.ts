@@ -137,6 +137,14 @@ export type StoredAiAssistantSession = { paperIds: string[] } & (
   | { kind: 'plain'; session: Omit<AiAssistantSession, 'epoch'> }
   | { kind: 'encrypted'; vaultIds: string[]; encrypted: EncryptedData }
 );
+export type AiConversation = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  session: StoredAiAssistantSession | null;
+};
+export type AiConversationSummary = { id: string; title: string; updatedAt: string; locked: boolean; messageCount: number | null };
+export type AiConversationHistory = { activeId: string; entries: AiConversation[] };
 
 export type LibrarySnapshot = {
   schemaVersion: 1;
@@ -151,6 +159,7 @@ export type LibrarySnapshot = {
   nextDecorationId: number;
   readerSession?: LibraryReaderSession;
   aiSession?: StoredAiAssistantSession | null;
+  aiConversations?: AiConversationHistory;
 };
 
 export function emptyMetadata(title = ''): PaperMetadata {
