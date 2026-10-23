@@ -1,5 +1,5 @@
 import { webcrypto } from 'node:crypto';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LibraryService } from '../library/libraryService';
 import { emptyMetadata, type LibrarySnapshot } from '../library/libraryModels';
@@ -41,9 +41,27 @@ function ask(question = '注意力的结论是什么？') {
   fireEvent.click(screen.getByRole('button', { name: /^(检索并提问|发送问题)$/ }));
 }
 
+function transcript() {
+  return within(screen.getByLabelText('AI 对话记录'));
+}
+
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 
 describe('AI research assistant', () => {
+  it('keeps the primary question controls before collapsed knowledge management', async () => {
+    const { library, ai } = await setup();
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    const question = screen.getByLabelText('科研问题');
+    const summary = screen.getByText('知识库与检索范围').closest('summary')!;
+    const details = summary.closest('details')!;
+    expect(question.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(details).not.toHaveAttribute('open');
+    fireEvent.click(summary);
+    expect(details).toHaveAttribute('open');
+    expect(screen.getByLabelText('搜索知识库文件')).toBeInTheDocument();
+    ai.dispose();
+  });
+
   it.each(['library', 'direct'] as const)('keeps chat, drafts and follow-up context across provider and model switches in %s mode', async (mode) => {
     const { library, ai, paper, completion } = await setup();
     const first = library.getView().snapshot.ai.providers[0];
@@ -60,8 +78,8 @@ describe('AI research assistant', () => {
     fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'fast-model' } });
     await screen.findByText('AI 厂商与模型已切换，可继续当前对话。');
     expect(screen.getByLabelText('聊天模型')).toHaveValue('fast-model');
-    expect(screen.getByText('切换前的问题')).toBeInTheDocument();
-    expect(screen.getByText('切换前的回答。')).toBeInTheDocument();
+    expect(transcript().getByText('切换前的问题')).toBeInTheDocument();
+    expect(transcript().getByText('切换前的回答。')).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('使用快模型追问');
     completion.mockResolvedValueOnce('快模型的回答。');
     fireEvent.click(screen.getByRole('button', { name: mode === 'direct' ? '发送问题' : '检索并提问' }));
@@ -92,9 +110,9 @@ describe('AI research assistant', () => {
     await waitFor(() => expect(screen.getByLabelText('聊天模型')).toHaveValue('fast-model'));
     fireEvent.change(screen.getByLabelText('AI 厂商'), { target: { value: second.id } });
     await waitFor(() => expect(screen.getByLabelText('聊天模型')).toHaveValue('second-fast'));
-    expect(screen.getByText('切换前的问题')).toBeInTheDocument();
-    expect(screen.getByText('快模型的回答。')).toBeInTheDocument();
-    expect(screen.getByText('第二厂商的回答。')).toBeInTheDocument();
+    expect(transcript().getByText('切换前的问题')).toBeInTheDocument();
+    expect(transcript().getByText('快模型的回答。')).toBeInTheDocument();
+    expect(transcript().getByText('第二厂商的回答。')).toBeInTheDocument();
     ai.dispose();
   });
 
@@ -401,14 +419,14 @@ describe('AI research assistant', () => {
     completion.mockResolvedValue('追问的回答。[S1]');
     ask('那第二点呢？');
     await screen.findByText('追问的回答。[S1]');
-    expect(screen.getByText('第一个问题')).toBeInTheDocument();
+    expect(transcript().getByText('第一个问题')).toBeInTheDocument();
     expect(screen.getByText('注意力可以改善记忆。[S1]')).toBeInTheDocument();
     const messages = streaming.mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
     expect(messages.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user']);
     expect(messages[1].content).toBe('第一个问题');
     fireEvent.click(screen.getByRole('button', { name: '新建对话' }));
     await waitFor(() => expect(screen.getByLabelText('科研问题')).toHaveValue(''));
-    expect(screen.queryByText('第一个问题')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('AI 对话记录')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '打开会话 第一个问题' })).toBeInTheDocument();
     ai.dispose();
   });
@@ -425,7 +443,7 @@ describe('AI research assistant', () => {
     fireEvent.change(screen.getByLabelText('搜索知识库文件'), { target: { value: '论文' } });
     first.unmount();
     const restored = render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
-    expect(screen.getByText('保存的文献问题')).toBeInTheDocument();
+    expect(transcript().getByText('保存的文献问题')).toBeInTheDocument();
     expect(screen.getByText('注意力可以改善记忆。[S1]')).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('未发送的追问');
     expect(screen.getByLabelText('搜索知识库文件')).toHaveValue('论文');
@@ -475,7 +493,7 @@ describe('AI research assistant', () => {
     await act(async () => { await ai.flushAssistantSession(); });
     next.unmount();
     render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
-    expect(screen.queryByText('旧论文问题')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('AI 对话记录')).not.toBeInTheDocument();
     expect(screen.queryByText('新论文回答。[S1]')).not.toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('');
     ai.dispose();
@@ -501,7 +519,7 @@ describe('AI research assistant', () => {
     } else await ai.saveProvider({ ...provider, model: 'fast-model' });
     expect(ai.getAssistantSession()).toEqual(previous);
     render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
-    expect(screen.getByText('保存的问题')).toBeInTheDocument();
+    expect(transcript().getByText('保存的问题')).toBeInTheDocument();
     expect(screen.getByText('注意力可以改善记忆。[S1]')).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('保存的追问草稿');
     expect(screen.getByLabelText('搜索知识库文件')).toHaveValue('认知神经');
@@ -560,7 +578,7 @@ describe('AI research assistant', () => {
     first.unmount();
     render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
     await act(async () => { finish({ text: '离开后的迟到回答', sources: [], providerName: '研究服务' }); });
-    expect(screen.getByText('完成的问题')).toBeInTheDocument();
+    expect(transcript().getByText('完成的问题')).toBeInTheDocument();
     expect(screen.queryByText('未完成的问题')).not.toBeInTheDocument();
     expect(screen.queryByText('离开前的部分回答')).not.toBeInTheDocument();
     expect(screen.queryByText('离开后的迟到回答')).not.toBeInTheDocument();
@@ -655,7 +673,7 @@ describe('AI research assistant', () => {
     fireEvent.change(input, { target: { value: '保留的追问草稿' } });
     const button = screen.getByRole('button', { name: '继续提问' });
     const header = button.closest('header')!;
-    const viewport = screen.getByRole('region', { name: '让答案回到文献' });
+    const viewport = screen.getByRole('region', { name: 'AI 研究助手' });
     viewport.scrollTop = 1400;
     vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ top: 60 } as DOMRect);
     vi.spyOn(input, 'getBoundingClientRect').mockReturnValue({ top: -740 } as DOMRect);
@@ -682,7 +700,7 @@ describe('AI research assistant', () => {
       return new Promise((resolve) => { finish = resolve; });
     });
     render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
-    const viewport = screen.getByRole('region', { name: '让答案回到文献' });
+    const viewport = screen.getByRole('region', { name: 'AI 研究助手' });
     let scrollHeight = 1600;
     let scrollTop = 0;
     Object.defineProperties(viewport, {

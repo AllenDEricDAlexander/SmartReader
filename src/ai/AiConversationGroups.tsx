@@ -130,7 +130,10 @@ export function AiConversationGroups({ ai, disabled, selectedId, onSelect, histo
       <option value="">未分组（{count(null)}）</option>
       {groups.map((group) => <option key={group.id} value={group.id}>{group.name}（{count(group.id)}）</option>)}
     </select></label>
-    <div className="ai-history-group-actions">
+    <details className="ai-group-manager">
+      <summary><span>管理分组</span><small>{groups.length ? `${groups.length} 个分组` : '尚未分组'}</small></summary>
+      <div className="ai-group-manager-body">
+      <div className="ai-history-group-actions">
       <button type="button" disabled={disabled} onClick={() => { setError(null); setPendingDelete(null); setEditing({ id: null, name: '' }); }}>新建分组</button>
       <button type="button" disabled={disabled || !selected} onClick={() => {
         if (selected) { setError(null); setPendingDelete(null); setEditing({ id: selected.id, name: selected.name }); }
@@ -201,8 +204,6 @@ export function AiConversationGroups({ ai, disabled, selectedId, onSelect, histo
         </li>)}
       </ul>
     </details> : null}
-    {error ? <p className="settings-error" role="alert">{error}</p> : null}
-    {notice ? <p className="ai-muted" role="status">{notice}</p> : null}
     {editing ? <form className="ai-history-confirm ai-history-rename" aria-label={editing.id === null ? '新建会话分组' : '重命名会话分组'}
       onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <label><span>分组名称</span><input aria-label="分组名称" autoFocus required maxLength={100} disabled={disabled}
@@ -220,5 +221,9 @@ export function AiConversationGroups({ ai, disabled, selectedId, onSelect, histo
         <button type="button" disabled={disabled} onClick={() => setPendingDelete(null)}>取消</button>
       </div>
     </div> : null}
+      </div>
+    </details>
+    {error ? <p className="settings-error" role="alert">{error}</p> : null}
+    {notice ? <p className="ai-muted" role="status">{notice}</p> : null}
   </section>;
 }

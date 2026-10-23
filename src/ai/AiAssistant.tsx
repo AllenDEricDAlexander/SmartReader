@@ -76,6 +76,7 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [showLatest, setShowLatest] = useState(false);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const nextMessageId = useRef((session?.messages.at(-1)?.id ?? 0) + 1);
   const requestGeneration = useRef(0);
   const ownsRequest = useRef(false);
@@ -117,6 +118,10 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
     [chat, activity.answerEpoch],
   );
   const visibleDraft = draft.epoch === activity.answerEpoch ? draft.text : '';
+
+  useEffect(() => {
+    if (grounding === 'library' && scope === 'selected' && !scopedCount) setKnowledgeOpen(true);
+  }, [grounding, scope, scopedCount]);
 
   useEffect(() => {
     ai.saveAssistantSession({
@@ -379,10 +384,9 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
         setShowLatest(!nearBottom);
       }}>
       <header className="ai-assistant-header" ref={assistantHeader}>
-        <div>
-          <span className="ai-eyebrow"><Sparkles size={15} />文献研究助手</span>
-          <h1 id="ai-assistant-title">让答案回到文献</h1>
-          <p>检索本地论文，用有来源的回答辅助阅读；也可以直接和模型对话。</p>
+        <div className="ai-assistant-title">
+          <h1 id="ai-assistant-title"><Sparkles size={17} aria-hidden="true" />AI 研究助手</h1>
+          <p>基于本地文献获取有来源的回答，也可直接与模型对话。</p>
         </div>
         <div className="ai-header-actions">
           {showLatest && messages.length ? <button type="button" onClick={scrollToLatest}><ArrowDown size={16} />回到最新回答</button> : null}
@@ -397,34 +401,32 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
       </header>
       <div className="ai-assistant-body">
         <div className="ai-question-panel">
-          <div className="ai-section-heading">
+          <div className="ai-question-toolbar">
             <h2><FileSearch size={17} />检索问答</h2>
-            <span className="ai-status-badge">{provider?.name ?? '尚未配置'}</span>
+            <div className="ai-compact-config" role="group" aria-label="AI 厂商与模型选择">
+              <label>
+                <span>厂商</span>
+                <select aria-label="AI 厂商" value={selectedProviderId ?? ''}
+                  disabled={busy || !libraryView.loaded || !libraryView.snapshot.ai.providers.length}
+                  onChange={(event) => void selectConfiguration(event.target.value)}>
+                  {!selectedProviderId ? <option value="" disabled>请选择厂商</option> : null}
+                  {selectedProviderId && !profile ? <option value={selectedProviderId} disabled>原厂商已删除，请重新选择</option> : null}
+                  {libraryView.snapshot.ai.providers.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>模型</span>
+                <select aria-label="聊天模型" value={selectedModel} disabled={busy || !libraryView.loaded || !provider}
+                  onChange={(event) => { if (provider) void selectConfiguration(provider.id, event.target.value); }}>
+                  {!profile ? <option value={selectedModel}>请先配置厂商与模型</option> : <>
+                    {!modelAvailable ? <option value={selectedModel} disabled>{selectedModel || '原模型'} · 不可用</option> : null}
+                    {providerModels(profile).map((model) => <option key={model} value={model}>{model}</option>)}
+                  </>}
+                </select>
+              </label>
+            </div>
           </div>
-          <div className="ai-form-grid" role="group" aria-label="AI 厂商与模型选择">
-            <label>
-              <span>AI 厂商</span>
-              <select aria-label="AI 厂商" value={selectedProviderId ?? ''}
-                disabled={busy || !libraryView.loaded || !libraryView.snapshot.ai.providers.length}
-                onChange={(event) => void selectConfiguration(event.target.value)}>
-                {!selectedProviderId ? <option value="" disabled>请选择厂商</option> : null}
-                {selectedProviderId && !profile ? <option value={selectedProviderId} disabled>原厂商已删除，请重新选择</option> : null}
-                {libraryView.snapshot.ai.providers.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-              </select>
-            </label>
-            <label>
-              <span>聊天模型</span>
-              <select aria-label="聊天模型" value={selectedModel} disabled={busy || !libraryView.loaded || !provider}
-                onChange={(event) => { if (provider) void selectConfiguration(provider.id, event.target.value); }}>
-                {!profile ? <option value={selectedModel}>请先配置厂商与模型</option> : <>
-                  {!modelAvailable ? <option value={selectedModel} disabled>{selectedModel || '原模型'} · 不可用</option> : null}
-                  {providerModels(profile).map((model) => <option key={model} value={model}>{model}</option>)}
-                </>}
-              </select>
-            </label>
-          </div>
-          <p className="ai-field-help">{switching ? '正在切换 AI 配置…' : '厂商和模型按会话独立保存，切换会话时自动恢复；修改选择会保留当前聊天记录和上下文。'}</p>
-          <p className="ai-field-help">聊天记录和草稿自动保存在本机，重启后可继续追问。</p>
+          <p className="ai-session-note">{switching ? '正在切换 AI 配置…' : '当前会话独立保存厂商与模型 · 聊天记录和草稿自动保存在本机'}</p>
           {activity.sessionError ? <div className="ai-form-actions">
             <p className="settings-error" role="alert">{activity.sessionError}</p>
             <button type="button" disabled={activity.sessionSaving}
@@ -446,25 +448,56 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
             <p className="settings-error" role="alert">云端检索需要在 AI 设置中配置 Embedding 模型；也可以切换为直接与模型对话。</p>
           ) : null}
           <form onSubmit={(event) => void submit(event)}>
-            <div className="ai-knowledge-scope" role="group" aria-label="回答方式">
+            <div className="ai-answer-mode" role="group" aria-label="回答方式">
               <label>
-                <input type="radio" name="ai-grounding" checked={grounding === 'library'}
+                <input type="radio" name="ai-grounding" aria-label="检索本地文献并附来源" checked={grounding === 'library'}
                   disabled={busy || !usablePapers.length} onChange={() => setMode('library')} />
-                检索本地文献并附来源
+                <span>文献问答<small>附来源</small></span>
               </label>
               <label>
-                <input type="radio" name="ai-grounding" checked={grounding === 'direct'}
+                <input type="radio" name="ai-grounding" aria-label="直接与模型对话" checked={grounding === 'direct'}
                   disabled={busy} onChange={() => setMode('direct')} />
-                直接与模型对话
+                <span>直接对话<small>不检索文献</small></span>
               </label>
             </div>
             {grounding === 'direct' ? (
-              <p className="ai-muted">{usablePapers.length
+              <p className="ai-mode-note">{usablePapers.length
                 ? '当前回答不检索本地文献，也不会附带来源。'
                 : '知识库还没有可检索的文件，当前为纯模型对话。导入 PDF 后可切换为文献检索。'}</p>
             ) : null}
-            <fieldset className="ai-knowledge-files" disabled={busy || !libraryView.loaded}>
-              <legend>知识库文件</legend>
+            <label className="ai-question-field">
+              <span>科研问题</span>
+              <textarea
+                aria-label="科研问题"
+                ref={questionInput}
+                value={visibleDraft}
+                maxLength={4000}
+                rows={3}
+                placeholder="例如：这些研究对工作记忆的主要结论是什么？可以继续追问。"
+                disabled={busy}
+                onChange={(event) => setDraft({ text: event.target.value, epoch: ai.getView().answerEpoch })}
+              />
+            </label>
+            <div className="ai-question-footer">
+              <small>{visibleDraft.length} / 4000{messages.length ? ` · 已有 ${messages.filter((message) => message.role === 'user').length} 轮提问` : ''}</small>
+              <div>
+                <button
+                  type="submit"
+                  className="primary-action"
+                  disabled={!questionReady || busy || !visibleDraft.trim()}
+                >
+                  <Send size={15} />{grounding === 'direct' ? '发送问题' : '检索并提问'}
+                </button>
+              </div>
+            </div>
+            <details className="ai-knowledge-disclosure" open={knowledgeOpen}
+              onToggle={(event) => setKnowledgeOpen(event.currentTarget.open)}>
+              <summary>
+                <span><BookOpen size={15} aria-hidden="true" />知识库与检索范围</span>
+                <small>{grounding === 'direct' ? '当前未使用' : `${scope === 'all' ? '全部' : '已选'} ${scopedCount} 份 · ${provider?.embeddingModel ? '向量检索' : '全文检索'}`}</small>
+              </summary>
+              <fieldset className="ai-knowledge-files" disabled={busy || !libraryView.loaded}>
+                <legend>知识库文件</legend>
               <div className="ai-knowledge-actions">
                 {onAddPdfs ? <button type="button" onClick={() => void addPdfs()}><Plus size={14} />{addingFiles ? '添加并索引中…' : '添加本地 PDF'}</button> : null}
                 <button type="button" disabled={grounding === 'direct' || !vectorConfigured || !scopedCount} onClick={() => void buildIndex()}>重建向量索引</button>
@@ -516,33 +549,9 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
                   </div>)}
                 </div>
               </details> : null}
-              {grounding === 'library' && scope === 'selected' && !scopedCount && knowledgePapers.length ? <p className="ai-muted">请选择至少一份有可检索文本的文件。</p> : null}
-            </fieldset>
-            <label className="ai-question-field">
-              <span>科研问题</span>
-              <textarea
-                aria-label="科研问题"
-                ref={questionInput}
-                value={visibleDraft}
-                maxLength={4000}
-                rows={4}
-                placeholder="例如：这些研究对工作记忆的主要结论是什么？可以继续追问。"
-                disabled={busy}
-                onChange={(event) => setDraft({ text: event.target.value, epoch: ai.getView().answerEpoch })}
-              />
-            </label>
-            <div className="ai-question-footer">
-              <small>{visibleDraft.length} / 4000{messages.length ? ` · 已有 ${messages.filter((message) => message.role === 'user').length} 轮提问` : ''}</small>
-              <div>
-                <button
-                  type="submit"
-                  className="primary-action"
-                  disabled={!questionReady || busy || !visibleDraft.trim()}
-                >
-                  <Send size={15} />{grounding === 'direct' ? '发送问题' : '检索并提问'}
-                </button>
-              </div>
-            </div>
+                {grounding === 'library' && scope === 'selected' && !scopedCount && knowledgePapers.length ? <p className="ai-muted">请选择至少一份有可检索文本的文件。</p> : null}
+              </fieldset>
+            </details>
           </form>
           {buildingIndex ? <div className="ai-knowledge-actions"><span role="status">正在构建知识库向量…</span><button type="button" onClick={cancelIndex}>取消向量构建</button></div> : null}
           <p className="ai-assistant-privacy">

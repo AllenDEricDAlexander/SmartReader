@@ -58,11 +58,25 @@ async function createConversation() {
   await waitFor(() => expect(screen.getByLabelText('科研问题')).toHaveValue(''));
 }
 
+function openGroupManager() {
+  const summary = screen.getByText('管理分组').closest('summary')!;
+  const details = summary.closest('details') as HTMLDetailsElement;
+  if (!details.open) fireEvent.click(summary);
+  return details;
+}
+
+async function waitForConversationReady(ai: AiService) {
+  await waitFor(() => expect(ai.getView().conversationBusy).toBe(false));
+}
+
 async function createGroup(ai: AiService, name: string) {
+  await waitForConversationReady(ai);
+  openGroupManager();
   fireEvent.click(screen.getByRole('button', { name: '新建分组' }));
   fireEvent.change(screen.getByLabelText('分组名称'), { target: { value: name } });
   fireEvent.click(screen.getByRole('button', { name: '保存分组' }));
   await waitFor(() => expect(screen.queryByLabelText('分组名称')).not.toBeInTheDocument());
+  await waitForConversationReady(ai);
   const group = ai.getView().conversationGroups!.find((item) => item.name === name)!;
   expect(screen.getByRole('combobox', { name: '筛选会话分组' })).toHaveValue(group.id);
   return group;
@@ -95,6 +109,7 @@ function aimDrag(handle: Element, title: string | null) {
 }
 
 function startGroupDrag(name: string) {
+  openGroupManager();
   const handle = screen.getByRole('button', { name: `拖动排序分组 ${name}` });
   Object.defineProperties(handle, {
     setPointerCapture: { configurable: true, value: vi.fn() },
@@ -140,12 +155,25 @@ beforeEach(() => {
 });
 
 describe('AI conversation history UI', () => {
+  it('keeps search visible while group management starts collapsed and remains keyboard reachable', async () => {
+    const app = await setup();
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    expect(screen.getByRole('searchbox', { name: '搜索历史会话' })).toBeInTheDocument();
+    const details = screen.getByText('管理分组').closest('details')!;
+    expect(details).not.toHaveAttribute('open');
+    fireEvent.click(screen.getByText('管理分组'));
+    expect(details).toHaveAttribute('open');
+    expect(screen.getByRole('button', { name: '新建分组' })).toBeEnabled();
+    app.ai.dispose();
+  });
+
   it('independently collapses groups, restores them after restart and preserves the active chat and follow-up context', async () => {
     const app = await groupedConversations();
     const provider = app.library.getView().snapshot.ai.providers[0];
     await app.ai.saveProvider({ ...provider, models: ['chat-model', 'fast-model'] });
     await app.ai.selectProvider(provider.id, 'fast-model');
     const panel = render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    openGroupManager();
     expect(screen.getByRole('button', { name: '折叠分组 研究' })).toHaveAttribute('aria-expanded', 'true');
     ask('折叠前的问题');
     await screen.findByText('折叠前的问题回答[S1]');
@@ -154,20 +182,23 @@ describe('AI conversation history UI', () => {
     const before = app.snapshot().aiConversations!.entries;
     fireEvent.click(screen.getByRole('button', { name: '折叠分组 研究' }));
     await screen.findByRole('button', { name: '展开分组 研究' });
+    await waitForConversationReady(app.ai);
     expect(screen.queryByRole('button', { name: '打开会话 历史会话' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '打开会话 当前会话' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '折叠分组 归档' })).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(screen.getByRole('button', { name: '折叠分组 归档' }));
     await screen.findByText('会话所在分组已折叠，可展开分组查看。');
+    await waitForConversationReady(app.ai);
     expect(screen.getByText('折叠前的问题回答[S1]')).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('继续追问草稿');
     expect(screen.getByLabelText('聊天模型')).toHaveValue('fast-model');
-    expect(screen.getByText('已置顶 2/10')).toBeInTheDocument();
+    expect(screen.getByText('2/10')).toBeInTheDocument();
     expect(app.snapshot().aiConversations?.entries).toEqual(before);
     await act(async () => { await app.ai.flushAssistantSession(); });
     panel.unmount(); app.ai.dispose();
     const restarted = services(app.storage);
     render(<AiAssistant library={restarted.library} ai={restarted.ai} onOpenPaper={vi.fn()} />);
+    openGroupManager();
     await screen.findByText('折叠前的问题回答[S1]');
     expect(screen.getByRole('button', { name: '展开分组 研究' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('button', { name: '展开分组 归档' })).toHaveAttribute('aria-expanded', 'false');
@@ -181,6 +212,7 @@ describe('AI conversation history UI', () => {
     expect(screen.queryByRole('button', { name: '打开会话 当前会话' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '展开分组 归档' }));
     await screen.findByRole('button', { name: '折叠分组 归档' });
+    await waitForConversationReady(restarted.ai);
     expect(screen.getByRole('button', { name: '打开会话 当前会话' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
     await screen.findByText('继续追问草稿回答[S1]');
@@ -197,6 +229,7 @@ describe('AI conversation history UI', () => {
     const group = app.groups[0];
     await app.ai.setConversationGroupCollapsed(group.id, !collapsed);
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    openGroupManager();
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保留草稿' } });
     await act(async () => { await app.ai.flushAssistantSession(); });
     const before = app.snapshot().aiConversations;
@@ -204,11 +237,13 @@ describe('AI conversation history UI', () => {
     vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('折叠状态保存失败'));
     fireEvent.click(screen.getByRole('button', { name: label }));
     expect(await screen.findByRole('alert')).toHaveTextContent('折叠状态保存失败');
+    await waitForConversationReady(app.ai);
     expect(app.snapshot().aiConversations).toEqual(before);
     expect(screen.getByRole('button', { name: label })).toHaveAttribute('aria-expanded', collapsed ? 'true' : 'false');
     expect(screen.getByLabelText('科研问题')).toHaveValue('保留草稿');
     fireEvent.click(screen.getByRole('button', { name: label }));
     await screen.findByText(collapsed ? '分组已折叠。' : '分组已展开。');
+    await waitForConversationReady(app.ai);
     expect(screen.getByRole('button', { name: `${collapsed ? '展开' : '折叠'}分组 研究` })).toHaveAttribute('aria-expanded', collapsed ? 'false' : 'true');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(app.snapshot().aiConversations?.entries).toEqual(before?.entries);
@@ -220,10 +255,12 @@ describe('AI conversation history UI', () => {
   it('keeps collapsed groups searchable, sortable and renameable without changing their saved collapsed state', async () => {
     const app = await groupedConversations();
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    openGroupManager();
     const group = app.groups[0];
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
     fireEvent.click(screen.getByRole('button', { name: '折叠分组 研究' }));
     await screen.findByText('该分组已折叠，展开后可查看会话。');
+    await waitForConversationReady(app.ai);
     expect(screen.getByRole('combobox', { name: '筛选会话分组' })).toHaveValue(group.id);
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: '历史会话' } });
     await screen.findByText('找到 1 个会话');
@@ -233,6 +270,7 @@ describe('AI conversation history UI', () => {
     aimGroupDrag(handle, '参考');
     pointerEvent(handle, 'pointerup');
     await screen.findByText('分组顺序已保存。');
+    await waitForConversationReady(app.ai);
     expect(app.ai.getView().conversationGroups?.find((item) => item.id === group.id)?.collapsed).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: '重命名分组' }));
     fireEvent.change(screen.getByLabelText('分组名称'), { target: { value: '重点研究' } });
@@ -252,6 +290,7 @@ describe('AI conversation history UI', () => {
     const app = await groupedConversations();
     const [one, two, three] = app.groups;
     const panel = render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    openGroupManager();
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保留的草稿' } });
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: two.id } });
     await act(async () => { await app.ai.flushAssistantSession(); });
@@ -261,6 +300,7 @@ describe('AI conversation history UI', () => {
     expect(aimGroupDrag(handle, '研究')).toHaveClass('drop-before');
     pointerEvent(handle, 'pointerup');
     await screen.findByText('分组顺序已保存。');
+    await waitForConversationReady(app.ai);
     expect(app.snapshot().aiConversations).toEqual({ ...before, groups: [three, one, two] });
     expect(screen.getByRole('combobox', { name: '筛选会话分组' })).toHaveValue(two.id);
     expect(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' })).toHaveValue(two.id);
@@ -268,6 +308,7 @@ describe('AI conversation history UI', () => {
     expect(within(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' })).getAllByRole('option').map((option) => (option as HTMLOptionElement).value)).toEqual(['', three.id, one.id, two.id]);
     fireEvent.keyDown(screen.getByRole('button', { name: '拖动排序分组 参考' }), { key: 'ArrowDown' });
     await waitFor(() => expect(app.ai.getView().conversationGroups).toEqual([one, three, two]));
+    await waitForConversationReady(app.ai);
     await waitFor(() => expect(screen.getByRole('button', { name: '拖动排序分组 参考' })).toHaveFocus());
     fireEvent.keyDown(screen.getByRole('button', { name: '拖动排序分组 参考' }), { key: 'ArrowUp' });
     await waitFor(() => expect(app.ai.getView().conversationGroups).toEqual([three, one, two]));
@@ -278,6 +319,7 @@ describe('AI conversation history UI', () => {
     panel.unmount(); app.ai.dispose();
     const restarted = services(app.storage);
     render(<AiAssistant library={restarted.library} ai={restarted.ai} onOpenPaper={vi.fn()} />);
+    openGroupManager();
     await waitFor(() => expect(screen.getByLabelText('科研问题')).toHaveValue('保留的草稿'));
     expect(restarted.ai.getView().conversationGroups).toEqual([three, one, two]);
     expect(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' })).toHaveValue(two.id);
@@ -299,12 +341,14 @@ describe('AI conversation history UI', () => {
     aimGroupDrag(handle, '研究');
     pointerEvent(handle, 'pointerup');
     expect(await screen.findByRole('alert')).toHaveTextContent('分组顺序保存失败');
+    await waitForConversationReady(app.ai);
     expect(app.snapshot().aiConversations).toEqual(before);
     expect(screen.getByLabelText('科研问题')).toHaveValue('保留草稿');
     handle = startGroupDrag('参考');
     aimGroupDrag(handle, '研究');
     pointerEvent(handle, 'pointerup');
     await screen.findByText('分组顺序已保存。');
+    await waitForConversationReady(app.ai);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(app.snapshot().aiConversations?.entries).toEqual(before?.entries);
     expect(app.ai.getView().conversationGroups).toEqual([app.groups[2], app.groups[0], app.groups[1]]);
@@ -369,6 +413,7 @@ describe('AI conversation history UI', () => {
     const app = await groupedConversations();
     for (let index = 0; index < 5; index += 1) await app.ai.createConversationGroup(`其他${index}`);
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    openGroupManager();
     fireEvent.click(screen.getByText('调整分组顺序'));
     const list = screen.getByRole('list', { name: '分组排序' });
     const bounds = vi.spyOn(list, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 200, left: 0, right: 240, x: 0, y: 0, width: 240, height: 200, toJSON: () => ({}) });
@@ -403,6 +448,7 @@ describe('AI conversation history UI', () => {
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
     fireEvent.change(screen.getByRole('combobox', { name: '移动会话 课题甲 到分组' }), { target: { value: research.id } });
     await screen.findByText('会话分组已更新。');
+    await waitForConversationReady(app.ai);
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: research.id } });
     await createConversation();
     fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'chat-model' } });
@@ -416,6 +462,7 @@ describe('AI conversation history UI', () => {
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
     fireEvent.change(screen.getByRole('combobox', { name: '移动会话 课题乙 到分组' }), { target: { value: archive.id } });
     await screen.findByText('会话分组已更新。');
+    await waitForConversationReady(app.ai);
     const first = app.ai.getView().conversations!.find((entry) => entry.title === '课题甲')!.id;
     const second = app.ai.getView().activeConversationId!;
     await act(async () => {
@@ -427,12 +474,14 @@ describe('AI conversation history UI', () => {
     fireEvent.change(screen.getByLabelText('分组名称'), { target: { value: '已归档' } });
     fireEvent.click(screen.getByRole('button', { name: '保存分组' }));
     await waitFor(() => expect(screen.queryByLabelText('分组名称')).not.toBeInTheDocument());
+    await waitForConversationReady(app.ai);
     const beforeOrder = app.snapshot().aiConversations!;
     fireEvent.click(screen.getByText('调整分组顺序'));
     const groupHandle = startGroupDrag('已归档');
     aimGroupDrag(groupHandle, '研究讨论');
     pointerEvent(groupHandle, 'pointerup');
     await screen.findByText('分组顺序已保存。');
+    await waitForConversationReady(app.ai);
     expect(app.snapshot().aiConversations?.entries).toEqual(beforeOrder.entries);
     expect(screen.getByRole('combobox', { name: '筛选会话分组' })).toHaveValue(archive.id);
     expect(screen.getByLabelText('科研问题')).toHaveValue('乙的草稿');
@@ -494,7 +543,7 @@ describe('AI conversation history UI', () => {
     await createConversation();
     expect(screen.getByRole('combobox', { name: '移动会话 新对话 到分组' })).toHaveValue(two.id);
     expect(screen.getByRole('option', { name: '归档（2）' })).toBeInTheDocument();
-    expect(screen.getByText('已置顶 2/10')).toBeInTheDocument();
+    expect(screen.getByText('2/10')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '置顶会话 新对话' })).toHaveAttribute('aria-pressed', 'false');
     await act(async () => { await app.ai.flushAssistantSession(); });
     app.ai.dispose();
@@ -505,14 +554,17 @@ describe('AI conversation history UI', () => {
     const group = await app.ai.createConversationGroup('研究');
     await app.ai.moveConversationToGroup(app.ids[0], group.id);
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    openGroupManager();
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保留草稿' } });
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
     fireEvent.change(screen.getByRole('combobox', { name: '移动会话 历史会话 到分组' }), { target: { value: '' } });
     await screen.findByText('该分组暂无会话。');
+    await waitForConversationReady(app.ai);
     expect(screen.getByLabelText('科研问题')).toHaveValue('保留草稿');
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: '' } });
     fireEvent.change(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' }), { target: { value: group.id } });
     await waitFor(() => expect(screen.queryByRole('button', { name: '打开会话 当前会话' })).not.toBeInTheDocument());
+    await waitForConversationReady(app.ai);
     expect(app.ai.getView().activeConversationId).toBe(app.ids[1]);
     expect(screen.getByLabelText('科研问题')).toHaveValue('保留草稿');
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
@@ -521,6 +573,7 @@ describe('AI conversation history UI', () => {
     vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('归属保存失败'));
     fireEvent.change(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' }), { target: { value: '' } });
     expect(await screen.findByRole('alert')).toHaveTextContent('归属保存失败');
+    await waitForConversationReady(app.ai);
     expect(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' })).toHaveValue(group.id);
     expect(app.snapshot().aiConversations).toEqual(before);
     fireEvent.change(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' }), { target: { value: '' } });
@@ -536,6 +589,7 @@ describe('AI conversation history UI', () => {
     const group = await app.ai.createConversationGroup('原分组');
     await app.ai.moveConversationToGroup(app.ids[0], group.id);
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    openGroupManager();
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保留草稿' } });
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
     await act(async () => { await app.ai.flushAssistantSession(); });
@@ -549,6 +603,14 @@ describe('AI conversation history UI', () => {
     vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('分组保存失败'));
     submit();
     expect(await screen.findByRole('alert')).toHaveTextContent('分组保存失败');
+    await waitForConversationReady(app.ai);
+    if (operation === 'rename') {
+      const details = screen.getByText('管理分组').closest('details')!;
+      fireEvent.click(screen.getByText('管理分组'));
+      expect(details).not.toHaveAttribute('open');
+      expect(screen.getByRole('alert')).toHaveTextContent('分组保存失败');
+      fireEvent.click(screen.getByText('管理分组'));
+    }
     expect(app.snapshot().aiConversations).toEqual(before);
     expect(screen.getByLabelText('科研问题')).toHaveValue('保留草稿');
     if (operation !== 'delete') expect(screen.getByLabelText('分组名称')).toHaveValue('新名称');
@@ -565,6 +627,7 @@ describe('AI conversation history UI', () => {
   it('validates group names, supports cancelling and protects the built-in history views', async () => {
     const app = await setup();
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    openGroupManager();
     expect(screen.getByRole('button', { name: '重命名分组' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '删除分组' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '新建分组' }));
@@ -607,7 +670,7 @@ describe('AI conversation history UI', () => {
     expect(app.ai.getView().conversations?.find((entry) => entry.id === app.ids[1])?.groupId).toBe(other.id);
     fireEvent.keyDown(screen.getByRole('button', { name: '拖动排序置顶会话 组内乙' }), { key: 'ArrowDown' });
     await waitFor(() => expect(app.ai.getView().conversations?.filter((entry) => entry.pinned).map((entry) => entry.id)).toEqual([app.ids[0], app.ids[2], app.ids[1]]));
-    expect(screen.getByText('已置顶 3/10')).toBeInTheDocument();
+    expect(screen.getByText('3/10')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '打开会话 隐藏置顶' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
     expect(screen.getByRole('combobox', { name: '移动会话 隐藏置顶 到分组' })).toHaveValue(other.id);
@@ -689,7 +752,7 @@ describe('AI conversation history UI', () => {
     await screen.findByText('置顶顺序已保存。');
     await screen.findByText('找到 2 个会话');
     expect(app.ai.getView().conversations?.filter((entry) => entry.pinned).map((entry) => entry.id)).toEqual([app.ids[2], app.ids[0], app.ids[1]]);
-    expect(screen.getByText('已置顶 3/10')).toBeInTheDocument();
+    expect(screen.getByText('3/10')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '清空会话搜索' }));
     const keyboard = await screen.findByRole('button', { name: '拖动排序置顶会话 目标甲' });
     keyboard.focus();
@@ -743,6 +806,7 @@ describe('AI conversation history UI', () => {
     aimDrag(handle, '常用乙');
     pointerEvent(handle, 'pointerup');
     expect(await screen.findByRole('alert')).toHaveTextContent('排序写入失败');
+    await waitForConversationReady(app.ai);
     expect(app.snapshot().aiConversations).toEqual(before);
     expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 常用甲');
     expect(screen.getByLabelText('科研问题')).toHaveValue('需要保留的草稿');
@@ -771,7 +835,7 @@ describe('AI conversation history UI', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('置顶会话列表已变化');
     expect(reorder).not.toHaveBeenCalled();
     expect(app.snapshot().aiConversations).toEqual(afterPin);
-    expect(screen.getByText('已置顶 3/10')).toBeInTheDocument();
+    expect(screen.getByText('3/10')).toBeInTheDocument();
     app.ai.dispose();
   });
 
@@ -804,6 +868,7 @@ describe('AI conversation history UI', () => {
     await app.ai.createConversationGroup('参考');
     for (const id of app.ids) await app.ai.moveConversationToGroup(id, group.id);
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    openGroupManager();
     fireEvent.click(screen.getByText('调整分组顺序'));
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
     const reorder = vi.spyOn(app.ai, 'reorderPinnedConversations');
@@ -844,7 +909,7 @@ describe('AI conversation history UI', () => {
     expect(recentOrder).toEqual(['打开会话 当前课题', '打开会话 常用课题']);
     fireEvent.click(screen.getByRole('button', { name: '置顶会话 常用课题', pressed: false }));
     await screen.findByRole('button', { name: '取消置顶会话 常用课题', pressed: true });
-    expect(screen.getByText('已置顶 1/10')).toBeInTheDocument();
+    expect(screen.getByText('1/10')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 常用课题');
     expect(screen.getByText('当前课题回答[S1]')).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('当前草稿');
@@ -852,11 +917,11 @@ describe('AI conversation history UI', () => {
     await screen.findByText('找到 2 个会话');
     expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 常用课题');
     fireEvent.click(screen.getByRole('button', { name: '取消置顶会话 常用课题' }));
-    await screen.findByText('已置顶 0/10');
+    await screen.findByText('0/10');
     await screen.findByText('找到 2 个会话');
     expect(screen.getAllByRole('button', { name: /^打开会话 / }).map((button) => button.getAttribute('aria-label'))).toEqual(recentOrder);
     fireEvent.click(screen.getByRole('button', { name: '置顶会话 常用课题' }));
-    await screen.findByText('已置顶 1/10');
+    await screen.findByText('1/10');
     await act(async () => { await app.ai.flushAssistantSession(); });
     panel.unmount();
     app.ai.dispose();
@@ -896,27 +961,27 @@ describe('AI conversation history UI', () => {
     await app.ai.moveConversationToGroup(ids[10], group.id);
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
-    expect(screen.getByText('已置顶 10/10')).toBeInTheDocument();
+    expect(screen.getByText('10/10')).toBeInTheDocument();
     expect(screen.getByText('置顶已达上限，请先取消其他会话的置顶。')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '置顶会话 课题11' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '取消置顶会话 课题1' })).toBeEnabled();
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: '课题11' } });
     await screen.findByText('找到 1 个会话');
     expect(screen.getByRole('button', { name: '置顶会话 课题11' })).toBeDisabled();
-    expect(screen.getByText('已置顶 10/10')).toBeInTheDocument();
+    expect(screen.getByText('10/10')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '清空会话搜索' }));
     fireEvent.click(await screen.findByRole('button', { name: '取消置顶会话 课题1' }));
-    await screen.findByText('已置顶 9/10');
+    await screen.findByText('9/10');
     expect(screen.getByRole('button', { name: '置顶会话 课题11' })).toBeEnabled();
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: '课题11' } });
     await screen.findByText('找到 1 个会话');
     fireEvent.click(screen.getByRole('button', { name: '置顶会话 课题11' }));
-    await screen.findByText('已置顶 10/10');
+    await screen.findByText('10/10');
     await screen.findByText('找到 1 个会话');
     expect(screen.getByRole('button', { name: '取消置顶会话 课题11' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: '删除会话 课题11' }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除会话' }));
-    await screen.findByText('已置顶 9/10');
+    await screen.findByText('9/10');
     await screen.findByText('没有匹配的会话。');
     fireEvent.click(screen.getByRole('button', { name: '清空会话搜索' }));
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
@@ -941,6 +1006,7 @@ describe('AI conversation history UI', () => {
     vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('置顶状态保存失败'));
     fireEvent.click(screen.getByRole('button', { name: action }));
     expect(await screen.findByRole('alert')).toHaveTextContent('置顶状态保存失败');
+    await waitForConversationReady(app.ai);
     expect(screen.getByRole('button', { name: action, pressed: !pinned })).toBeEnabled();
     expect(screen.getByText('保留的聊天回答[S1]')).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('保留的草稿');
@@ -1093,6 +1159,7 @@ describe('AI conversation history UI', () => {
     fireEvent.change(screen.getByLabelText('会话名称'), { target: { value: '新的标题' } });
     fireEvent.click(screen.getByRole('button', { name: '保存名称' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('名称保存失败');
+    await waitForConversationReady(app.ai);
     expect(screen.getByRole('button', { name: '打开会话 原来的标题' })).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('不能丢失的草稿');
     expect(screen.getByLabelText('会话名称')).toHaveValue('新的标题');
@@ -1453,10 +1520,12 @@ describe('AI conversation history UI', () => {
     expect(screen.queryByText('PRIVATE-QUESTION')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '置顶会话 加密会话' }));
     await screen.findByRole('button', { name: '取消置顶会话 加密会话' });
+    await waitForConversationReady(app.ai);
     expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 加密会话');
     expect(screen.getByLabelText('科研问题')).toHaveValue('公开草稿');
     fireEvent.click(screen.getByRole('button', { name: '置顶会话 公开会话' }));
     await screen.findByRole('button', { name: '取消置顶会话 公开会话' });
+    await waitForConversationReady(app.ai);
     const handle = startDrag('公开会话');
     aimDrag(handle, '加密会话');
     pointerEvent(handle, 'pointerup');
@@ -1480,6 +1549,7 @@ describe('AI conversation history UI', () => {
     fireEvent.click(screen.getByRole('button', { name: '清空会话搜索' }));
     fireEvent.click(screen.getByRole('button', { name: '展开分组 私密归档' }));
     await screen.findByRole('button', { name: '打开会话 加密会话' });
+    await waitForConversationReady(app.ai);
     fireEvent.click(screen.getByRole('button', { name: '删除分组' }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除分组' }));
     await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选会话分组' })).toHaveValue('all'));
@@ -1493,7 +1563,7 @@ describe('AI conversation history UI', () => {
     fireEvent.click(screen.getByRole('button', { name: '删除会话 加密会话' }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除会话' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: '打开会话 加密会话' })).not.toBeInTheDocument());
-    expect(screen.getByText('已置顶 0/10')).toBeInTheDocument();
+    expect(screen.getByText('0/10')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '打开会话 公开会话' })).toBeInTheDocument();
     expect(JSON.stringify(app.snapshot())).not.toContain('PRIVATE-');
     app.ai.dispose();

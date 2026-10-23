@@ -121,20 +121,23 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
   }
 
   return <aside className="ai-history-panel" aria-label="历史会话">
-    <div className="ai-history-heading"><History size={17} /><h2>历史会话</h2>
-      <span className="ai-history-pin-count">已置顶 {pinnedCount}/{MAX_PINNED_AI_CONVERSATIONS}</span>
+    <div className="ai-history-heading">
+      <span className="ai-history-title"><History size={17} /><h2>历史会话</h2>
+        <small>{pinnedCount}/{MAX_PINNED_AI_CONVERSATIONS}</small>
+      </span>
+      <button type="button" className="ai-new-conversation" disabled={disabled}
+        onClick={() => void perform(async () => { await ai.createConversation(groupFilter ?? null); setQuery(''); })}>
+        <MessageSquarePlus size={15} />新建对话
+      </button>
     </div>
-    <button type="button" className="ai-new-conversation" disabled={disabled}
-      onClick={() => void perform(async () => { await ai.createConversation(groupFilter ?? null); setQuery(''); })}><MessageSquarePlus size={16} />新建对话</button>
-    <p className="ai-muted">每个会话独立保存聊天、草稿和文献范围。</p>
-    <AiConversationGroups ai={ai} disabled={disabled} selectedId={groupFilter} onSelect={setGroupFilter} historyListId={historyListId} />
-    {pinnedCount > 1 ? <p className="ai-muted">拖动置顶会话左侧手柄排序，也可聚焦手柄用 ↑ / ↓ 调整。</p> : null}
-    {pinLimitReached ? <p className="ai-muted" role="status">置顶已达上限，请先取消其他会话的置顶。</p> : null}
     <label className="ai-history-search"><Search size={15} aria-hidden="true" />
       <input type="search" aria-label="搜索历史会话" placeholder="搜索标题或聊天内容" value={query} disabled={!activity.sessionLoaded}
         onChange={(event) => setQuery(event.target.value)} />
       {query ? <button type="button" aria-label="清空会话搜索" onClick={() => setQuery('')}><X size={14} /></button> : null}
     </label>
+    <AiConversationGroups ai={ai} disabled={disabled} selectedId={groupFilter} onSelect={setGroupFilter} historyListId={historyListId} />
+    {pinnedCount > 1 ? <p className="ai-history-tip">拖动置顶手柄排序，也可用 ↑ / ↓ 调整。</p> : null}
+    {pinLimitReached ? <p className="ai-muted" role="status">置顶已达上限，请先取消其他会话的置顶。</p> : null}
     {query.trim() && !currentSearch ? <p className="ai-muted" role="status">正在搜索会话…</p> : null}
     {query.trim() && currentSearch && !currentSearch.error ? <p className="ai-muted" role="status">
       {entries.length ? `找到 ${entries.length} 个会话` : '没有匹配的会话。'}
@@ -216,32 +219,36 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
           <button type="button" className="ai-history-select" disabled={disabled}
             title={entry.title} aria-label={`打开会话 ${entry.title}`} aria-current={entry.id === activity.activeConversationId ? 'true' : undefined}
             onClick={() => void perform(() => ai.selectConversation(entry.id))}>
-            <strong>{`${entry.title} · ${entry.locked ? '待解锁' : entry.messageCount === null ? '已加密' : `${Math.floor(entry.messageCount / 2)} 轮`}`}</strong>
+            <strong>{entry.title}</strong>
             <span>{entry.pinned ? <span className="ai-history-pinned"><Pin size={12} aria-hidden="true" />置顶</span> : null}
-              {entry.locked ? <LockKeyhole size={12} /> : null}<time dateTime={entry.updatedAt}>{new Date(entry.updatedAt).toLocaleString()}</time>
+              {entry.locked ? <span className="ai-history-locked"><LockKeyhole size={12} aria-hidden="true" />待解锁</span>
+                : <span>{entry.messageCount === null ? '已加密' : `${Math.floor(entry.messageCount / 2)} 轮`}</span>}
+              <time dateTime={entry.updatedAt}>{new Date(entry.updatedAt).toLocaleString()}</time>
             </span>
           </button>
-          <select className="ai-history-membership" aria-label={`移动会话 ${entry.title} 到分组`} title="选择所属分组"
-            value={entry.groupId ?? ''} disabled={disabled} onChange={(event) => {
-              const groupId = event.target.value || null;
-              void perform(() => ai.moveConversationToGroup(entry.id, groupId))
-                .then((saved) => { if (saved) setNotice('会话分组已更新。'); });
-            }}>
-            <option value="">未分组</option>
-            {activity.conversationGroups?.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-          </select>
-        </div>
-        <div className="ai-history-actions">
-          <button type="button" className="ai-history-pin" disabled={disabled || (!entry.pinned && pinLimitReached)}
-            aria-label={`${entry.pinned ? '取消置顶' : '置顶'}会话 ${entry.title}`} aria-pressed={Boolean(entry.pinned)}
-            title={!entry.pinned && pinLimitReached ? `最多置顶 ${MAX_PINNED_AI_CONVERSATIONS} 个会话，请先取消其他会话的置顶。` : entry.pinned ? '取消置顶' : '置顶到历史列表顶部'}
-            onClick={() => void perform(() => ai.setConversationPinned(entry.id, !entry.pinned))}>
-            {entry.pinned ? <PinOff size={14} /> : <Pin size={14} />}
-          </button>
-          <button type="button" disabled={disabled || entry.locked} aria-label={`重命名会话 ${entry.title}`}
-            onClick={() => { setError(null); setPendingDelete(null); setPendingRename({ id: entry.id, name: entry.title }); }}><PencilLine size={14} /></button>
-          <button type="button" className="ai-history-delete" disabled={disabled} aria-label={`删除会话 ${entry.title}`}
-            onClick={() => { setError(null); setPendingRename(null); setPendingDelete(entry.id); }}><Trash2 size={14} /></button>
+          <div className="ai-history-row-tools">
+            <select className="ai-history-membership" aria-label={`移动会话 ${entry.title} 到分组`} title="选择所属分组"
+              value={entry.groupId ?? ''} disabled={disabled} onChange={(event) => {
+                const groupId = event.target.value || null;
+                void perform(() => ai.moveConversationToGroup(entry.id, groupId))
+                  .then((saved) => { if (saved) setNotice('会话分组已更新。'); });
+              }}>
+              <option value="">未分组</option>
+              {activity.conversationGroups?.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+            </select>
+            <div className="ai-history-actions">
+              <button type="button" className="ai-history-pin" disabled={disabled || (!entry.pinned && pinLimitReached)}
+                aria-label={`${entry.pinned ? '取消置顶' : '置顶'}会话 ${entry.title}`} aria-pressed={Boolean(entry.pinned)}
+                title={!entry.pinned && pinLimitReached ? `最多置顶 ${MAX_PINNED_AI_CONVERSATIONS} 个会话，请先取消其他会话的置顶。` : entry.pinned ? '取消置顶' : '置顶到历史列表顶部'}
+                onClick={() => void perform(() => ai.setConversationPinned(entry.id, !entry.pinned))}>
+                {entry.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+              </button>
+              <button type="button" disabled={disabled || entry.locked} aria-label={`重命名会话 ${entry.title}`}
+                onClick={() => { setError(null); setPendingDelete(null); setPendingRename({ id: entry.id, name: entry.title }); }}><PencilLine size={14} /></button>
+              <button type="button" className="ai-history-delete" disabled={disabled} aria-label={`删除会话 ${entry.title}`}
+                onClick={() => { setError(null); setPendingRename(null); setPendingDelete(entry.id); }}><Trash2 size={14} /></button>
+            </div>
+          </div>
         </div>
       </li>)}
     </ul>
