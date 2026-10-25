@@ -46,7 +46,7 @@ export type TauriBridge = {
   readDesktopPdf(path: string): Promise<OpenedDesktopPdf>;
   selectNativePdfPaths?(): Promise<string[]>;
   selectNativePdfFolder?(): Promise<string[]>;
-  setWindowBackgroundColor?(color: string): Promise<void>;
+  setWindowBackgroundColor?(color: string, theme?: 'light' | 'dark'): Promise<void>;
 };
 
 export function createTauriBridge(
@@ -88,12 +88,12 @@ export function createTauriBridge(
       if (!selected || Array.isArray(selected)) return [];
       return invoke<string[]>('list_desktop_pdfs', { directory: selected });
     },
-    setWindowBackgroundColor(color) {
+    setWindowBackgroundColor(color, theme) {
       if (!dependencies.invoke && !isTauriRuntimeAvailable()) {
         return Promise.resolve();
       }
 
-      const update = backgroundUpdates.then(() => invoke<void>('set_window_background_color', { color }));
+      const update = backgroundUpdates.then(() => invoke<void>('set_window_background_color', { color, ...(theme ? { theme } : {}) }));
       backgroundUpdates = update.catch(() => undefined);
       return update;
     },

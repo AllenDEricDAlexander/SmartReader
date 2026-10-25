@@ -1,10 +1,17 @@
-use tauri::{window::Color, WebviewWindow};
+use tauri::{window::Color, Theme, WebviewWindow};
 
 #[tauri::command]
 pub async fn set_window_background_color(
     window: WebviewWindow,
     color: Color,
+    theme: Option<Theme>,
 ) -> Result<(), String> {
+    // Native title text and controls must match the page's explicit color scheme.
+    if let Some(theme) = theme {
+        window
+            .set_theme(Some(theme))
+            .map_err(|error| error.to_string())?;
+    }
     window
         .set_background_color(Some(color))
         .map_err(|error| error.to_string())?;

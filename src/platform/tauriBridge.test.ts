@@ -2,34 +2,43 @@ import { describe, expect, it, vi } from 'vitest';
 import { createTauriBridge } from './tauriBridge';
 
 describe('tauriBridge', () => {
-  it('updates the window, webview and native backing layers through one command', async () => {
+  it('updates the native theme, window, webview and backing layers through one command', async () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
     const bridge = createTauriBridge({ invoke });
 
-    await bridge.setWindowBackgroundColor?.('#C7EDCC');
+    await bridge.setWindowBackgroundColor?.('#C7EDCC', 'light');
 
     expect(invoke.mock.calls).toEqual([
-      ['set_window_background_color', { color: '#C7EDCC' }],
+      ['set_window_background_color', { color: '#C7EDCC', theme: 'light' }],
     ]);
   });
 
-  it('finishes background updates in order when themes change before IPC completes', async () => {
+  it('preserves color-only callers without overriding the native theme', async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    await createTauriBridge({ invoke }).setWindowBackgroundColor?.('#C7EDCC');
+
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('set_window_background_color', { color: '#C7EDCC' });
+  });
+
+  it('finishes paired background and native theme updates in order before IPC completes', async () => {
     let resolveWindow!: () => void;
     const pendingWindow = new Promise<void>((resolve) => { resolveWindow = resolve; });
     const invoke = vi.fn().mockResolvedValue(undefined).mockReturnValueOnce(pendingWindow);
     const bridge = createTauriBridge({ invoke });
 
-    const first = bridge.setWindowBackgroundColor?.('#C7EDCC');
-    const second = bridge.setWindowBackgroundColor?.('#0f172a');
+    const first = bridge.setWindowBackgroundColor?.('#C7EDCC', 'light');
+    const second = bridge.setWindowBackgroundColor?.('#0f172a', 'dark');
+    const third = bridge.setWindowBackgroundColor?.('#f5f6f8', 'light');
     await Promise.resolve();
-    expect(invoke).toHaveBeenCalledExactlyOnceWith('set_window_background_color', { color: '#C7EDCC' });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('set_window_background_color', { color: '#C7EDCC', theme: 'light' });
 
     resolveWindow();
-    await Promise.all([first, second]);
+    await Promise.all([first, second, third]);
 
     expect(invoke.mock.calls).toEqual([
-      ['set_window_background_color', { color: '#C7EDCC' }],
-      ['set_window_background_color', { color: '#0f172a' }],
+      ['set_window_background_color', { color: '#C7EDCC', theme: 'light' }],
+      ['set_window_background_color', { color: '#0f172a', theme: 'dark' }],
+      ['set_window_background_color', { color: '#f5f6f8', theme: 'light' }],
     ]);
   });
 
@@ -37,15 +46,15 @@ describe('tauriBridge', () => {
     const invoke = vi.fn().mockRejectedValueOnce(new Error('permission denied')).mockResolvedValue(undefined);
     const bridge = createTauriBridge({ invoke });
 
-    await expect(bridge.setWindowBackgroundColor?.('#C7EDCC')).rejects.toThrow('permission denied');
-    await expect(bridge.setWindowBackgroundColor?.('#0f172a')).resolves.toBeUndefined();
-    expect(invoke).toHaveBeenLastCalledWith('set_window_background_color', { color: '#0f172a' });
+    await expect(bridge.setWindowBackgroundColor?.('#C7EDCC', 'light')).rejects.toThrow('permission denied');
+    await expect(bridge.setWindowBackgroundColor?.('#0f172a', 'dark')).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenLastCalledWith('set_window_background_color', { color: '#0f172a', theme: 'dark' });
   });
 
   it('skips native background updates outside the Tauri runtime', async () => {
     Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
 
-    await expect(createTauriBridge().setWindowBackgroundColor?.('#C7EDCC')).resolves.toBeUndefined();
+    await expect(createTauriBridge().setWindowBackgroundColor?.('#C7EDCC', 'light')).resolves.toBeUndefined();
   });
 
   it('opens a native PDF path and reads bytes', async () => {
