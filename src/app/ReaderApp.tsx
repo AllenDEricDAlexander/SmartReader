@@ -320,8 +320,9 @@ export function ReaderApp({
     root.setAttribute('data-theme', readerPreferences.theme);
     const backgroundColor = getComputedStyle(root).getPropertyValue('--sr-bg').trim();
     if (backgroundColor && bridge.setWindowBackgroundColor) {
-      void bridge.setWindowBackgroundColor(backgroundColor).catch((error) => {
-        if (!cancelled) setAppError(`窗口背景同步失败：${errorMessage(error)}`);
+      const nativeTheme = readerPreferences.theme === 'dark' ? 'dark' : 'light';
+      void bridge.setWindowBackgroundColor(backgroundColor, nativeTheme).catch((error) => {
+        if (!cancelled) setAppError(`窗口外观同步失败：${errorMessage(error)}`);
       });
     }
     return () => {

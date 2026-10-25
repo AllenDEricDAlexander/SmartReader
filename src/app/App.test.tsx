@@ -2650,7 +2650,7 @@ describe('App', () => {
     },
   );
 
-  it('keeps native window backgrounds on the loaded theme, theme switches and failed-save rollbacks', async () => {
+  it('keeps native title appearance and backgrounds paired on load, dark-to-eye-care switches and failed-save rollbacks', async () => {
     const css = readFileSync(join(process.cwd(), 'src/app/styles.css'), 'utf8');
     const style = document.createElement('style');
     style.textContent = css.slice(0, css.indexOf('\n* {'));
@@ -2668,21 +2668,29 @@ describe('App', () => {
       />);
       const switcher = screen.getByRole('combobox', { name: '切换主题' });
       await waitFor(() => expect(switcher).toBeEnabled());
-      expect(setWindowBackgroundColor).toHaveBeenLastCalledWith('#C7EDCC');
+      expect(setWindowBackgroundColor).toHaveBeenLastCalledWith('#C7EDCC', 'light');
 
       fireEvent.change(switcher, { target: { value: 'dark' } });
       await waitFor(() => expect(switcher).toBeEnabled());
-      expect(setWindowBackgroundColor).toHaveBeenLastCalledWith('#0f172a');
+      expect(setWindowBackgroundColor).toHaveBeenLastCalledWith('#0f172a', 'dark');
+
+      fireEvent.change(switcher, { target: { value: 'eye-care' } });
+      await waitFor(() => expect(switcher).toBeEnabled());
+      expect(setWindowBackgroundColor).toHaveBeenLastCalledWith('#C7EDCC', 'light');
+
+      fireEvent.change(switcher, { target: { value: 'dark' } });
+      await waitFor(() => expect(switcher).toBeEnabled());
+      expect(setWindowBackgroundColor).toHaveBeenLastCalledWith('#0f172a', 'dark');
 
       vi.mocked(persistence.savePreferences).mockRejectedValueOnce(new Error('storage unavailable'));
       fireEvent.change(switcher, { target: { value: 'light' } });
-      expect(setWindowBackgroundColor).toHaveBeenLastCalledWith('#f5f6f8');
+      expect(setWindowBackgroundColor).toHaveBeenLastCalledWith('#f5f6f8', 'light');
       expect(await screen.findByRole('alert')).toHaveTextContent('主题保存失败，已恢复原主题');
-      expect(setWindowBackgroundColor).toHaveBeenLastCalledWith('#0f172a');
+      expect(setWindowBackgroundColor).toHaveBeenLastCalledWith('#0f172a', 'dark');
 
       fireEvent.change(switcher, { target: { value: 'light' } });
       await waitFor(() => expect(switcher).toBeEnabled());
-      expect(setWindowBackgroundColor).toHaveBeenLastCalledWith('#f5f6f8');
+      expect(setWindowBackgroundColor).toHaveBeenLastCalledWith('#f5f6f8', 'light');
     } finally {
       style.remove();
     }
