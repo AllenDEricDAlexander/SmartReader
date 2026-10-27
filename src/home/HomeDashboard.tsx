@@ -31,7 +31,7 @@ import { HomeSidebar, type HomeSidebarPage, type HomeSidebarProps } from './Home
 import { HomeStatusBar } from './HomeStatusBar';
 import { HomeTopBar } from './HomeTopBar';
 import { HomeWelcomeBanner } from './HomeWelcomeBanner';
-import type { HomeAppVersion, HomeTaskStatus } from './homeTypes';
+import type { HomeTaskStatus } from './homeTypes';
 
 const noop = () => undefined;
 
@@ -59,8 +59,6 @@ type HomeDashboardProps = {
   availableTags?: Tag[];
   activeSidebarPage?: HomeSidebarPage;
   counts?: HomeSidebarProps['counts'];
-  cacheStats?: HomeSidebarProps['cacheStats'];
-  appVersion?: HomeAppVersion;
   taskStatus?: HomeTaskStatus;
   tagPersistence: Parameters<typeof TagManager>[0]['persistence'];
   onTagsChange(update: SetStateAction<Tag[]>): void;
@@ -104,7 +102,6 @@ type HomeDashboardProps = {
   onOpenFolders?(): void;
   onOpenNotes?(): void;
   onOpenFullTextSearch?(): void;
-  onOpenCacheManagement?(): void;
   onOpenShortcutSettings?(): void;
   onSetupFileAssociation?(): void | Promise<void>;
   onCheckUpdates?(): void | Promise<void>;
@@ -133,12 +130,6 @@ export function HomeDashboard({
     favoriteFiles: favoriteDocuments.length,
     restorableSessions: recentDocuments.length,
   },
-  cacheStats = {
-    usedBytes: 0,
-    totalBytes: 0,
-    fileCount: 0,
-  },
-  appVersion = { version: '0.1.0', build: null },
   taskStatus = 'idle',
   tagPersistence,
   onTagsChange,
@@ -172,7 +163,6 @@ export function HomeDashboard({
   onOpenFolders = noop,
   onOpenNotes = noop,
   onOpenFullTextSearch = noop,
-  onOpenCacheManagement = noop,
   onOpenShortcutSettings,
   onSetupFileAssociation,
   onCheckUpdates,
@@ -312,7 +302,6 @@ export function HomeDashboard({
         />
       </div>
       <HomeAssistPanel
-        appVersion={appVersion}
         quickTipsEnabled={preferencesReady && preferences.homeQuickTipsEnabled}
         desktopIntegrationEnabled={preferencesReady && preferences.homeDesktopIntegrationEnabled}
         disabled={homePreferencesDisabled}
@@ -322,7 +311,6 @@ export function HomeDashboard({
         onOpenBookmarks={onOpenBookmarks}
         onOpenAnnotations={onOpenAnnotations}
         onOpenShortcutSettings={openShortcutSettings}
-        onOpenCacheManagement={onOpenCacheManagement}
         onSetupFileAssociation={handleSetupFileAssociation}
       />
     </div>
@@ -432,7 +420,6 @@ export function HomeDashboard({
         <HomeSidebar
           activePage={activeSidebarPage}
           counts={counts}
-          cacheStats={cacheStats}
           onOpenHome={onOpenHome}
           onOpenRecentFiles={onOpenRecentFiles}
           onOpenFavoriteFiles={onOpenFavoriteFiles}
@@ -446,7 +433,7 @@ export function HomeDashboard({
           onOpenBookmarks={onOpenBookmarks}
           onOpenCompare={onOpenCompare}
           onOpenAi={onOpenAi}
-          onOpenCacheManagement={onOpenCacheManagement}
+          onOpenSettings={onOpenSettings}
         />
         <div className="home-main" style={{ zoom: preferences.homeZoom }}>{mainContent}</div>
       </section>

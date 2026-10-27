@@ -197,13 +197,13 @@ describe('App', () => {
 
     expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /打开本地 PDF/ })).toBeInTheDocument();
-    expect(screen.getByText('拖拽到这里')).toBeInTheDocument();
-    expect(screen.getByRole('complementary', { name: '辅助信息' })).toBeInTheDocument();
+    expect(screen.getByText('点击选择 PDF / 拖拽文件到此处')).toBeInTheDocument();
+    expect(await screen.findByRole('complementary', { name: '辅助信息' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: '快速上手' })).toBeInTheDocument();
     expect(screen.queryByText('AI 助手')).not.toBeInTheDocument();
   });
 
-  it('shows sidebar data from recent files, favorites, session restore, and cache stats', async () => {
+  it('shows navigation counts on home and moves loaded cache stats into settings', async () => {
     const persistence = {
       ...createEmptyPersistence(),
       listRecentDocuments: vi.fn().mockResolvedValue([
@@ -292,7 +292,12 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: '最近文件 2' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '收藏文件 1' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '会话恢复 3' })).toBeInTheDocument();
-    expect(screen.getByText('1.24 GB / 5 GB')).toBeInTheDocument();
+    expect(screen.queryByLabelText('本地缓存')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '管理缓存' })).not.toBeInTheDocument();
+    expect(screen.queryByText('版本 0.1.0')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '打开设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '缓存' }));
+    expect(await screen.findByText('1.24 GB / 5 GB')).toBeInTheDocument();
     expect(screen.getByText('已缓存 128 个文件')).toBeInTheDocument();
   });
 
@@ -369,7 +374,7 @@ describe('App', () => {
     });
   });
 
-  it('opens cache settings from the sidebar cache management entry', async () => {
+  it('opens cache and version tabs from the left settings entry and keeps both out of home', async () => {
     renderApp(
       <App
         bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
@@ -378,10 +383,19 @@ describe('App', () => {
       />,
     );
 
-    fireEvent.click(within(screen.getByLabelText('本地缓存')).getByRole('button', { name: '管理缓存' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开设置' }));
 
     expect(await screen.findByLabelText('设置工作区')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '缓存' }));
     expect(screen.getByRole('heading', { name: '缓存' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '版本信息' }));
+    expect(screen.getByRole('heading', { name: '版本信息' })).toBeInTheDocument();
+    expect(screen.getByText('版本 0.1.0')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '检查更新' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '关闭设置' }));
+    expect(screen.getByRole('button', { name: '打开设置' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('本地缓存')).not.toBeInTheDocument();
+    expect(screen.queryByText('版本 0.1.0')).not.toBeInTheDocument();
   });
 
   it('falls back to empty cache stats when cache stats fail to load', async () => {
@@ -398,6 +412,8 @@ describe('App', () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: '打开设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '缓存' }));
     expect(await screen.findByText('0 B / 5 GB')).toBeInTheDocument();
     expect(screen.getByText('已缓存 0 个文件')).toBeInTheDocument();
   });

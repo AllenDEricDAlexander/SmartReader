@@ -240,11 +240,6 @@ function createDashboardProps(
       favoriteFiles: 1,
       restorableSessions: 0,
     },
-    cacheStats: {
-      usedBytes: 512 * 1024 * 1024,
-      totalBytes: 2 * 1024 * 1024 * 1024,
-      fileCount: 4,
-    },
     onOpenHome: vi.fn(),
     onOpenRecentFiles: vi.fn(),
     onOpenFavoriteFiles: vi.fn(),
@@ -255,7 +250,6 @@ function createDashboardProps(
     onOpenTags: vi.fn(),
     onOpenNotes: vi.fn(),
     onOpenFullTextSearch: vi.fn(),
-    onOpenCacheManagement: vi.fn(),
     tagPersistence: createTagPersistence(),
     onTagsChange: vi.fn(),
     onOpenTagDocument: vi.fn(),
@@ -425,7 +419,9 @@ describe('HomeDashboard', () => {
 
     expect(within(assist).getByRole('heading', { name: '快速上手' })).toBeInTheDocument();
     expect(within(assist).getByRole('heading', { name: '桌面集成' })).toBeInTheDocument();
-    expect(within(assist).getByText('版本 0.1.0')).toBeInTheDocument();
+    expect(screen.queryByLabelText('版本信息')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('本地缓存')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '管理缓存' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '工作台状态' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '阅读流程' })).not.toBeInTheDocument();
   });
@@ -462,13 +458,11 @@ describe('HomeDashboard', () => {
     const onOpenGlobalSearch = vi.fn();
     const onOpenBookmarks = vi.fn();
     const onOpenAnnotations = vi.fn();
-    const onOpenCacheManagement = vi.fn();
     const onOpenSettings = vi.fn();
     renderDashboard({
       onOpenGlobalSearch,
       onOpenBookmarks,
       onOpenAnnotations,
-      onOpenCacheManagement,
       onOpenSettings,
     });
 
@@ -479,13 +473,11 @@ describe('HomeDashboard', () => {
     fireEvent.click(within(assist).getByRole('button', { name: /批注与高亮/ }));
     fireEvent.click(within(assist).getByRole('button', { name: /快捷键总览/ }));
     fireEvent.click(within(assist).getByRole('button', { name: '更多技巧' }));
-    fireEvent.click(within(assist).getByRole('button', { name: '管理缓存' }));
 
     expect(onOpenGlobalSearch).toHaveBeenCalledTimes(1);
     expect(onOpenBookmarks).toHaveBeenCalledTimes(1);
     expect(onOpenAnnotations).toHaveBeenCalledTimes(1);
     expect(onOpenSettings).toHaveBeenCalledTimes(2);
-    expect(onOpenCacheManagement).toHaveBeenCalledTimes(1);
   });
 
   it('shows fallback notices for unavailable desktop association and update checks', () => {

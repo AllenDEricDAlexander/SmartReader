@@ -1,4 +1,4 @@
-import { CloudUpload, FolderOpen, FolderPlus } from 'lucide-react';
+import { FolderUp } from 'lucide-react';
 import { useEffect, useRef, useState, type DragEventHandler } from 'react';
 import { getPdfFilesFromDrop, hasDroppedDirectory } from '../platform/dropZone';
 import { listenForNativeFileDrop } from '../platform/nativeFileDrop';
@@ -91,22 +91,26 @@ export function HomeQuickStart({
         }}
         onDrop={handleDrop}
       >
+        <button
+          type="button"
+          className="quick-start-file-trigger"
+          aria-label="打开本地 PDF"
+          aria-describedby="home-import-description"
+          onClick={onOpenPdf}
+        />
         <span className="quick-start-icon" aria-hidden="true">
-          <CloudUpload size={26} />
+          <FolderUp size={56} strokeWidth={1.5} />
         </span>
         <div className="quick-start-copy">
-          <strong>拖拽到这里</strong>
-          <span>拖入单个 PDF 直接阅读，拖入文件夹批量导入其中的 PDF</span>
+          <strong>点击选择 PDF / 拖拽文件到此处</strong>
+          <span id="home-import-description">单个 PDF 直接阅读，文件夹及子文件夹中的 PDF 自动批量导入</span>
         </div>
         <div className="quick-start-actions">
-          <button type="button" className="primary-action" aria-label="打开本地 PDF" onClick={onOpenPdf}>
-            <FolderOpen size={16} aria-hidden="true" />
-            选择 PDF
-          </button>
-          <button type="button" className="secondary-action" onClick={onOpenFolder}>
-            <FolderPlus size={16} aria-hidden="true" />
+          <span>也可以</span>
+          <button type="button" className="assist-link-button" onClick={onOpenFolder}>
             选择文件夹
           </button>
+          <span>批量导入 PDF</span>
         </div>
       </div>
     </section>

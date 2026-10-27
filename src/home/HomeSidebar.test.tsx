@@ -12,11 +12,6 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof HomeSidebar>> = 
       favoriteFiles: 3,
       restorableSessions: 2,
     },
-    cacheStats: {
-      usedBytes: 1.24 * 1024 * 1024 * 1024,
-      totalBytes: 5 * 1024 * 1024 * 1024,
-      fileCount: 42,
-    },
     onOpenHome: vi.fn(),
     onOpenRecentFiles: vi.fn(),
     onOpenFavoriteFiles: vi.fn(),
@@ -29,7 +24,7 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof HomeSidebar>> = 
     onOpenAnnotations: vi.fn(),
     onOpenBookmarks: vi.fn(),
     onOpenCompare: vi.fn(),
-    onOpenCacheManagement: vi.fn(),
+    onOpenSettings: vi.fn(),
     ...overrides,
   } satisfies ComponentProps<typeof HomeSidebar>;
 
@@ -74,7 +69,7 @@ describe('HomeSidebar', () => {
     expect(within(nav).getByRole('button', { name: '会话恢复 2' })).toBeInTheDocument();
   });
 
-  it('forwards every navigation and cache action callback', () => {
+  it('forwards every navigation action and opens settings from the footer', () => {
     const props = renderSidebar();
 
     fireEvent.click(screen.getByRole('button', { name: '首页' }));
@@ -89,7 +84,7 @@ describe('HomeSidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: '批注管理' }));
     fireEvent.click(screen.getByRole('button', { name: '书签管理' }));
     fireEvent.click(screen.getByRole('button', { name: '对比阅读' }));
-    fireEvent.click(screen.getByRole('button', { name: '管理缓存' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开设置' }));
 
     expect(props.onOpenHome).toHaveBeenCalledTimes(1);
     expect(props.onOpenRecentFiles).toHaveBeenCalledTimes(1);
@@ -103,34 +98,15 @@ describe('HomeSidebar', () => {
     expect(props.onOpenAnnotations).toHaveBeenCalledTimes(1);
     expect(props.onOpenBookmarks).toHaveBeenCalledTimes(1);
     expect(props.onOpenCompare).toHaveBeenCalledTimes(1);
-    expect(props.onOpenCacheManagement).toHaveBeenCalledTimes(1);
+    expect(props.onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
-  it('formats default cache capacity', () => {
+  it('keeps cache details and version information out of the home sidebar', () => {
     renderSidebar();
 
-    expect(screen.getByText('本地缓存')).toBeInTheDocument();
-    expect(screen.getByText('1.24 GB / 5 GB')).toBeInTheDocument();
-    expect(screen.getByRole('progressbar', { name: '本地缓存使用量' })).toHaveAttribute(
-      'aria-valuenow',
-      '25',
-    );
-  });
-
-  it('formats cache capacity and clamps the progress value', () => {
-    renderSidebar({
-      cacheStats: {
-        usedBytes: 8 * 1024 * 1024 * 1024,
-        totalBytes: 5 * 1024 * 1024 * 1024,
-        fileCount: 12,
-      },
-    });
-
-    expect(screen.getByText('8 GB / 5 GB')).toBeInTheDocument();
-    expect(screen.getByText('已缓存 12 个文件')).toBeInTheDocument();
-    expect(screen.getByRole('progressbar', { name: '本地缓存使用量' })).toHaveAttribute(
-      'aria-valuenow',
-      '100',
-    );
+    expect(screen.queryByLabelText('本地缓存')).not.toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.queryByText('版本信息')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开设置' })).toBeInTheDocument();
   });
 });

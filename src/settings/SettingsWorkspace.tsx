@@ -11,6 +11,7 @@ import { AiSettings } from './AiSettings';
 import { AppearanceSettings } from './AppearanceSettings';
 import { AboutSettings } from './AboutSettings';
 import type { HomeAppVersion } from '../home/homeTypes';
+import type { CacheStats } from '../persistence/persistenceApi';
 import { useResearch } from '../app/ResearchContext';
 
 export type SettingsSection = 'appearance' | 'shortcuts' | 'cache' | 'desktop' | 'restore' | 'ai' | 'about';
@@ -21,6 +22,7 @@ type SettingsWorkspaceProps = {
   openSessionCount: number;
   recentDocumentCount: number;
   appVersion?: HomeAppVersion;
+  cacheStats?: CacheStats;
   initialSection?: SettingsSection;
   saving?: boolean;
   onClose(): void;
@@ -31,9 +33,9 @@ const sections: Array<{ id: SettingsSection; label: string }> = [
   { id: 'appearance', label: '外观' },
   { id: 'shortcuts', label: '快捷键' },
   { id: 'cache', label: '缓存' },
+  { id: 'about', label: '版本信息' },
   { id: 'desktop', label: '桌面集成' },
   { id: 'restore', label: '会话恢复' },
-  { id: 'about', label: '关于' },
 ];
 
 export function SettingsWorkspace({
@@ -42,6 +44,7 @@ export function SettingsWorkspace({
   openSessionCount,
   recentDocumentCount,
   appVersion = { version: '0.1.0', build: null },
+  cacheStats,
   initialSection = 'shortcuts',
   saving,
   onClose,
@@ -162,6 +165,7 @@ export function SettingsWorkspace({
             <CacheSettings
               openSessionCount={openSessionCount}
               recentDocumentCount={recentDocumentCount}
+              cacheStats={cacheStats}
             />
           ) : null}
           {activeSection === 'desktop' ? <DesktopIntegrationSettings /> : null}

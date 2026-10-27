@@ -11,6 +11,7 @@ function renderSettingsWorkspace(initialSection?: SettingsSection) {
     preferences: defaultReaderPreferences,
     openSessionCount: 2,
     recentDocumentCount: 3,
+    cacheStats: { usedBytes: 1.24 * 1024 ** 3, totalBytes: 5 * 1024 ** 3, fileCount: 42 },
     onClose: vi.fn(),
     onSave: vi.fn(),
     ...(initialSection ? { initialSection } : {}),
@@ -45,7 +46,7 @@ describe('SettingsWorkspace', () => {
   it('shows the current version and an update check under about', () => {
     const { rerender, props } = renderSettingsWorkspace('about');
     rerender(<SettingsWorkspace {...props} appVersion={{ version: '1.7', build: '86' }} />);
-    expect(screen.getByRole('heading', { name: '关于 SmartReader' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '版本信息' })).toBeInTheDocument();
     expect(screen.getByText('版本 1.7 (Build 86)')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
     expect(screen.getByRole('status')).toHaveTextContent('当前版本暂未接入自动检查更新。');
@@ -107,7 +108,22 @@ describe('SettingsWorkspace', () => {
     renderSettingsWorkspace('cache');
 
     expect(screen.getByRole('heading', { name: '缓存' })).toBeInTheDocument();
+    expect(screen.getByText('1.24 GB / 5 GB')).toBeInTheDocument();
+    expect(screen.getByText('已缓存 42 个文件')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '快捷键' })).not.toBeInTheDocument();
+  });
+
+  it('places version information next to cache in the left settings navigation', () => {
+    renderSettingsWorkspace('cache');
+    const navigation = within(screen.getByRole('navigation', { name: '设置导航' }));
+    const cache = navigation.getByRole('button', { name: '缓存' });
+    const version = navigation.getByRole('button', { name: '版本信息' });
+    expect(cache.nextElementSibling).toBe(version);
+    fireEvent.click(version);
+    expect(screen.getByRole('heading', { name: '版本信息' })).toBeInTheDocument();
+    expect(screen.getByText('版本 0.1.0')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '检查更新' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('本地缓存')).not.toBeInTheDocument();
   });
 
   it('updates the visible settings section when the initial section changes', () => {

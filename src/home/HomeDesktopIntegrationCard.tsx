@@ -1,10 +1,9 @@
-import { FileCheck2, FolderCog, HardDrive, X, type LucideIcon } from 'lucide-react';
+import { FileCheck2, FolderCog, X, type LucideIcon } from 'lucide-react';
 
 type HomeDesktopIntegrationCardProps = {
   disabled?: boolean;
   onClose(): void;
   onSetupFileAssociation(): void;
-  onOpenCacheManagement(): void;
 };
 
 type DesktopIntegrationItem = {
@@ -19,7 +18,6 @@ export function HomeDesktopIntegrationCard({
   disabled,
   onClose,
   onSetupFileAssociation,
-  onOpenCacheManagement,
 }: HomeDesktopIntegrationCardProps) {
   const integrationItems: DesktopIntegrationItem[] = [
     {
@@ -33,13 +31,6 @@ export function HomeDesktopIntegrationCard({
       Icon: FolderCog,
       actionLabel: '设置关联',
       onClick: onSetupFileAssociation,
-    },
-    {
-      title: '本地缓存',
-      description: '智能缓存常用文件，加速打开与搜索体验。',
-      Icon: HardDrive,
-      actionLabel: '管理缓存',
-      onClick: onOpenCacheManagement,
     },
   ];
 

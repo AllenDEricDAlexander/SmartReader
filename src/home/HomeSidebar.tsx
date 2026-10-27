@@ -1,9 +1,7 @@
 import {
   BookMarked,
   Bookmark,
-  Database,
   FileClock,
-  FileSearch,
   FolderOpen,
   GitCompare,
   Highlighter,
@@ -11,6 +9,7 @@ import {
   Library,
   NotebookPen,
   Search,
+  Settings,
   Star,
   Sparkles,
   Tags,
@@ -38,16 +37,9 @@ type HomeSidebarCounts = {
   restorableSessions: number;
 };
 
-type HomeSidebarCacheStats = {
-  usedBytes: number;
-  totalBytes: number;
-  fileCount: number;
-};
-
 type HomeSidebarProps = {
   activePage: HomeSidebarPage;
   counts: HomeSidebarCounts;
-  cacheStats: HomeSidebarCacheStats;
   onOpenHome(): void;
   onOpenRecentFiles(): void;
   onOpenFavoriteFiles(): void;
@@ -61,7 +53,7 @@ type HomeSidebarProps = {
   onOpenBookmarks(): void;
   onOpenCompare(): void;
   onOpenAi?(): void;
-  onOpenCacheManagement(): void;
+  onOpenSettings(): void;
 };
 
 type SidebarItem = {
@@ -71,28 +63,6 @@ type SidebarItem = {
   count?: number;
   onClick: () => void;
 };
-
-const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
-
-function formatBytes(bytes: number) {
-  if (!Number.isFinite(bytes) || bytes <= 0) {
-    return '0 B';
-  }
-
-  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), BYTE_UNITS.length - 1);
-  const value = bytes / 1024 ** unitIndex;
-  const formatted = Number.isInteger(value) ? String(value) : value.toFixed(2);
-
-  return `${formatted} ${BYTE_UNITS[unitIndex]}`;
-}
-
-function clampProgress(value: number) {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-
-  return Math.min(Math.max(Math.round(value), 0), 100);
-}
 
 function SidebarNavItem({ activePage, item }: { activePage: HomeSidebarPage; item: SidebarItem }) {
   const active = item.page === activePage;
@@ -140,7 +110,6 @@ function SidebarGroup({
 export function HomeSidebar({
   activePage,
   counts,
-  cacheStats,
   onOpenHome,
   onOpenRecentFiles,
   onOpenFavoriteFiles,
@@ -154,13 +123,8 @@ export function HomeSidebar({
   onOpenBookmarks,
   onOpenCompare,
   onOpenAi,
-  onOpenCacheManagement,
+  onOpenSettings,
 }: HomeSidebarProps) {
-  const usagePercent = clampProgress(
-    cacheStats.totalBytes > 0 ? (cacheStats.usedBytes / cacheStats.totalBytes) * 100 : 0,
-  );
-  const capacityText = `${formatBytes(cacheStats.usedBytes)} / ${formatBytes(cacheStats.totalBytes)}`;
-
   const navigationItems: SidebarItem[] = [
     {
       page: 'home',
@@ -253,28 +217,10 @@ export function HomeSidebar({
         <SidebarGroup activePage={activePage} label="知识库" items={libraryItems} />
         <SidebarGroup activePage={activePage} label="工具" items={toolItems} />
       </nav>
-      <section className="home-cache-card" aria-label="本地缓存">
-        <div className="home-cache-title">
-          <Database size={16} />
-          <span>本地缓存</span>
-        </div>
-        <strong>{capacityText}</strong>
-        <div
-          className="home-cache-progress"
-          role="progressbar"
-          aria-label="本地缓存使用量"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={usagePercent}
-        >
-          <span style={{ width: `${usagePercent}%` }} />
-        </div>
-        <p>已缓存 {cacheStats.fileCount} 个文件</p>
-        <button type="button" onClick={onOpenCacheManagement}>
-          <FileSearch size={15} />
-          <span>管理缓存</span>
-        </button>
-      </section>
+      <button type="button" className="home-sidebar-settings" aria-label="打开设置" title="设置" onClick={onOpenSettings}>
+        <Settings size={16} aria-hidden="true" />
+        <span className="home-nav-label">设置</span>
+      </button>
     </aside>
   );
 }

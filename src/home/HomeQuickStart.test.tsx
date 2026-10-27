@@ -16,9 +16,9 @@ describe('HomeQuickStart', () => {
     expect(screen.getByRole('heading', { name: '快速开始' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /打开本地 PDF/ })).toBeInTheDocument();
     const dropzone = screen.getByRole('group', { name: 'PDF 拖拽区域' });
-    expect(within(dropzone).getByText('拖拽到这里')).toBeInTheDocument();
+    expect(within(dropzone).getByText('点击选择 PDF / 拖拽文件到此处')).toBeInTheDocument();
     expect(within(dropzone).getAllByRole('button')).toHaveLength(2);
-    expect(within(dropzone).getByRole('button', { name: '打开本地 PDF' })).toHaveTextContent('选择 PDF');
+    expect(within(dropzone).getByRole('button', { name: '打开本地 PDF' })).toHaveClass('quick-start-file-trigger');
     expect(screen.getByRole('button', { name: /选择文件夹/ })).toBeInTheDocument();
   });
 
@@ -149,12 +149,14 @@ describe('HomeQuickStart', () => {
 
   it('routes folder selection through the provided callback', () => {
     const onOpenFolder = vi.fn();
+    const onOpenPdf = vi.fn();
     renderApp(
-      <HomeQuickStart onOpenPdf={vi.fn()} onDropPdf={vi.fn()} onOpenFolder={onOpenFolder} />,
+      <HomeQuickStart onOpenPdf={onOpenPdf} onDropPdf={vi.fn()} onOpenFolder={onOpenFolder} />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: /选择文件夹/ }));
 
     expect(onOpenFolder).toHaveBeenCalledTimes(1);
+    expect(onOpenPdf).not.toHaveBeenCalled();
   });
 });

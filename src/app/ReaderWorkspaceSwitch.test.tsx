@@ -139,7 +139,8 @@ describe('ReaderWorkspaceSwitch', () => {
     renderSwitch();
 
     expect(screen.getByRole('button', { name: '打开文件' })).toBeInTheDocument();
-    expect(screen.getByText('0 B / 5 GB')).toBeInTheDocument();
+    expect(screen.queryByLabelText('本地缓存')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开设置' })).toBeInTheDocument();
   });
 
   it('renders tag management as a home sidebar page', async () => {

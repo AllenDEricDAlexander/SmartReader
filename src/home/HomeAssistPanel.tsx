@@ -1,10 +1,7 @@
 import { HomeDesktopIntegrationCard } from './HomeDesktopIntegrationCard';
 import { HomeQuickTipsCard } from './HomeQuickTipsCard';
-import { HomeVersionCard } from './HomeVersionCard';
-import type { HomeAppVersion } from './homeTypes';
 
 type HomeAssistPanelProps = {
-  appVersion: HomeAppVersion;
   quickTipsEnabled?: boolean;
   desktopIntegrationEnabled?: boolean;
   disabled?: boolean;
@@ -14,12 +11,10 @@ type HomeAssistPanelProps = {
   onOpenBookmarks(): void;
   onOpenAnnotations(): void;
   onOpenShortcutSettings(): void;
-  onOpenCacheManagement(): void;
   onSetupFileAssociation(): void;
 };
 
 export function HomeAssistPanel({
-  appVersion,
   quickTipsEnabled = true,
   desktopIntegrationEnabled = true,
   disabled,
@@ -29,9 +24,10 @@ export function HomeAssistPanel({
   onOpenBookmarks,
   onOpenAnnotations,
   onOpenShortcutSettings,
-  onOpenCacheManagement,
   onSetupFileAssociation,
 }: HomeAssistPanelProps) {
+  if (!quickTipsEnabled && !desktopIntegrationEnabled) return null;
+
   return (
     <aside className="home-assist" aria-label="辅助信息">
       {quickTipsEnabled ? (
@@ -49,10 +45,8 @@ export function HomeAssistPanel({
           disabled={disabled}
           onClose={onCloseDesktopIntegration}
           onSetupFileAssociation={onSetupFileAssociation}
-          onOpenCacheManagement={onOpenCacheManagement}
         />
       ) : null}
-      <HomeVersionCard appVersion={appVersion} />
     </aside>
   );
 }

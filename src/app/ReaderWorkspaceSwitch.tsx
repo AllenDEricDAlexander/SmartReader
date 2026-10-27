@@ -249,6 +249,7 @@ export function ReaderWorkspaceSwitch({
       {activeWorkspace === 'settings' ? (
         <SettingsWorkspace
           appVersion={appVersion}
+          cacheStats={cacheStats}
           commandRegistry={commandRegistry}
           preferences={readerPreferences}
           openSessionCount={documents.sessions.length}
@@ -399,13 +400,11 @@ export function ReaderWorkspaceSwitch({
           bookmarkDashboardError={bookmarkDashboardError}
           availableTags={availableTags}
           activeSidebarPage={activeSidebarPage}
-          appVersion={appVersion}
           counts={{
             recentFiles: recentDocuments.length,
             favoriteFiles: favoriteDocuments.length,
             restorableSessions: sessionRestoreCount,
           }}
-          cacheStats={cacheStats}
           tagPersistence={persistence}
           onTagsChange={onTagsChange}
           onOpenTagDocument={(documentKey, documentPath, page, documentMissing) =>
@@ -452,7 +451,6 @@ export function ReaderWorkspaceSwitch({
           onOpenFolders={() => openHomeSidebarPage('folders')}
           onOpenNotes={() => openHomeSidebarPage('notes')}
           onOpenFullTextSearch={openGlobalSearch}
-          onOpenCacheManagement={() => openSettingsWorkspace('cache')}
           onOpenShortcutSettings={() => openSettingsWorkspace('shortcuts')}
           onOpenSettings={() => openSettingsWorkspace()}
           onOpenTags={() => openHomeSidebarPage('tags')}

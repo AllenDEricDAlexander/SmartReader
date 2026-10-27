@@ -1,22 +1,19 @@
 import { fireEvent, screen, within } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderApp } from '../test/renderApp';
 import { HomeAssistPanel } from './HomeAssistPanel';
 
-function renderAssistPanel() {
+function renderAssistPanel(overrides: Partial<ComponentProps<typeof HomeAssistPanel>> = {}) {
   const props = {
-    appVersion: {
-      version: '0.1.0',
-      build: null,
-    },
     onOpenGlobalSearch: vi.fn(),
     onOpenBookmarks: vi.fn(),
     onOpenAnnotations: vi.fn(),
     onOpenShortcutSettings: vi.fn(),
-    onOpenCacheManagement: vi.fn(),
     onSetupFileAssociation: vi.fn(),
     onCloseQuickTips: vi.fn(),
     onCloseDesktopIntegration: vi.fn(),
+    ...overrides,
   };
 
   renderApp(<HomeAssistPanel {...props} />);
@@ -24,7 +21,7 @@ function renderAssistPanel() {
 }
 
 describe('HomeAssistPanel', () => {
-  it('renders quick tips, desktop integration, and version cards', () => {
+  it('renders quick tips and desktop integration without version or cache cards', () => {
     renderAssistPanel();
 
     const assist = screen.getByRole('complementary', { name: '辅助信息' });
@@ -50,34 +47,15 @@ describe('HomeAssistPanel', () => {
     expect(within(assist).getByText('在 Finder 中右键使用 SmartReader 打开 PDF。')).toBeInTheDocument();
     expect(within(assist).getByText('文件关联')).toBeInTheDocument();
     expect(within(assist).getByRole('button', { name: '设置关联' })).toBeInTheDocument();
-    expect(within(assist).getByText('本地缓存')).toBeInTheDocument();
-    expect(within(assist).getByRole('button', { name: '管理缓存' })).toBeInTheDocument();
-
-    expect(within(assist).getByText('SmartReader')).toBeInTheDocument();
-    expect(within(assist).getByText('版本 0.1.0')).toBeInTheDocument();
-    expect(within(assist).getByText('本地优先 · 隐私安全 · 高效阅读')).toBeInTheDocument();
+    expect(within(assist).queryByText('本地缓存')).not.toBeInTheDocument();
+    expect(within(assist).queryByRole('button', { name: '管理缓存' })).not.toBeInTheDocument();
+    expect(within(assist).queryByLabelText('版本信息')).not.toBeInTheDocument();
     expect(within(assist).queryByRole('button', { name: '检查更新' })).not.toBeInTheDocument();
   });
 
-  it('formats build metadata when available', () => {
-    const props = {
-      appVersion: {
-        version: '1.7',
-        build: '86',
-      },
-      onOpenGlobalSearch: vi.fn(),
-      onOpenBookmarks: vi.fn(),
-      onOpenAnnotations: vi.fn(),
-      onOpenShortcutSettings: vi.fn(),
-      onOpenCacheManagement: vi.fn(),
-      onSetupFileAssociation: vi.fn(),
-      onCloseQuickTips: vi.fn(),
-      onCloseDesktopIntegration: vi.fn(),
-    };
-
-    renderApp(<HomeAssistPanel {...props} />);
-
-    expect(screen.getByText('版本 1.7 (Build 86)')).toBeInTheDocument();
+  it('releases the assist column when both optional cards are closed', () => {
+    renderAssistPanel({ quickTipsEnabled: false, desktopIntegrationEnabled: false });
+    expect(screen.queryByRole('complementary', { name: '辅助信息' })).not.toBeInTheDocument();
   });
 
   it('forwards every assist action callback', () => {
@@ -89,7 +67,6 @@ describe('HomeAssistPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /批注与高亮/ }));
     fireEvent.click(screen.getByRole('button', { name: /快捷键总览/ }));
     fireEvent.click(screen.getByRole('button', { name: '设置关联' }));
-    fireEvent.click(screen.getByRole('button', { name: '管理缓存' }));
     fireEvent.click(screen.getByRole('button', { name: '关闭快速上手' }));
     fireEvent.click(screen.getByRole('button', { name: '关闭桌面集成' }));
 
@@ -98,7 +75,6 @@ describe('HomeAssistPanel', () => {
     expect(props.onOpenBookmarks).toHaveBeenCalledTimes(1);
     expect(props.onOpenAnnotations).toHaveBeenCalledTimes(1);
     expect(props.onSetupFileAssociation).toHaveBeenCalledTimes(1);
-    expect(props.onOpenCacheManagement).toHaveBeenCalledTimes(1);
     expect(props.onCloseQuickTips).toHaveBeenCalledOnce();
     expect(props.onCloseDesktopIntegration).toHaveBeenCalledOnce();
   });
