@@ -266,7 +266,7 @@ export function HomeDashboard({
   }, []);
 
   const homeContent = (
-    <div className="home-content" onDragOver={blockHomeDrop} onDrop={blockHomeDrop}>
+    <div className="home-content home-overview-content" onDragOver={blockHomeDrop} onDrop={blockHomeDrop}>
       <div className="home-primary">
         {preferencesReady && preferences.homeWelcomeEnabled ? (
           <HomeWelcomeBanner

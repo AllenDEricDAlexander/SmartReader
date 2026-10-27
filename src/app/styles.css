@@ -773,7 +773,7 @@ button:disabled,
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .home-header {
@@ -818,6 +818,55 @@ button:disabled,
   gap: 16px;
   padding: 16px;
   overflow: auto;
+}
+
+.home-overview-content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  align-content: flex-start;
+  gap: 20px;
+  padding: 20px;
+}
+
+.home-overview-content .home-primary {
+  flex: 3 1 620px;
+  gap: 20px;
+}
+
+.home-overview-content .home-assist {
+  flex: 1 1 280px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+}
+
+.home-overview-content .home-version-card {
+  grid-column: 1 / -1;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.home-overview-content .home-version-card p {
+  grid-column: 1 / -1;
+}
+
+.home-overview-content .home-welcome-banner {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 18px;
+  padding: 24px;
+}
+
+.home-overview-content .welcome-brand-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+}
+
+.home-overview-content .welcome-copy h1 {
+  font-size: 22px;
+}
+
+.home-overview-content .welcome-illustration {
+  display: none;
 }
 
 .home-status-bar {
@@ -1291,38 +1340,39 @@ button:disabled,
 
 .home-quick-start {
   display: grid;
-  gap: 16px;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
-.quick-start-card-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 32px;
-}
-
-.quick-start-card {
+.quick-start-dropzone {
   min-width: 0;
-  min-height: 92px;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 208px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: stretch;
-  gap: 16px;
-  padding: 18px 22px;
-  border: 1px solid var(--sr-border);
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  border: 1px dashed var(--sr-primary-border, #a8c3ed);
   border-radius: var(--sr-radius);
   background: var(--sr-surface);
-  text-align: left;
+  text-align: center;
+  transition: border-color 120ms ease, background-color 120ms ease;
 }
 
-.quick-start-card:hover,
-.quick-start-card.drag-active {
-  border-color: rgba(37, 99, 235, 0.38);
+.quick-start-dropzone:hover,
+.quick-start-dropzone:focus-within,
+.quick-start-dropzone.drag-active {
+  border-color: var(--sr-primary);
   background: var(--sr-hover-bg, #f8fbff);
 }
 
-.quick-start-card.drop-card {
-  border-style: dashed;
+.quick-start-dropzone:focus-within,
+.quick-start-dropzone.drag-active {
+  outline: 2px solid var(--sr-primary-border, #a8c3ed);
+  outline-offset: 3px;
 }
 
 .quick-start-icon {
@@ -1330,6 +1380,9 @@ button:disabled,
   height: 44px;
   display: grid;
   place-items: center;
+  flex: 0 0 auto;
+  border-radius: 12px;
+  background: var(--sr-primary-soft, #eff6ff);
   color: var(--sr-primary);
 }
 
@@ -1337,13 +1390,6 @@ button:disabled,
   min-width: 0;
   display: grid;
   gap: 6px;
-}
-
-.quick-start-copy strong,
-.quick-start-copy span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .quick-start-copy strong {
@@ -1354,6 +1400,20 @@ button:disabled,
 .quick-start-copy span {
   color: var(--sr-text-muted);
   font-size: 13px;
+  line-height: 1.5;
+}
+
+.quick-start-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.quick-start-actions button {
+  min-height: 36px;
+  padding: 0 16px;
 }
 
 .home-notice-backdrop {
@@ -3500,13 +3560,8 @@ select {
     grid-column: 1 / -1;
   }
 
-  .quick-start-card-grid,
   .favorite-grid {
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  }
-
-  .quick-start-card-grid {
-    gap: 16px;
   }
 
   .tag-dashboard-workspace {
@@ -3676,6 +3731,7 @@ select {
   }
 
   .home-header,
+  .home-content.home-overview-content,
   .home-content {
     padding: 12px;
   }
@@ -3705,13 +3761,13 @@ select {
     gap: 4px;
   }
 
-  .home-welcome-banner {
+  .home-welcome-banner,
+  .home-overview-content .home-welcome-banner {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
     padding: 22px;
   }
 
-  .quick-start-card-grid,
   .favorite-grid {
     grid-template-columns: minmax(0, 1fr);
   }

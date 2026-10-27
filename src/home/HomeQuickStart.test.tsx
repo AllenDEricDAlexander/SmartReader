@@ -1,22 +1,24 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderApp } from '../test/renderApp';
 import { HomeQuickStart } from './HomeQuickStart';
 
 describe('HomeQuickStart', () => {
-  it('renders the prototype three-card quick start layout', () => {
+  it('combines PDF, folder selection and drag-and-drop in one import area', () => {
     renderApp(
       <HomeQuickStart onOpenPdf={vi.fn()} onDropPdf={vi.fn()} onOpenFolder={vi.fn()} />,
     );
 
     expect(screen.getByRole('heading', { name: '快速开始' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /打开本地 PDF/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /拖拽到这里/ })).toBeInTheDocument();
+    const dropzone = screen.getByRole('group', { name: 'PDF 拖拽区域' });
+    expect(within(dropzone).getByText('拖拽到这里')).toBeInTheDocument();
+    expect(within(dropzone).getAllByRole('button')).toHaveLength(2);
+    expect(within(dropzone).getByRole('button', { name: '打开本地 PDF' })).toHaveTextContent('选择 PDF');
     expect(screen.getByRole('button', { name: /选择文件夹/ })).toBeInTheDocument();
-    expect(screen.queryByLabelText('PDF 拖拽区域')).not.toBeInTheDocument();
   });
 
-  it('opens a local PDF from the first card', () => {
+  it('opens a local PDF from the import area', () => {
     const onOpenPdf = vi.fn();
     renderApp(
       <HomeQuickStart onOpenPdf={onOpenPdf} onDropPdf={vi.fn()} onOpenFolder={vi.fn()} />,
@@ -27,13 +29,13 @@ describe('HomeQuickStart', () => {
     expect(onOpenPdf).toHaveBeenCalledTimes(1);
   });
 
-  it('marks the drop card active and forwards dropped files', () => {
+  it('marks the whole import area active and forwards dropped files', () => {
     const onDropPdf = vi.fn((event) => event.preventDefault());
     renderApp(
       <HomeQuickStart onOpenPdf={vi.fn()} onDropPdf={onDropPdf} onOpenFolder={vi.fn()} />,
     );
 
-    const dropCard = screen.getByRole('button', { name: /拖拽到这里/ });
+    const dropCard = screen.getByRole('group', { name: 'PDF 拖拽区域' });
     fireEvent.dragOver(dropCard);
     expect(dropCard).toHaveClass('drag-active');
 
@@ -59,7 +61,7 @@ describe('HomeQuickStart', () => {
       />,
     );
 
-    fireEvent.drop(screen.getByRole('button', { name: /拖拽到这里/ }), {
+    fireEvent.drop(screen.getByRole('group', { name: 'PDF 拖拽区域' }), {
       dataTransfer: {
         files: [new File(['text'], 'notes.txt', { type: 'text/plain' })],
       },
@@ -69,20 +71,21 @@ describe('HomeQuickStart', () => {
     expect(onRejectDrop).toHaveBeenCalledWith('仅支持 PDF 文件');
   });
 
-  it('keeps card drops from bubbling to parent drop handlers', () => {
+  it('handles a drop over an inner button once without clicking it or bubbling to the parent', () => {
     let defaultPrevented = false;
     const onDropPdf = vi.fn((event) => {
       event.preventDefault();
       defaultPrevented = event.defaultPrevented;
     });
     const onParentDrop = vi.fn();
+    const onOpenPdf = vi.fn();
     renderApp(
       <div onDrop={onParentDrop}>
-        <HomeQuickStart onOpenPdf={vi.fn()} onDropPdf={onDropPdf} onOpenFolder={vi.fn()} />
+        <HomeQuickStart onOpenPdf={onOpenPdf} onDropPdf={onDropPdf} onOpenFolder={vi.fn()} />
       </div>,
     );
 
-    fireEvent.drop(screen.getByRole('button', { name: /拖拽到这里/ }), {
+    fireEvent.drop(screen.getByRole('button', { name: '打开本地 PDF' }), {
       dataTransfer: {
         files: [new File(['pdf'], 'sample.pdf', { type: 'application/pdf' })],
       },
@@ -91,6 +94,22 @@ describe('HomeQuickStart', () => {
     expect(onDropPdf).toHaveBeenCalledTimes(1);
     expect(defaultPrevented).toBe(true);
     expect(onParentDrop).not.toHaveBeenCalled();
+    expect(onOpenPdf).not.toHaveBeenCalled();
+  });
+
+  it('keeps the drag highlight between children and clears it when leaving the import area', () => {
+    renderApp(<HomeQuickStart onOpenPdf={vi.fn()} onDropPdf={vi.fn()} onOpenFolder={vi.fn()} />);
+    const dropzone = screen.getByRole('group', { name: 'PDF 拖拽区域' });
+    const pdfButton = within(dropzone).getByRole('button', { name: '打开本地 PDF' });
+    const folderButton = within(dropzone).getByRole('button', { name: '选择文件夹' });
+    fireEvent.dragEnter(pdfButton);
+    fireEvent.dragOver(pdfButton);
+    expect(dropzone).toHaveClass('drag-active');
+    fireEvent.dragEnter(folderButton);
+    fireEvent.dragLeave(pdfButton);
+    expect(dropzone).toHaveClass('drag-active');
+    fireEvent.dragLeave(folderButton);
+    expect(dropzone).not.toHaveClass('drag-active');
   });
 
   it('routes folder selection through the provided callback', () => {

@@ -278,10 +278,13 @@ function readAppStyles() {
 }
 
 describe('HomeDashboard', () => {
-  it('keeps the wide home layout three-area and degrades recent files on narrow screens', () => {
+  it('wraps the overview by available space and degrades recent files on narrow screens', () => {
     const styles = readAppStyles();
 
     expect(styles).toMatch(/\.home-content\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 320px;/s);
+    expect(styles).toMatch(/\.home-main\s*{[^}]*grid-template-rows:\s*minmax\(0, 1fr\);/s);
+    expect(styles).toMatch(/\.home-overview-content\s*{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;[^}]*align-content:\s*flex-start;/s);
+    expect(styles).toMatch(/\.home-overview-content \.home-primary\s*{[^}]*flex:\s*3 1 620px;/s);
     expect(styles).toMatch(/\.home-assist\s*{[^}]*display:\s*grid;/s);
     expect(styles).toMatch(/@media \(max-width: 1180px\)\s*{[^@]*\.home-content\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
     expect(styles).toMatch(/@media \(max-width: 720px\)\s*{[^@]*\.recent-files-table\s*{[^}]*min-width:\s*0;/s);
@@ -720,7 +723,7 @@ describe('HomeDashboard', () => {
     const onDropPdf = vi.fn((event) => event.preventDefault());
     renderDashboard({ onDropPdf });
 
-    fireEvent.drop(screen.getByRole('button', { name: /拖拽到这里/ }), {
+    fireEvent.drop(screen.getByRole('group', { name: 'PDF 拖拽区域' }), {
       dataTransfer: {
         files: [new File(['pdf'], 'drop.pdf', { type: 'application/pdf' })],
       },
@@ -733,7 +736,7 @@ describe('HomeDashboard', () => {
     const onDropPdf = vi.fn();
     renderDashboard({ onDropPdf });
 
-    fireEvent.drop(screen.getByRole('button', { name: /拖拽到这里/ }), {
+    fireEvent.drop(screen.getByRole('group', { name: 'PDF 拖拽区域' }), {
       dataTransfer: {
         files: [new File(['text'], 'notes.txt', { type: 'text/plain' })],
       },
