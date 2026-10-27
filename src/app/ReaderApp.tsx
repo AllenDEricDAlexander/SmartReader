@@ -53,6 +53,7 @@ import { ReaderTabs } from '../reader/ReaderTabs';
 import { GlobalSearchPanel } from '../search/GlobalSearchPanel';
 import { AiAssistant } from '../ai/AiAssistant';
 import { LibraryWorkspace } from '../library/LibraryWorkspace';
+import { exportDocumentNotesPdf, type NotesExportSource } from '../library/exportPaperNotes';
 import { paperToPersistedDocument } from '../library/libraryPersistence';
 import { paperIdFromDocumentKey } from '../library/libraryModels';
 import { errorMessage } from '../library/libraryService';
@@ -184,6 +185,25 @@ export function ReaderApp({
     ];
     return { groups, totalBookmarks: groups.reduce((total, group) => total + group.bookmarkCount, 0) };
   }, [bookmarkDashboard, libraryView.papers, research]);
+  const noteExportSources = useMemo(() => {
+    const sources = new Map<string, NotesExportSource>();
+    for (const paper of libraryView.papers) {
+      const documentKey = `paper:${paper.id}`;
+      sources.set(documentKey, { documentKey, displayName: paper.metadata.title || paper.fileName, detail: paper.metadata.title ? paper.fileName : null });
+    }
+    for (const annotation of displayAnnotations) {
+      if (!sources.has(annotation.documentKey)) sources.set(annotation.documentKey, {
+        documentKey: annotation.documentKey, displayName: annotation.documentDisplayName || annotation.documentPath || annotation.documentKey,
+        detail: annotation.documentPath,
+      });
+    }
+    for (const { document } of displayBookmarkDashboard?.groups ?? []) {
+      if (!sources.has(document.documentKey)) sources.set(document.documentKey, {
+        documentKey: document.documentKey, displayName: document.displayName || document.path || document.documentKey, detail: document.path,
+      });
+    }
+    return [...sources.values()];
+  }, [displayAnnotations, displayBookmarkDashboard, libraryView.papers]);
   const globalSearchBookmarks = useMemo(() => flattenBookmarkDashboard(displayBookmarkDashboard), [displayBookmarkDashboard]);
   const [pendingGlobalSearchJump, setPendingGlobalSearchJump] = useState<{
     documentKey: string;
@@ -831,9 +851,10 @@ export function ReaderApp({
     [recordToolReturnTarget, refreshBookmarkDashboard, refreshGlobalSearchAnnotations],
   );
   const openHomeSidebarPage = useCallback((page: HomeSidebarPage) => {
+    if (page === 'notes') refreshGlobalSearchCollections();
     setWorkspaceOverride('home');
     setHomeSidebarPage(page);
-  }, []);
+  }, [refreshGlobalSearchCollections]);
 
   const openReaderSession = useCallback(
     (sessionId: string) => {
@@ -1423,7 +1444,10 @@ export function ReaderApp({
       subtitle: `第 ${hit.page} 页 · ${hit.snippet}`, actionLabel: '打开文献',
       documentKey: `paper:${hit.paperId}`, path: null, page: hit.page,
     })) : [], [globalSearchQuery, libraryView.papers, research]);
-  const libraryWorkspace = research ? <LibraryWorkspace library={research.library} ai={research.ai}
+  const reportExportError = (failure: unknown) => {
+    if (failure instanceof Error && failure.name === 'NotesExportCleanupError') setAppError(failure.message);
+  };
+  const libraryWorkspace = research ? <LibraryWorkspace library={research.library} ai={research.ai} persistence={persistence} onExportError={reportExportError}
     onOpenPaper={openResearchPaper} onImport={async (folderId) => { await importPdfs(folderId); }} onOpenAiSettings={() => openSettingsWorkspace('ai')}
     importing={importing} importProgress={importProgress} initialFolderView={homeSidebarPage === 'folders'} /> : null;
   const workspaceContent = research && (homeSidebarPage === 'myDocuments' || homeSidebarPage === 'folders') ? libraryWorkspace
@@ -1431,6 +1455,11 @@ export function ReaderApp({
       onOpenPaper={openResearchPaper} onAddPdfs={() => importPdfs()} onOpenSettings={() => openSettingsWorkspace('ai')} />
     : research && homeSidebarPage === 'notes' ? <AnnotationManagerWorkspace title="笔记管理"
       annotations={displayAnnotations.filter((annotation) => annotation.type === 'note')}
+      exportSources={noteExportSources} onExportNotes={(sources) => exportDocumentNotesPdf(research.library, persistence, sources).catch((failure: unknown) => {
+        reportExportError(failure);
+        throw failure;
+      })}
+      exportSourcesError={globalSearchAnnotationError || bookmarkDashboardError ? '部分旧文档的批注或书签加载失败，文献列表可能不完整；请重新打开笔记管理后重试。' : null}
       error={globalSearchAnnotationError} canOpenAnnotation={(annotation) => canOpenRecordPage(annotation.documentKey, annotation.documentPath, annotation.documentMissing)}
       onClose={openHomeWorkspace} onOpenAnnotation={(annotation) => void openRecordPage(annotation.documentKey, annotation.documentPath, annotation.page, annotation.documentMissing)} />
     : research && homeSidebarPage === 'sessionRestore' ? <SessionRestoreWorkspace sessions={displayDocuments.sessions}

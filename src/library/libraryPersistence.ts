@@ -19,10 +19,16 @@ export function paperToPersistedDocument(paper: Paper): PersistedDocument {
 /** Keeps library reader data inside its encrypted storage boundary. */
 export function createLibraryPersistence(base: PersistenceApi, library: LibraryService): PersistenceApi {
   let writes: Promise<unknown> = Promise.resolve();
+  const pendingWrites = new Set<Promise<unknown>>();
+  function track<T>(operation: Promise<T>): Promise<T> {
+    pendingWrites.add(operation);
+    void operation.then(() => pendingWrites.delete(operation), () => pendingWrites.delete(operation));
+    return operation;
+  }
   function write<T>(operation: () => Promise<T>): Promise<T> {
     const result = writes.then(async () => { await library.initialize(); return operation(); });
     writes = result.catch(() => undefined);
-    return result;
+    return track(result);
   }
   function requirePaper(key: string): Paper {
     const id = paperIdFromDocumentKey(key);
@@ -96,7 +102,7 @@ export function createLibraryPersistence(base: PersistenceApi, library: LibraryS
     });
   }
   async function changeDocumentTag(key: string, tagId: number, attach: boolean): Promise<void> {
-    if (!managed(key)) return attach ? base.attachDocumentTag(key, tagId) : base.detachDocumentTag(key, tagId);
+    if (!managed(key)) return track(attach ? base.attachDocumentTag(key, tagId) : base.detachDocumentTag(key, tagId));
     return write(async () => {
       if (attach) await requireTag(tagId);
       const paper = requirePaper(key);
@@ -106,7 +112,7 @@ export function createLibraryPersistence(base: PersistenceApi, library: LibraryS
     });
   }
   async function changeAnnotationTag(id: number, tagId: number, attach: boolean): Promise<void> {
-    if (id >= 0) return attach ? base.attachAnnotationTag(id, tagId) : base.detachAnnotationTag(id, tagId);
+    if (id >= 0) return track(attach ? base.attachAnnotationTag(id, tagId) : base.detachAnnotationTag(id, tagId));
     return write(async () => {
       if (attach) await requireTag(tagId);
       const paper = findDecoration(id, 'annotations');
@@ -121,6 +127,10 @@ export function createLibraryPersistence(base: PersistenceApi, library: LibraryS
 
   return {
     ...base,
+    async flushPendingWrites() {
+      await Promise.all([...pendingWrites]);
+      await library.waitForPendingWrites();
+    },
     async getDocument(key) {
       if (!managed(key)) return base.getDocument?.(key) ?? null;
       const access = library.captureAccess();
@@ -202,7 +212,7 @@ export function createLibraryPersistence(base: PersistenceApi, library: LibraryS
     async saveBookmark(record) {
       if (!managed(record.documentKey)) {
         if (record.id !== null && record.id < 0) return Promise.reject(new Error('库内书签不能保存到外部文档。'));
-        return base.saveBookmark(record);
+        return track(base.saveBookmark(record));
       }
       const access = library.captureAccess();
       const saved = await write(async () => {
@@ -241,7 +251,7 @@ export function createLibraryPersistence(base: PersistenceApi, library: LibraryS
       return { totalBookmarks: groups.reduce((total, group) => total + group.bookmarkCount, 0), groups } satisfies BookmarkDashboard;
     },
     deleteBookmark(id) {
-      if (id >= 0) return base.deleteBookmark(id);
+      if (id >= 0) return track(base.deleteBookmark(id));
       return write(async () => {
         const paper = findDecoration(id, 'bookmarks');
         await library.updatePaper(paper.id, (current) => ({ bookmarks: current.bookmarks.filter((item) => item.id !== id) }));
@@ -250,7 +260,7 @@ export function createLibraryPersistence(base: PersistenceApi, library: LibraryS
     async saveAnnotation(record) {
       if (!managed(record.documentKey)) {
         if (record.id !== null && record.id < 0) return Promise.reject(new Error('库内批注不能保存到外部文档。'));
-        return base.saveAnnotation(record);
+        return track(base.saveAnnotation(record));
       }
       const access = library.captureAccess();
       const saved = await write(async () => {
@@ -280,7 +290,7 @@ export function createLibraryPersistence(base: PersistenceApi, library: LibraryS
       )];
     },
     deleteAnnotation(id) {
-      if (id >= 0) return base.deleteAnnotation(id);
+      if (id >= 0) return track(base.deleteAnnotation(id));
       return write(async () => {
         const paper = findDecoration(id, 'annotations');
         await library.updatePaper(paper.id, (current) => ({ annotations: current.annotations.filter((item) => item.id !== id) }));
@@ -301,6 +311,8 @@ export function createLibraryPersistence(base: PersistenceApi, library: LibraryS
       const [tags] = await Promise.all([base.listTags(), library.initialize()]);
       return tags.map((tag) => ({ ...tag, ...countTagUsage(tag, visiblePapers(access)) }));
     },
+    createTag(input) { return track(base.createTag(input)); },
+    renameTag(id, name) { return track(base.renameTag(id, name)); },
     deleteTag(id) {
       return write(() => rewriteTags(id, undefined, () => base.deleteTag(id)));
     },

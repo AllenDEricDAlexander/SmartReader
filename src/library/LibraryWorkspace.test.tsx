@@ -3,11 +3,14 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LibraryWorkspace } from './LibraryWorkspace';
 import { libraryUiFixture, paperFixture } from './libraryUiTestUtils';
+import { exportPaperNotesPdf } from './exportPaperNotes';
 import type { AiService } from '../ai/aiService';
+
+vi.mock('./exportPaperNotes', () => ({ exportPaperNotesPdf: vi.fn() }));
 
 const services: AiService[] = [];
 beforeEach(() => vi.stubGlobal('crypto', webcrypto));
-afterEach(() => { services.splice(0).forEach((ai) => ai.dispose()); });
+afterEach(() => { services.splice(0).forEach((ai) => ai.dispose()); vi.clearAllMocks(); });
 
 async function setup(papers = [paperFixture(), { ...paperFixture('paper-2', '教育研究'), pages: [{ page: 1, text: 'Classroom education results.' }], pageCount: 1 }]) {
   const fixture = await libraryUiFixture(papers);
@@ -23,6 +26,46 @@ function chooseFolderAction(name: string) {
 }
 
 describe('library workspace', () => {
+  it('exports notes for one paper or all selected papers', async () => {
+    const props = await setup();
+    vi.mocked(exportPaperNotesPdf).mockResolvedValue(true);
+    render(<LibraryWorkspace {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: '导出 认知研究 的笔记 PDF' }));
+    await waitFor(() => expect(exportPaperNotesPdf).toHaveBeenCalledWith(props.library, ['paper-1']));
+    expect(await screen.findByText(/笔记 PDF 已导出/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 认知研究' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 教育研究' }));
+    fireEvent.click(screen.getByRole('button', { name: '导出笔记 PDF' }));
+    await waitFor(() => expect(exportPaperNotesPdf).toHaveBeenLastCalledWith(props.library, ['paper-1', 'paper-2']));
+  });
+
+  it('does not report success when the save dialog is cancelled and displays export failures', async () => {
+    const props = await setup();
+    vi.mocked(exportPaperNotesPdf).mockResolvedValueOnce(false).mockRejectedValueOnce(new Error('写入失败'));
+    render(<LibraryWorkspace {...props} />);
+    const button = screen.getByRole('button', { name: '导出 认知研究 的笔记 PDF' });
+    fireEvent.click(button);
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.queryByText(/笔记 PDF 已导出/)).not.toBeInTheDocument();
+    fireEvent.click(button);
+    expect(await screen.findByRole('alert')).toHaveTextContent('写入失败');
+  });
+
+  it('reports a cleanup failure even if the library view has been closed', async () => {
+    const props = await setup();
+    const onExportError = vi.fn();
+    let reject!: (failure: Error) => void;
+    vi.mocked(exportPaperNotesPdf).mockReturnValue(new Promise<boolean>((_resolve, fail) => { reject = fail; }));
+    const { unmount } = render(<LibraryWorkspace {...props} onExportError={onExportError} />);
+    fireEvent.click(screen.getByRole('button', { name: '导出 认知研究 的笔记 PDF' }));
+    unmount();
+    const error = new Error('清理新文件失败');
+    error.name = 'NotesExportCleanupError';
+    reject(error);
+    await waitFor(() => expect(onExportError).toHaveBeenCalledExactlyOnceWith(error));
+  });
+
   it('searches indexed pages and opens the matching page directly', async () => {
     const props = await setup();
     render(<LibraryWorkspace {...props} />);

@@ -110,6 +110,8 @@ export type CacheStats = {
 };
 
 export type CorePersistenceApi = {
+  /** Wait for reader changes already submitted to the persistence adapter. */
+  flushPendingWrites?(): Promise<void>;
   getDocument?(documentKey: string): Promise<PersistedDocument | null>;
   saveDocument(document: PersistedDocument): Promise<void>;
   listRecentDocuments(): Promise<PersistedDocument[]>;

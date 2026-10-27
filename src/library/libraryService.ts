@@ -48,6 +48,7 @@ export class LibraryService {
   private loaded = false;
   private loading: Promise<void> | null = null;
   private queue: Promise<unknown> = Promise.resolve();
+  private pendingTransactions = new Set<Promise<unknown>>();
   private decrypted = new Map<string, Paper>();
   private keys = new Map<string, CryptoKey>();
   private listeners = new Set<() => void>();
@@ -58,7 +59,9 @@ export class LibraryService {
   private invalidatedAt = new Map<string, number>();
   private accessChanges = 0;
   private pendingAccessIds = new Map<string, number>();
-  private maintenance = new Set<Promise<void>>();
+  private pendingLockIds = new Map<string, number>();
+  private pendingLockVaults = new Map<string, number>();
+  private maintenance = new Map<Promise<void>, ReadonlySet<string> | null>();
   private searchIndex = new LibrarySearchIndex();
   private view: LibraryView = {
     loaded: false, error: null, snapshot: this.snapshot,
@@ -121,23 +124,29 @@ export class LibraryService {
   }
 
   getPaper(id: string): Paper | undefined {
+    if (this.pendingLockIds.has(id)) return undefined;
     const record = this.snapshot.papers.find((item) => item.id === id);
     return record?.kind === 'plain' ? record.paper : this.decrypted.get(id);
   }
 
   captureAccess(): number { return this.accessEpoch; }
 
+  isVaultLocking(id: string): boolean { return this.pendingLockVaults.has(id); }
+
   canAccess(id: string, token: number): boolean {
     return (this.invalidatedAt.get(id) ?? 0) <= token && !this.pendingAccessIds.has(id) && this.getPaper(id) !== undefined;
   }
 
+  /** Wait for library transactions submitted before this call. */
+  async waitForPendingWrites(): Promise<void> { await Promise.all([...this.pendingTransactions]); }
+
   /** Keeps credentials available until a multi-store operation and its compensation finish. */
-  async withStableAccess<T>(operation: () => Promise<T>): Promise<T> {
+  async withStableAccess<T>(operation: () => Promise<T>, paperIds?: string[]): Promise<T> {
     await this.initialize();
     if (this.accessChanges) throw new Error('文献保护状态正在变化，请稍后重试。');
     let release: () => void = () => undefined;
     const barrier = new Promise<void>((resolve) => { release = resolve; });
-    this.maintenance.add(barrier);
+    this.maintenance.set(barrier, paperIds ? new Set(paperIds) : null);
     try { return await operation(); }
     finally { this.maintenance.delete(barrier); release(); }
   }
@@ -412,8 +421,10 @@ export class LibraryService {
   }
 
   async unlockVault(vaultId: string, password: string): Promise<void> {
+    if (this.isVaultLocking(vaultId)) throw new Error('文件夹正在锁定，请稍后再解锁。');
     await this.exclusive(async () => {
       await this.initialize();
+      if (this.isVaultLocking(vaultId)) throw new Error('文件夹正在锁定，请稍后再解锁。');
       const vault = this.snapshot.vaults.find((item) => item.id === vaultId);
       if (!vault) throw new Error('加密文件夹不存在。');
       const key = await deriveVaultKey(password, vault.salt);
@@ -446,12 +457,26 @@ export class LibraryService {
   async lockVault(vaultId: string): Promise<void> {
     const ids = this.snapshot.papers.filter((record) => record.kind === 'encrypted' && record.vaultId === vaultId)
       .map((record) => record.id);
-    await this.changeAccess(() => this.exclusive(async () => {
+    const operation = this.changeAccess(() => this.exclusive(async () => {
       this.keys.delete(vaultId);
       for (const id of ids) this.decrypted.delete(id);
+      this.publish();
+    }), ids, true);
+    this.pendingLockVaults.set(vaultId, (this.pendingLockVaults.get(vaultId) ?? 0) + 1);
+    for (const id of ids) this.pendingLockIds.set(id, (this.pendingLockIds.get(id) ?? 0) + 1);
+    try {
       this.notifyLocked(ids);
       this.publish();
-    }), ids);
+      await operation;
+    } finally {
+      const vaultLocks = (this.pendingLockVaults.get(vaultId) ?? 1) - 1;
+      if (vaultLocks) this.pendingLockVaults.set(vaultId, vaultLocks); else this.pendingLockVaults.delete(vaultId);
+      for (const id of ids) {
+        const locks = (this.pendingLockIds.get(id) ?? 1) - 1;
+        if (locks) this.pendingLockIds.set(id, locks); else this.pendingLockIds.delete(id);
+      }
+      this.publish();
+    }
   }
 
   async decryptFolder(vaultId: string): Promise<void> {
@@ -911,15 +936,20 @@ export class LibraryService {
     const result = this.queue.then(operation);
     // A rejected operation is reported to its caller but must not poison later saves.
     this.queue = result.catch(() => undefined);
+    this.pendingTransactions.add(result);
+    void result.then(() => this.pendingTransactions.delete(result), () => this.pendingTransactions.delete(result));
     return result;
   }
 
-  private async changeAccess<T>(operation: () => Promise<T>, ids: string[] = []): Promise<T> {
+  private async changeAccess<T>(operation: () => Promise<T>, ids: string[] = [], scoped = false): Promise<T> {
     this.accessChanges += 1;
     if (ids.length) this.invalidateAccess(ids);
     for (const id of ids) this.pendingAccessIds.set(id, (this.pendingAccessIds.get(id) ?? 0) + 1);
     try {
-      await Promise.all(this.maintenance);
+      const pending = [...this.maintenance].filter(([, protectedIds]) =>
+        protectedIds === null || (!scoped && ids.length === 0) || ids.some((id) => protectedIds.has(id)),
+      ).map(([barrier]) => barrier);
+      await Promise.all(pending);
       return await operation();
     } finally {
       this.accessChanges -= 1;
@@ -946,15 +976,16 @@ export class LibraryService {
 
   private publish(error: string | null = null, indexChanged = true) {
     const papers = this.snapshot.papers.flatMap((record) => {
+      if (this.pendingLockIds.has(record.id)) return [];
       const paper = record.kind === 'plain' ? record.paper : this.decrypted.get(record.id);
       return paper ? [paper] : [];
     });
     if (indexChanged) this.searchIndex.rebuild(papers);
     this.view = {
       loaded: this.loaded, error, snapshot: this.snapshot, papers,
-      lockedPaperIds: this.snapshot.papers.filter((record) => record.kind === 'encrypted' && !this.decrypted.has(record.id))
+      lockedPaperIds: this.snapshot.papers.filter((record) => record.kind === 'encrypted' && (!this.decrypted.has(record.id) || this.pendingLockIds.has(record.id)))
         .map((record) => record.id),
-      unlockedVaultIds: [...this.keys.keys()],
+      unlockedVaultIds: [...this.keys.keys()].filter((id) => !this.pendingLockVaults.has(id)),
     };
     for (const listener of this.listeners) listener();
   }

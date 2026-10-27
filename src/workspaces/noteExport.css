@@ -1,0 +1,9 @@
+.notes-export-panel { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.notes-export-panel .muted-copy { margin: 0; }
+.notes-export-panel > button { padding: 0 12px; }
+.notes-export-panel > [role="status"], .notes-export-panel > [role="alert"] { margin: 0; font-size: 12px; }
+.notes-export-panel > [role="alert"] { color: var(--sr-danger-text, #b91c1c); }
+.notes-export-list { display: grid; gap: 3px; width: 100%; max-height: 220px; overflow: auto; }
+.notes-export-list label { display: flex; align-items: flex-start; gap: 8px; padding: 6px 4px; font-size: 12px; overflow-wrap: anywhere; }
+.notes-export-list input { flex-shrink: 0; margin-top: 2px; accent-color: var(--sr-primary); }
+.notes-export-list small { display: block; margin-top: 2px; color: var(--sr-text-muted); }

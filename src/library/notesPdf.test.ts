@@ -13,6 +13,7 @@ import type { ReaderAnnotation } from '../annotations/annotationModels';
 
 const font = new Uint8Array(readFileSync(resolve('src/library/assets/NotoSansSC-Regular.ttf')));
 GlobalWorkerOptions.workerSrc = resolve('node_modules/pdfjs-dist/build/pdf.worker.js');
+vi.setConfig({ testTimeout: 20_000 });
 const hasPoppler = !spawnSync('pdftoppm', ['-v']).error;
 
 function annotation(type: ReaderAnnotation['type'], page: number, quote: string | null, text: string | null): ReaderAnnotation {

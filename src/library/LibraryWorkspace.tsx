@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
-import { BookOpen, ChevronDown, FileText, Folder, FolderPlus, LockKeyhole, PanelLeft, Pin, RefreshCw, Search, Settings2, Sparkles, Star, Trash2, Upload, X } from 'lucide-react';
+import { BookOpen, ChevronDown, Download, FileText, Folder, FolderPlus, LockKeyhole, PanelLeft, Pin, RefreshCw, Search, Settings2, Sparkles, Star, Trash2, Upload, X } from 'lucide-react';
 import type { AiService } from '../ai/aiService';
+import type { PersistenceApi } from '../persistence/persistenceApi';
 import { formatFileSize } from '../home/homeDisplayUtils';
 import { LibraryActionDialog, type LibraryAction } from './LibraryActionDialog';
 import { LibraryFolderTree } from './LibraryFolderTree';
 import { PaperMetadataEditor } from './PaperMetadataEditor';
 import { PaperPreview } from './PaperPreview';
+import { exportPaperNotesPdf } from './exportPaperNotes';
 import { descendantFolderIds, folderVaultId } from './libraryFolders';
 import { folderOptions } from './libraryFolderUi';
 import type { LibraryService } from './libraryService';
@@ -14,15 +16,17 @@ import './libraryWorkspace.css';
 export type LibraryWorkspaceProps = {
   library: LibraryService;
   ai: AiService;
+  persistence?: PersistenceApi;
   onOpenPaper(id: string, page?: number): void | Promise<void>;
   onImport(folderId?: string): void | Promise<void>;
   onOpenAiSettings?(): void;
+  onExportError?(failure: unknown): void;
   importing?: boolean;
   importProgress?: string;
   initialFolderView?: boolean;
 };
 
-export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiSettings, importing = false, importProgress, initialFolderView = true }: LibraryWorkspaceProps) {
+export function LibraryWorkspace({ library, ai, persistence, onOpenPaper, onImport, onOpenAiSettings, onExportError, importing = false, importProgress, initialFolderView = true }: LibraryWorkspaceProps) {
   const view = useSyncExternalStore(library.subscribe, library.getView, library.getView);
   const activity = useSyncExternalStore(ai.subscribe, ai.getView, ai.getView);
   const [query, setQuery] = useState('');
@@ -41,6 +45,7 @@ export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiS
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const busyRef = useRef(false);
   const [aiBatchRunning, setAiBatchRunning] = useState(false);
   const aiBatchRef = useRef(false);
@@ -52,6 +57,7 @@ export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiS
   const activeVaultId = selectedFolder ? folderVaultId(snapshot, selectedFolder.id) : null;
   const activeVault = snapshot.vaults.find((vault) => vault.id === activeVaultId);
   const vaultUnlocked = activeVaultId !== null && view.unlockedVaultIds.includes(activeVaultId);
+  const vaultLocking = activeVaultId !== null && library.isVaultLocking(activeVaultId);
   const options = useMemo(() => folderOptions(snapshot.folders), [snapshot.folders]);
 
   useEffect(() => {
@@ -124,6 +130,19 @@ export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiS
       if (alive.current) setAiBatchRunning(false);
     }
   };
+
+  const exportNotes = (ids: string[]) => void perform(async () => {
+    setExporting(true);
+    try {
+      const saved = persistence ? await exportPaperNotesPdf(library, ids, undefined, persistence) : await exportPaperNotesPdf(library, ids);
+      if (saved && alive.current) setNotice('笔记 PDF 已导出。导出文件未加密，请妥善保存。');
+    } catch (failure) {
+      onExportError?.(failure);
+      throw failure;
+    } finally {
+      if (alive.current) setExporting(false);
+    }
+  });
 
   const folderCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -233,7 +252,7 @@ export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiS
   return (
     <section className="library-workspace" aria-label="科研文献库">
       <header className="library-workspace-header">
-        <div><h1><BookOpen size={21} aria-hidden="true" />文献库</h1><p>本地保存 · 自动索引 · 一篇文献，多种归档</p></div>
+        <div><h1><BookOpen size={21} aria-hidden="true" />文献库</h1><p>本地保存 · 自动索引 · 一篇文献，多种归档</p><p>笔记 PDF 未加密，导出时需选择新文件名。</p></div>
         <div className="library-header-actions">
           <button className="library-tree-toggle" type="button" aria-label="切换分类目录" aria-pressed={foldersOpen} onClick={() => setFoldersOpen((current) => !current)}><PanelLeft size={16} />目录</button>
           {onOpenAiSettings ? <button type="button" disabled={disabled} onClick={onOpenAiSettings}><Settings2 size={15} />AI 设置</button> : null}
@@ -241,6 +260,7 @@ export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiS
         </div>
       </header>
       {importing || importProgress ? <p className="library-progress" role="status">{importProgress || '正在导入文献并建立索引…'}</p> : null}
+      {exporting ? <p className="library-progress" role="status">正在导出笔记 PDF…</p> : null}
       {displayedError ? <div className="library-notice library-error" role="alert"><span>{displayedError}</span><button type="button" disabled={busy} onClick={() => void perform(() => library.reload())}>重新载入</button><button type="button" aria-label="关闭错误提示" onClick={() => setError(null)}><X size={14} /></button></div> : null}
       {notice ? <div className="library-notice" role="status"><span>{notice}</span><button type="button" aria-label="关闭操作提示" onClick={() => setNotice(null)}><X size={14} /></button></div> : null}
       <div className="library-toolbar">
@@ -288,7 +308,7 @@ export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiS
               ) : null}
             </div>
           ) : null}
-          {activeVaultId ? <button type="button" disabled={disabled} onClick={() => vaultUnlocked ? void perform(() => library.lockVault(activeVaultId), '文件夹已锁定。') : setAction({ kind: 'unlockVault', vaultId: activeVaultId })}><LockKeyhole size={14} />{vaultUnlocked ? '锁定文件夹' : '解锁文件夹'}</button> : null}
+          {activeVaultId ? <button type="button" disabled={disabled || vaultLocking} onClick={() => vaultUnlocked ? void perform(() => library.lockVault(activeVaultId), '文件夹已锁定。') : setAction({ kind: 'unlockVault', vaultId: activeVaultId })}><LockKeyhole size={14} />{vaultLocking ? '正在锁定…' : vaultUnlocked ? '锁定文件夹' : '解锁文件夹'}</button> : null}
         </div>
       </div>
       {activeVault ? <p className="library-vault-scope">加密范围：{snapshot.folders.find((folder) => folder.id === activeVault.folderId)?.name}及其子分类。同一论文的各分类入口共用加密状态。</p> : null}
@@ -298,6 +318,7 @@ export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiS
         <button type="button" disabled={disabled} onClick={() => setAction({ kind: 'categorize', paperIds: selectedIds, mode: 'add' })}>追加分类</button>
         <button type="button" aria-label={allPinned ? '批量取消置顶' : '批量置顶'} disabled={disabled} onClick={() => void perform(() => library.batchUpdate(selectedIds, { pinned: !allPinned }))}><Pin size={14} />{allPinned ? '取消置顶' : '置顶'}</button>
         <button type="button" aria-label={allFavorites ? '批量取消收藏' : '批量收藏'} disabled={disabled} onClick={() => void perform(() => library.batchUpdate(selectedIds, { favorite: !allFavorites }))}><Star size={14} />{allFavorites ? '取消收藏' : '收藏'}</button>
+        <button type="button" disabled={disabled} onClick={() => exportNotes(selectedIds)}><Download size={14} />导出笔记 PDF</button>
         <button type="button" disabled={disabled || aiBatchRunning} onClick={() => void runEnrichment(selectedIds)}><Sparkles size={14} />AI 补全</button>
         <button type="button" aria-label="批量删除" className="library-danger" disabled={disabled} onClick={() => setAction({ kind: 'deletePapers', paperIds: selectedIds })}><Trash2 size={14} />删除</button>
         <button type="button" onClick={() => setSelected(new Set())}>取消选择</button>
@@ -313,7 +334,7 @@ export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiS
         <div className="library-list-panel">
           <div className="library-list-heading"><label><input type="checkbox" aria-label="选择当前结果中的全部文献" checked={allSelected} disabled={!papers.length || disabled} onChange={(event) => setSelected(event.target.checked ? new Set(papers.map((paper) => paper.id)) : new Set())} />{query.trim() ? `检索结果 ${papers.length} 篇` : '文献列表'}</label><span>{snapshot.ai.autoEnrich ? '导入后自动 AI 分类' : '导入后自动建立索引'}</span></div>
           <div className="library-list-scroll">
-            {view.lockedPaperIds.length ? <div className="library-locked-message"><LockKeyhole size={18} /><div><p>{view.lockedPaperIds.length} 篇文献已锁定，解锁后可查看和检索。</p><div>{snapshot.vaults.filter((vault) => !view.unlockedVaultIds.includes(vault.id)).map((vault) => <button key={vault.id} type="button" disabled={disabled} onClick={() => setAction({ kind: 'unlockVault', vaultId: vault.id })}>解锁 {snapshot.folders.find((folder) => folder.id === vault.folderId)?.name ?? '文件夹'}</button>)}</div></div></div> : null}
+            {view.lockedPaperIds.length ? <div className="library-locked-message"><LockKeyhole size={18} /><div><p>{view.lockedPaperIds.length} 篇文献已锁定或正在锁定，解锁后可查看和检索。</p><div>{snapshot.vaults.filter((vault) => !view.unlockedVaultIds.includes(vault.id)).map((vault) => <button key={vault.id} type="button" disabled={disabled || library.isVaultLocking(vault.id)} onClick={() => setAction({ kind: 'unlockVault', vaultId: vault.id })}>解锁 {snapshot.folders.find((folder) => folder.id === vault.folderId)?.name ?? '文件夹'}</button>)}</div></div></div> : null}
             {!view.loaded ? <p className="library-empty" role="status">正在载入本地文献库…</p> : papers.length ? <ul className="library-paper-list" aria-label="文献列表">
               {papers.map((paper) => {
                 const title = paper.metadata.title || paper.fileName;
@@ -336,6 +357,7 @@ export function LibraryWorkspace({ library, ai, onOpenPaper, onImport, onOpenAiS
                   <div className="library-paper-actions">
                     <button type="button" disabled={disabled} onClick={() => { setPreviewId(paper.id); if (mode === 'off') void perform(() => library.savePreferences({ previewMode: 'hover' })); }}>查看信息</button>
                     <button type="button" disabled={disabled} onClick={() => setAction({ kind: 'categorize', paperIds: [paper.id], mode: 'add' })}>归类</button>
+                    <button type="button" disabled={disabled} aria-label={`导出 ${title} 的笔记 PDF`} onClick={() => exportNotes([paper.id])}><Download size={12} />导出笔记</button>
                     {enriching ? <button type="button" aria-label={`取消 AI ${title}`} onClick={() => { aiBatchCancelled.current = true; ai.cancelEnrichment(paper.id); }}>取消 AI</button> : <button type="button" disabled={disabled || aiBatchRunning || paper.indexStatus === 'pending'} aria-label={`AI 补全 ${title}`} onClick={() => void runEnrichment([paper.id])}><Sparkles size={12} />{paper.aiStatus === 'error' ? '重试 AI' : 'AI 补全'}</button>}
                     <button type="button" disabled={disabled || paper.indexStatus === 'pending'} aria-label={`重新索引 ${title}`} onClick={() => setAction({ kind: 'reindex', paperIds: [paper.id] })}><RefreshCw size={12} />{paper.indexStatus === 'error' || paper.indexStatus === 'empty' ? '重试索引' : '重建索引'}</button>
                   </div>
