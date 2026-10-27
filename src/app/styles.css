@@ -191,7 +191,8 @@ button:disabled,
   grid-template-rows: 38px minmax(0, 1fr);
 }
 
-.reader-mode {
+.reader-mode,
+.settings-mode {
   display: grid;
   grid-template-rows: 38px minmax(0, 1fr);
 }
@@ -3073,7 +3074,6 @@ select {
   margin-left: auto;
 }
 
-.settings-mode,
 .tags-mode,
 .import-mode,
 .compare-mode,
@@ -3088,6 +3088,16 @@ select {
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
   background: var(--sr-bg);
+}
+
+.settings-tab-panel {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.settings-tab-panel[hidden] {
+  display: none;
 }
 
 .tool-workspace {

@@ -765,7 +765,9 @@ describe('App', () => {
 
     fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
     expect(await screen.findByLabelText('设置工作区')).toBeInTheDocument();
-    expect(screen.queryByLabelText('文档导航栏')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('文档导航栏')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '设置' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'settings-home.pdf' })).toHaveAttribute('aria-selected', 'false');
 
     fireEvent.click(screen.getByRole('button', { name: '关闭设置' }));
     expect(await screen.findByRole('heading', { name: '快速上手' })).toBeInTheDocument();
@@ -837,7 +839,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'More options' }));
     expect(await screen.findByLabelText('设置工作区')).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: 'w', metaKey: true });
+    fireEvent.click(screen.getByRole('button', { name: '关闭文档 settings-missing.pdf' }));
     expect(screen.queryByRole('tab', { name: 'settings-missing.pdf' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('设置工作区')).toBeInTheDocument();
 
@@ -847,6 +849,83 @@ describe('App', () => {
     expect(
       within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }),
     ).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('keeps one settings tab and its unsaved draft when switching home and honors explicit settings links', async () => {
+    const persistence = createEmptyPersistence();
+    renderApp(<App bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+      persistence={persistence} viewerRenderer={testViewerRenderer} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '卡片视图' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '打开设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ }));
+    fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));
+    expect(screen.getByLabelText('设置工作区')).not.toBeVisible();
+    expect(screen.getByRole('region', { name: '欢迎使用 SmartReader' })).toBeVisible();
+    expect(screen.getByRole('tab', { name: '设置' })).toHaveAttribute('aria-selected', 'false');
+    fireEvent.click(screen.getByRole('tab', { name: '设置' }));
+    expect(screen.getByRole('heading', { name: '外观' })).toBeVisible();
+    expect(screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ })).not.toBeChecked();
+    expect(screen.getAllByRole('tab', { name: '设置' })).toHaveLength(1);
+    fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));
+    fireEvent.click(screen.getByRole('button', { name: '更多技巧' }));
+    expect(screen.getByRole('heading', { name: '快捷键' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
+    expect(screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: '关闭设置标签页' }));
+    expect(screen.queryByRole('tab', { name: '设置' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('设置工作区')).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '欢迎使用 SmartReader' })).toBeVisible();
+    expect(persistence.savePreferences).not.toHaveBeenCalled();
+  });
+
+  it('keeps an unsaved settings change without overwriting a theme changed on the home page', async () => {
+    const persistence = createEmptyPersistence();
+    renderApp(<App bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+      persistence={persistence} viewerRenderer={testViewerRenderer} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '卡片视图' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '打开设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ }));
+    fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));
+    fireEvent.change(screen.getByLabelText('切换主题'), { target: { value: 'dark' } });
+    await waitFor(() => expect(persistence.savePreferences).toHaveBeenCalledWith({ ...defaultReaderPreferences, theme: 'dark' }));
+    fireEvent.click(screen.getByRole('tab', { name: '设置' }));
+    expect(screen.getByRole('button', { name: '暗色' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+    await waitFor(() => expect(persistence.savePreferences).toHaveBeenLastCalledWith({
+      ...defaultReaderPreferences, theme: 'dark', homeWelcomeEnabled: false,
+    }));
+  });
+
+  it('cycles between settings and PDF tabs and closes settings independently by shortcut or its tab close action', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:settings-tab-reader');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    renderApp(<App bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+      persistence={createEmptyPersistence()} viewerRenderer={testViewerRenderer} />);
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [new File(['%PDF-1.7'], 'tab-reader.pdf', { type: 'application/pdf' })] },
+    });
+    await screen.findByRole('tab', { name: 'tab-reader.pdf' });
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    expect(screen.getByRole('tab', { name: '设置' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'tab-reader.pdf' })).toHaveAttribute('aria-selected', 'false');
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true });
+    expect(screen.getByRole('tab', { name: 'tab-reader.pdf' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByLabelText('设置工作区')).not.toBeVisible();
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true, shiftKey: true });
+    expect(screen.getByRole('tab', { name: '设置' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(window, { key: 'w', metaKey: true });
+    expect(screen.queryByRole('tab', { name: '设置' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'tab-reader.pdf' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'tab-reader.pdf' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'tab-reader.pdf' }));
+    fireEvent.click(screen.getByRole('button', { name: '关闭设置标签页' }));
+    expect(screen.getByLabelText('阅读工作区')).toBeVisible();
+    expect(screen.queryByRole('tab', { name: '设置' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'tab-reader.pdf' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('adds a newly opened desktop PDF to recent files without reloading persistence', async () => {
@@ -4117,7 +4196,8 @@ describe('App', () => {
     });
     expect(await screen.findByRole('tab', { name: 'settings-result.pdf' })).toBeInTheDocument();
     expect(screen.getByLabelText('阅读工作区')).toBeInTheDocument();
-    expect(screen.queryByLabelText('设置工作区')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('设置工作区')).not.toBeVisible();
+    expect(screen.getByRole('tab', { name: '设置' })).toHaveAttribute('aria-selected', 'false');
   });
 
   it('keeps a tool workspace visible when a global search result cannot reopen', async () => {

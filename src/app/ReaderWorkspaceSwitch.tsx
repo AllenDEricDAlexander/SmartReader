@@ -86,6 +86,9 @@ type ReaderWorkspaceSwitchProps = {
   selectedAnnotation: ReaderAnnotation | null;
   sessionRestoreCount: number;
   settingsInitialSection: SettingsSection;
+  settingsOpen?: boolean;
+  settingsNavigationRequest?: number;
+  closeSettingsWorkspace?(): void;
   settingsSaving: boolean;
   sidebarOpen: boolean;
   rightPanelOpen: boolean;
@@ -189,6 +192,9 @@ export function ReaderWorkspaceSwitch({
   selectedAnnotation,
   sessionRestoreCount,
   settingsInitialSection,
+  settingsOpen = false,
+  settingsNavigationRequest = 0,
+  closeSettingsWorkspace,
   settingsSaving,
   sidebarOpen,
   rightPanelOpen,
@@ -246,19 +252,22 @@ export function ReaderWorkspaceSwitch({
   const research = useResearch();
   return (
     <>
-      {activeWorkspace === 'settings' ? (
-        <SettingsWorkspace
-          appVersion={appVersion}
-          cacheStats={cacheStats}
-          commandRegistry={commandRegistry}
-          preferences={readerPreferences}
-          openSessionCount={documents.sessions.length}
-          recentDocumentCount={recentDocuments.length}
-          initialSection={settingsInitialSection}
-          saving={settingsSaving}
-          onClose={closeToolWorkspace}
-          onSave={handleSavePreferences}
-        />
+      {settingsOpen || activeWorkspace === 'settings' ? (
+        <div className="settings-tab-panel" hidden={activeWorkspace !== 'settings'}>
+          <SettingsWorkspace
+            appVersion={appVersion}
+            cacheStats={cacheStats}
+            commandRegistry={commandRegistry}
+            preferences={readerPreferences}
+            openSessionCount={documents.sessions.length}
+            recentDocumentCount={recentDocuments.length}
+            initialSection={settingsInitialSection}
+            navigationRequest={settingsNavigationRequest}
+            saving={settingsSaving}
+            onClose={closeSettingsWorkspace ?? closeToolWorkspace}
+            onSave={handleSavePreferences}
+          />
+        </div>
       ) : null}
       {activeWorkspace === 'import' ? (
         importContent ?? <ImportWorkspace

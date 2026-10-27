@@ -1,6 +1,6 @@
 import { RotateCcw, Save, Settings, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import type { CommandRegistry } from '../commands/commandRegistry';
+import { useEffect, useRef, useState } from 'react';
+import type { CommandId, CommandRegistry } from '../commands/commandRegistry';
 import type { ReaderPreferences } from '../preferences/preferencesModels';
 import { defaultReaderPreferences } from '../preferences/preferencesStore';
 import { CacheSettings } from './CacheSettings';
@@ -24,6 +24,7 @@ type SettingsWorkspaceProps = {
   appVersion?: HomeAppVersion;
   cacheStats?: CacheStats;
   initialSection?: SettingsSection;
+  navigationRequest?: number;
   saving?: boolean;
   onClose(): void;
   onSave(preferences: ReaderPreferences): void | Promise<void>;
@@ -38,6 +39,21 @@ const sections: Array<{ id: SettingsSection; label: string }> = [
   { id: 'restore', label: '会话恢复' },
 ];
 
+type PreferenceField = Exclude<keyof ReaderPreferences, 'shortcuts'>;
+
+function preferenceFields(preferences: ReaderPreferences): PreferenceField[] {
+  return (Object.keys(preferences) as Array<keyof ReaderPreferences>).filter((key): key is PreferenceField => key !== 'shortcuts');
+}
+
+function rebaseDraft(draft: ReaderPreferences, preferences: ReaderPreferences, edits: Map<string, number>): ReaderPreferences {
+  const preserved = Object.fromEntries(preferenceFields(draft).filter((key) => edits.has(key)).map((key) => [key, draft[key]]));
+  const shortcuts = { ...preferences.shortcuts };
+  for (const key of Object.keys(draft.shortcuts) as CommandId[]) {
+    if (edits.has(`shortcut:${key}`)) shortcuts[key] = draft.shortcuts[key];
+  }
+  return { ...preferences, ...preserved, shortcuts };
+}
+
 export function SettingsWorkspace({
   commandRegistry,
   preferences,
@@ -46,6 +62,7 @@ export function SettingsWorkspace({
   appVersion = { version: '0.1.0', build: null },
   cacheStats,
   initialSection = 'shortcuts',
+  navigationRequest = 0,
   saving,
   onClose,
   onSave,
@@ -55,34 +72,57 @@ export function SettingsWorkspace({
   const [draftPreferences, setDraftPreferences] = useState(preferences);
   const [dirty, setDirty] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const draftRef = useRef(preferences);
+  const editVersions = useRef(new Map<string, number>());
+  const editVersion = useRef(0);
+  const savingRef = useRef(false);
 
   useEffect(() => {
     setActiveSection(initialSection);
-  }, [initialSection]);
+  }, [initialSection, navigationRequest]);
 
   useEffect(() => {
-    if (!dirty) {
-      setDraftPreferences(preferences);
-    }
+    const next = rebaseDraft(draftRef.current, preferences, editVersions.current);
+    draftRef.current = next;
+    setDraftPreferences(next);
   }, [dirty, preferences]);
 
   const updateDraftPreferences = (nextPreferences: ReaderPreferences) => {
+    const previous = draftRef.current;
+    const version = ++editVersion.current;
+    for (const key of preferenceFields(nextPreferences)) {
+      if (nextPreferences[key] !== previous[key]) editVersions.current.set(key, version);
+    }
+    for (const key of Object.keys(nextPreferences.shortcuts) as CommandId[]) {
+      if (nextPreferences.shortcuts[key] !== previous.shortcuts[key]) editVersions.current.set(`shortcut:${key}`, version);
+    }
     setSaveError(null);
-    setDirty(true);
+    setDirty(editVersions.current.size > 0);
+    draftRef.current = nextPreferences;
     setDraftPreferences(nextPreferences);
   };
 
   const handleSave = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    const submitted = draftRef.current;
+    const submittedVersions = new Map(editVersions.current);
     setSaveError(null);
     try {
-      await onSave(draftPreferences);
-      setDirty(false);
+      await onSave(submitted);
+      for (const [key, version] of submittedVersions) {
+        if (editVersions.current.get(key) === version) editVersions.current.delete(key);
+      }
+      setDirty(editVersions.current.size > 0);
     } catch (error) {
       setSaveError(error instanceof Error ? `设置保存失败：${error.message}` : '设置保存失败，请重试。');
+    } finally {
+      savingRef.current = false;
     }
   };
 
   const handleClose = () => {
+    editVersions.current.clear();
     setDirty(false);
     onClose();
   };

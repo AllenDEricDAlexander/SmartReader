@@ -1,20 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { ChangeEventHandler, ComponentType } from 'react';
+import type { ComponentType } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { DocumentSession } from '../documents/documentModels';
 import { ReaderTabs } from './ReaderTabs';
 
-type ReaderTabsTestProps = {
-  sessions: DocumentSession[];
-  activeSessionId: string | null;
-  homeActive: boolean;
-  canOpenNativePdf(): boolean;
-  onOpenHome(): void;
-  onOpenPdf(): boolean | void | Promise<boolean | void>;
-  onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
-  onSelectSession(sessionId: string): void;
-  onCloseSession(sessionId: string): void;
-};
+type ReaderTabsTestProps = Parameters<typeof ReaderTabs>[0];
 
 const ReaderTabsUnderTest = ReaderTabs as unknown as ComponentType<ReaderTabsTestProps>;
 
@@ -63,6 +53,31 @@ function renderTabs(overrides: Partial<ReaderTabsTestProps> = {}) {
 }
 
 describe('ReaderTabs shared document navigation', () => {
+  it('marks only settings as active while preserving every open PDF tab', () => {
+    const onOpenSettings = vi.fn();
+    const onCloseSettings = vi.fn();
+    const view = renderTabs({ settingsOpen: true, settingsActive: true, onOpenSettings, onCloseSettings });
+    expect(screen.getByRole('tab', { name: '设置' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'A.pdf' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByRole('tab', { name: 'B.pdf' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getAllByRole('tab', { selected: true })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('tab', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '关闭设置标签页' }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(onCloseSettings).toHaveBeenCalledOnce();
+    expect(view.props.onCloseSession).not.toHaveBeenCalled();
+    view.rerender(<ReaderTabsUnderTest {...view.props} settingsOpen={false} settingsActive={false} />);
+    expect(screen.getByRole('tab', { name: 'A.pdf' })).toHaveFocus();
+  });
+
+  it('keeps settings visible and focused when its last background PDF closes', () => {
+    const view = renderTabs({ sessions: [sessionA], settingsOpen: true, settingsActive: true });
+    fireEvent.click(screen.getByRole('button', { name: '关闭文档 A.pdf' }));
+    view.rerender(<ReaderTabsUnderTest {...view.props} sessions={[]} activeSessionId={null} />);
+    expect(screen.getByRole('tab', { name: '设置' })).toHaveFocus();
+    expect(screen.getByRole('tab', { name: '设置' })).toHaveAttribute('aria-selected', 'true');
+  });
+
   it('focuses home after a document closes and the workspace returns home with remaining tabs', () => {
     const { props, rerender } = renderTabs();
     fireEvent.click(screen.getByRole('button', { name: '关闭文档 A.pdf' }));

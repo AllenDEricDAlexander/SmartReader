@@ -141,6 +141,8 @@ export function ReaderApp({
   const [homeSidebarPage, setHomeSidebarPage] = useState<HomeSidebarPage>('home');
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<SettingsSection>('shortcuts');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsNavigationRequest, setSettingsNavigationRequest] = useState(0);
   const [readerPreferences, setReaderPreferences] = useState(defaultReaderPreferences);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [preferencesLoadSucceeded, setPreferencesLoadSucceeded] = useState(false);
@@ -809,9 +811,13 @@ export function ReaderApp({
     }
   }, [activeWorkspace]);
 
-  const openSettingsWorkspace = useCallback((initialSection: SettingsSection = 'shortcuts') => {
+  const openSettingsWorkspace = useCallback((initialSection?: SettingsSection) => {
     recordToolReturnTarget();
-    setSettingsInitialSection(initialSection);
+    if (initialSection) {
+      setSettingsInitialSection(initialSection);
+      setSettingsNavigationRequest((request) => request + 1);
+    }
+    setSettingsOpen(true);
     setWorkspaceOverride('settings');
   }, [recordToolReturnTarget]);
 
@@ -828,14 +834,20 @@ export function ReaderApp({
     if (activeWorkspace === 'home' || activeWorkspace === 'reader') openHomeWorkspace();
   }, [activeWorkspace, closeReaderSession, documents.sessions, openHomeWorkspace]);
 
-  const closeActiveTab = useCallback(() => {
-    if (activeSession) handleCloseReaderSession(activeSession.id);
-  }, [activeSession, handleCloseReaderSession]);
-
   const closeToolWorkspace = useCallback(() => {
     setWorkspaceOverride(workspaceReturnTarget === 'home' ? 'home' : null);
     setWorkspaceReturnTarget(null);
   }, [workspaceReturnTarget]);
+
+  const closeSettingsWorkspace = useCallback(() => {
+    setSettingsOpen(false);
+    if (activeWorkspace === 'settings') closeToolWorkspace();
+  }, [activeWorkspace, closeToolWorkspace]);
+
+  const closeActiveTab = useCallback(() => {
+    if (activeWorkspace === 'settings') closeSettingsWorkspace();
+    else if (activeSession) handleCloseReaderSession(activeSession.id);
+  }, [activeSession, activeWorkspace, closeSettingsWorkspace, handleCloseReaderSession]);
 
   const openShortcutWorkspace = useCallback(
     (workspace: Extract<AppWorkspace, 'import' | 'compare' | 'annotations' | 'bookmarks'>) => {
@@ -872,6 +884,21 @@ export function ReaderApp({
     void openPdf().catch(() => undefined);
   }, [openPdf]);
 
+  const selectAdjacentTab = useCallback((direction: number) => {
+    if (!settingsOpen) {
+      if (direction > 0) selectNextReaderSession();
+      else selectPreviousReaderSession();
+      return;
+    }
+    const sessions = displayDocuments.sessions;
+    const currentIndex = activeWorkspace === 'settings' ? sessions.length
+      : Math.max(0, sessions.findIndex((session) => session.id === activeSession?.id));
+    const nextIndex = (currentIndex + direction + sessions.length + 1) % (sessions.length + 1);
+    if (nextIndex === sessions.length) openSettingsWorkspace();
+    else openReaderSession(sessions[nextIndex].id);
+  }, [activeSession?.id, activeWorkspace, displayDocuments.sessions, openReaderSession, openSettingsWorkspace,
+    selectNextReaderSession, selectPreviousReaderSession, settingsOpen]);
+
   const { commandRegistry } = useReaderCommands({
     activeSession,
     activeViewerController,
@@ -881,13 +908,13 @@ export function ReaderApp({
     focusSearchInput,
     openGlobalSearch,
     openPdf: openPdfAndIgnoreResult,
-    selectNextSession: selectNextReaderSession,
-    selectPreviousSession: selectPreviousReaderSession,
+    selectNextSession: () => selectAdjacentTab(1),
+    selectPreviousSession: () => selectAdjacentTab(-1),
     setPreferencesOpen: (open) => {
       if (open) {
         openSettingsWorkspace();
       } else {
-        closeToolWorkspace();
+        closeSettingsWorkspace();
       }
     },
     setSidebarOpen,
@@ -1477,11 +1504,15 @@ export function ReaderApp({
         <span>{appError ?? libraryView.error ?? themeError}</span>
         <button type="button" aria-label="关闭提示" onClick={() => { setAppError(null); setThemeError(null); }}>关闭</button>
       </div> : null}
-      {activeWorkspace === 'home' || activeWorkspace === 'reader' ? (
+      {activeWorkspace === 'home' || activeWorkspace === 'reader' || activeWorkspace === 'settings' ? (
         <ReaderTabs
           sessions={displayDocuments.sessions}
           activeSessionId={displayDocuments.activeSessionId}
           homeActive={activeWorkspace === 'home'}
+          settingsOpen={settingsOpen}
+          settingsActive={activeWorkspace === 'settings'}
+          onOpenSettings={() => openSettingsWorkspace()}
+          onCloseSettings={closeSettingsWorkspace}
           canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
           onOpenHome={openHomeWorkspace}
           onOpenPdf={openPdf}
@@ -1537,6 +1568,9 @@ export function ReaderApp({
         selectedAnnotation={selectedAnnotation}
         sessionRestoreCount={sessionRestoreCount}
         settingsInitialSection={settingsInitialSection}
+        settingsOpen={settingsOpen}
+        settingsNavigationRequest={settingsNavigationRequest}
+        closeSettingsWorkspace={closeSettingsWorkspace}
         settingsSaving={settingsSaving}
         sidebarOpen={sidebarOpen}
         rightPanelOpen={rightPanelOpen}
