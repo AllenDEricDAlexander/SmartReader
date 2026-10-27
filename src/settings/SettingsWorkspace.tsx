@@ -9,15 +9,18 @@ import { SessionRestoreSettings } from './SessionRestoreSettings';
 import { ShortcutSettings } from './ShortcutSettings';
 import { AiSettings } from './AiSettings';
 import { AppearanceSettings } from './AppearanceSettings';
+import { AboutSettings } from './AboutSettings';
+import type { HomeAppVersion } from '../home/homeTypes';
 import { useResearch } from '../app/ResearchContext';
 
-export type SettingsSection = 'appearance' | 'shortcuts' | 'cache' | 'desktop' | 'restore' | 'ai';
+export type SettingsSection = 'appearance' | 'shortcuts' | 'cache' | 'desktop' | 'restore' | 'ai' | 'about';
 
 type SettingsWorkspaceProps = {
   commandRegistry: CommandRegistry;
   preferences: ReaderPreferences;
   openSessionCount: number;
   recentDocumentCount: number;
+  appVersion?: HomeAppVersion;
   initialSection?: SettingsSection;
   saving?: boolean;
   onClose(): void;
@@ -30,6 +33,7 @@ const sections: Array<{ id: SettingsSection; label: string }> = [
   { id: 'cache', label: '缓存' },
   { id: 'desktop', label: '桌面集成' },
   { id: 'restore', label: '会话恢复' },
+  { id: 'about', label: '关于' },
 ];
 
 export function SettingsWorkspace({
@@ -37,6 +41,7 @@ export function SettingsWorkspace({
   preferences,
   openSessionCount,
   recentDocumentCount,
+  appVersion = { version: '0.1.0', build: null },
   initialSection = 'shortcuts',
   saving,
   onClose,
@@ -137,6 +142,7 @@ export function SettingsWorkspace({
           </div>
         </header>
         <div className="settings-content">
+          {activeSection === 'about' ? <AboutSettings appVersion={appVersion} /> : null}
           {saveError ? <p className="settings-error" role="alert">{saveError}</p> : null}
           {activeSection === 'appearance' ? (
             <AppearanceSettings

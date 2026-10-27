@@ -891,6 +891,56 @@ button:disabled,
   color: var(--sr-primary);
 }
 
+.view-controls {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.view-controls-panel {
+  position: absolute;
+  z-index: 40;
+  right: 0;
+  bottom: calc(100% + 8px);
+  display: grid;
+  gap: 12px;
+  width: min(280px, calc(100vw - 32px));
+  max-height: min(380px, 70vh);
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid var(--sr-border);
+  border-radius: var(--sr-radius);
+  background: var(--sr-surface);
+  color: var(--sr-text);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+  white-space: normal;
+}
+
+.view-controls-zoom,
+.view-controls-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.view-controls-actions button {
+  flex: 1;
+}
+
+.update-check {
+  display: grid;
+  gap: 8px;
+}
+
+.update-check p {
+  margin: 0;
+  color: var(--sr-text-muted);
+  line-height: 1.5;
+}
+
 .home-task-status svg {
   color: var(--sr-text-muted);
 }
@@ -950,6 +1000,7 @@ button:disabled,
 }
 
 .assist-card-heading h2 {
+  flex: 1;
   margin: 0;
   font-size: 16px;
   line-height: 1.25;
@@ -1929,7 +1980,7 @@ button:disabled,
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: 44px minmax(0, 1fr) 30px;
+  grid-template-rows: 44px minmax(0, 1fr) auto;
 }
 
 .reader-tabs {
@@ -2999,8 +3050,17 @@ select {
   background: var(--sr-surface);
   color: var(--sr-text-muted);
   font-size: 12px;
-  overflow: hidden;
+  min-height: 32px;
   white-space: nowrap;
+}
+
+.reader-status-details {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  overflow: hidden;
 }
 
 .shortcut-hint {
@@ -3764,7 +3824,7 @@ select {
   }
 
   .reader-workspace {
-    grid-template-rows: 80px minmax(0, 1fr) 30px;
+    grid-template-rows: 80px minmax(0, 1fr) auto;
   }
 
   .reader-toolbar {

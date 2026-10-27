@@ -167,6 +167,9 @@ describe('persistenceApi', () => {
     const preferences = {
       theme: 'eye-care' as const,
       homeWelcomeEnabled: false,
+      homeQuickTipsEnabled: false,
+      homeDesktopIntegrationEnabled: false,
+      homeZoom: 1.5,
       homeRecentViewMode: 'cards' as const,
       sessionRestoreEnabled: true,
       restoreScope: 'all' as const,

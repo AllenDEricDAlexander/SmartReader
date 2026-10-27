@@ -116,8 +116,9 @@ export function ReaderApp({
   const [documents, setDocuments] = useState(createEmptyDocumentState);
   const [viewerSource, setViewerSource] = useState<ViewerSource | null>(null);
   const [viewerReadyIdentity, setViewerReadyIdentity] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [defaultSidebarOpen, setDefaultSidebarOpen] = useState(true);
+  const [sidebarOpenByDocument, setSidebarOpenByDocument] = useState<Record<string, boolean>>({});
+  const [rightPanelOpenByDocument, setRightPanelOpenByDocument] = useState<Record<string, boolean>>({});
   const [searchText, setSearchText] = useState('');
   const [lastSearchCommand, setLastSearchCommand] = useState('');
   const [searchState, setSearchState] = useState<ViewerSearchState>(emptySearchState);
@@ -210,6 +211,28 @@ export function ReaderApp({
     return { ...documents, sessions, activeSessionId: sessions.some((session) => session.id === documents.activeSessionId) ? documents.activeSessionId : null };
   }, [documents, research, visibleLibraryIds]);
   const activeSession = displayDocuments.sessions.find((session) => session.id === displayDocuments.activeSessionId) ?? null;
+  const activeDocumentKey = activeSession?.documentKey;
+  const sidebarOpen = activeDocumentKey ? sidebarOpenByDocument[activeDocumentKey] ?? defaultSidebarOpen : defaultSidebarOpen;
+  const rightPanelOpen = activeDocumentKey ? rightPanelOpenByDocument[activeDocumentKey] ?? true : true;
+  const setSidebarOpen = useCallback((update: SetStateAction<boolean>) => {
+    if (!activeDocumentKey) {
+      setDefaultSidebarOpen(update);
+      return;
+    }
+    setSidebarOpenByDocument((current) => ({
+      ...current,
+      [activeDocumentKey]: typeof update === 'function'
+        ? update(current[activeDocumentKey] ?? defaultSidebarOpen) : update,
+    }));
+  }, [activeDocumentKey, defaultSidebarOpen]);
+  const setRightPanelOpen = useCallback((update: SetStateAction<boolean>) => {
+    if (!activeDocumentKey) return;
+    setRightPanelOpenByDocument((current) => ({
+      ...current,
+      [activeDocumentKey]: typeof update === 'function'
+        ? update(current[activeDocumentKey] ?? true) : update,
+    }));
+  }, [activeDocumentKey]);
   const activeWorkspace: AppWorkspace =
     workspaceOverride ?? (activeSession ? 'reader' : 'home');
   useReadingTime({ library: research?.library, session: activeSession, active: activeWorkspace === 'reader',
@@ -266,7 +289,7 @@ export function ReaderApp({
     preferencesLoaded,
     setDocuments,
     setRecentDocuments: mergeRestoredRecentDocuments,
-    setSidebarOpen,
+    setSidebarOpen: setDefaultSidebarOpen,
     setViewerSource,
   });
 

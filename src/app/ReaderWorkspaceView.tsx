@@ -136,10 +136,6 @@ export function ReaderWorkspaceView({
           onJumpToPage={() => jumpToPage(Number(pageInput))}
           onPagePrevious={() => goToAdjacentPage(-1)}
           onPageNext={() => goToAdjacentPage(1)}
-          onFitWidth={() => activeViewerController.fitWidth()}
-          onFitPage={() => activeViewerController.fitPage()}
-          onZoomIn={() => activeViewerController.zoomIn()}
-          onZoomOut={() => activeViewerController.zoomOut()}
           onToggleSidebar={() => setSidebarOpen((open) => !open)}
           onToggleRightPanel={() => setRightPanelOpen((open) => !open)}
           onHistoryBack={stepHistoryBack}
@@ -204,7 +200,7 @@ export function ReaderWorkspaceView({
           onToggleAnnotationTag={handleToggleAnnotationTag}
         />
       }
-      statusBar={<ReaderStatusBar activeSession={activeSession} />}
+      statusBar={<ReaderStatusBar activeSession={activeSession} controller={activeViewerController} />}
     />
   );
 }

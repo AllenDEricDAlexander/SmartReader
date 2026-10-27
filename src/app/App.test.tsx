@@ -186,7 +186,7 @@ describe('App', () => {
     expect(screen.getByLabelText('SmartReader workbench')).toBeInTheDocument();
   });
 
-  it('shows the home dashboard with primary open actions', () => {
+  it('shows the home dashboard with primary open actions', async () => {
     renderApp(
       <App
         bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
@@ -199,7 +199,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /打开本地 PDF/ })).toBeInTheDocument();
     expect(screen.getByText('拖拽到这里')).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: '辅助信息' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '快速上手' })).toBeInTheDocument();
     expect(screen.queryByText('AI 助手')).not.toBeInTheDocument();
   });
 
@@ -2556,7 +2556,7 @@ describe('App', () => {
     });
   });
 
-  it('remembers the home reading view and dismissed welcome banner across navigation and reopening', async () => {
+  it('remembers the home reading view, zoom and dismissed cards across navigation and reopening', async () => {
     const initialPreferences: ReaderPreferences = {
       ...defaultReaderPreferences, theme: 'eye-care', restoreScope: 'active',
     };
@@ -2578,24 +2578,41 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '卡片视图' })).toHaveAttribute('aria-pressed', 'true'));
     fireEvent.click(screen.getByRole('button', { name: '关闭欢迎语' }));
     await waitFor(() => expect(screen.queryByRole('region', { name: '欢迎使用 SmartReader' })).not.toBeInTheDocument());
-    expect(savedPreferences).toEqual({ ...initialPreferences, homeRecentViewMode: 'cards', homeWelcomeEnabled: false });
+    fireEvent.click(screen.getByRole('button', { name: '关闭快速上手' }));
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '快速上手' })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '关闭桌面集成' }));
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '桌面集成' })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '打开首页视图控制' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    await waitFor(() => expect(savedPreferences.homeZoom).toBe(1.35));
+    expect(document.querySelector('.home-main')).toHaveStyle({ zoom: '1.35' });
+    expect(savedPreferences).toEqual({ ...initialPreferences, homeRecentViewMode: 'cards', homeWelcomeEnabled: false,
+      homeQuickTipsEnabled: false, homeDesktopIntegrationEnabled: false, homeZoom: 1.35 });
 
     fireEvent.click(screen.getByRole('button', { name: '最近文件 0' }));
     fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));
     expect(screen.getByRole('button', { name: '卡片视图' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByRole('region', { name: '欢迎使用 SmartReader' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '快速上手' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '桌面集成' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开首页视图控制，当前缩放 135%' })).toBeInTheDocument();
     mounted.unmount();
 
     renderApp(<App {...props} />);
     await waitFor(() => expect(screen.getByRole('button', { name: '卡片视图' })).toHaveAttribute('aria-pressed', 'true'));
     expect(screen.queryByRole('region', { name: '欢迎使用 SmartReader' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '快速上手' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '桌面集成' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开首页视图控制，当前缩放 135%' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '列表视图' }));
     await waitFor(() => expect(savedPreferences.homeRecentViewMode).toBe('list'));
-    expect(savedPreferences).toEqual({ ...initialPreferences, homeWelcomeEnabled: false });
+    expect(savedPreferences).toEqual({ ...initialPreferences, homeWelcomeEnabled: false,
+      homeQuickTipsEnabled: false, homeDesktopIntegrationEnabled: false, homeZoom: 1.35 });
   });
 
-  it('restores the welcome banner through appearance settings and leaves cancelled edits unapplied', async () => {
-    let savedPreferences = { ...defaultReaderPreferences, homeWelcomeEnabled: false };
+  it('restores the dismissed home cards through appearance settings and leaves cancelled edits unapplied', async () => {
+    let savedPreferences = { ...defaultReaderPreferences, homeWelcomeEnabled: false,
+      homeQuickTipsEnabled: false, homeDesktopIntegrationEnabled: false };
     const persistence = {
       ...createEmptyPersistence(),
       loadPreferences: vi.fn(async () => savedPreferences),
@@ -2608,21 +2625,109 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '外观' }));
     expect(screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ })).not.toBeChecked();
     fireEvent.click(screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /首页显示快速上手/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /首页显示桌面集成/ }));
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
     expect(screen.queryByRole('region', { name: '欢迎使用 SmartReader' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '快速上手' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '桌面集成' })).not.toBeInTheDocument();
     expect(persistence.savePreferences).not.toHaveBeenCalled();
 
     fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
     fireEvent.click(screen.getByRole('button', { name: '外观' }));
     expect(screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ })).not.toBeChecked();
     fireEvent.click(screen.getByRole('checkbox', { name: /进入首页时显示欢迎语/ }));
+    expect(screen.getByRole('checkbox', { name: /首页显示快速上手/ })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /首页显示桌面集成/ })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: /首页显示快速上手/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /首页显示桌面集成/ }));
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
     await waitFor(() => expect(savedPreferences.homeWelcomeEnabled).toBe(true));
     fireEvent.click(screen.getByRole('button', { name: '关闭设置' }));
     expect(screen.getByRole('region', { name: '欢迎使用 SmartReader' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '桌面集成' })).toBeInTheDocument();
   });
 
-  it.each(['关闭欢迎语', '卡片视图'])(
+  it('isolates home zoom and each document view when switching between home and reader tabs', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValueOnce('blob:view-one').mockReturnValueOnce('blob:view-two');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    let applyZoom = (_scale: number) => undefined as void;
+    function ViewTestRenderer({ onZoomChange, onPageChange }: Parameters<PdfRenderer>[0]) {
+      useEffect(() => {
+        applyZoom = onZoomChange;
+        onPageChange(1, 10);
+      }, [onPageChange, onZoomChange]);
+      return <div>View test PDF</div>;
+    }
+    const controller = {
+      jumpToPage: vi.fn(), openSearch: vi.fn(), search: vi.fn(), searchNext: vi.fn(),
+      searchPrevious: vi.fn(), jumpToMatch: vi.fn(),
+      zoomIn: vi.fn(() => applyZoom(1.8)), zoomOut: vi.fn(() => applyZoom(0.8)),
+      fitWidth: vi.fn(() => applyZoom(1.2)), fitPage: vi.fn(() => applyZoom(0.7)),
+    };
+    const persistence = createEmptyPersistence();
+    renderApp(<App
+      bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }}
+      persistence={persistence}
+      viewerController={controller}
+      viewerRenderer={(props) => <ViewTestRenderer {...props} />}
+    />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '卡片视图' })).toBeEnabled());
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [new File(['%PDF-1.7'], 'view-one.pdf', { type: 'application/pdf' })] },
+    });
+    await screen.findByText('View test PDF');
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle sidebar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle right sidebar' }));
+    const firstStatus = within(screen.getByLabelText('阅读状态'));
+    fireEvent.click(firstStatus.getByRole('button', { name: '打开阅读视图控制' }));
+    fireEvent.click(firstStatus.getByRole('button', { name: 'Zoom in' }));
+    expect(firstStatus.getByRole('button', { name: '打开阅读视图控制，当前缩放 180%' })).toBeInTheDocument();
+    expect(within(screen.getByLabelText('阅读工具栏')).queryByRole('button', { name: 'Zoom in' })).not.toBeInTheDocument();
+
+    fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));
+    expect(screen.getByRole('button', { name: '打开首页视图控制，当前缩放 125%' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '阅读视图控制' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '打开首页视图控制' }));
+    fireEvent.click(screen.getByRole('button', { name: '重置为 100%' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '打开首页视图控制，当前缩放 100%' })).toBeInTheDocument());
+    expect(controller.zoomIn).toHaveBeenCalledOnce();
+    expect(controller.zoomOut).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('选择 PDF 文件'), {
+      target: { files: [new File(['%PDF-1.7'], 'view-two.pdf', { type: 'application/pdf' })] },
+    });
+    await screen.findByText('View test PDF');
+    expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
+    expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 100%' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '首页视图控制' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '打开阅读视图控制' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: '阅读视图控制' })).getByRole('button', { name: 'Fit width' }));
+    expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 120%' })).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('dialog', { name: '阅读视图控制' })).getByRole('button', { name: 'Fit page' }));
+    expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 70%' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'view-one.pdf' }));
+    expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 180%' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('阅读侧栏')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('阅读检查器')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '阅读视图控制' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '打开阅读视图控制' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
+    expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 80%' })).toBeInTheDocument();
+
+    fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));
+    expect(screen.getByRole('button', { name: '打开首页视图控制，当前缩放 100%' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'view-two.pdf' }));
+    expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 70%' })).toBeInTheDocument();
+    expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
+    expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
+  });
+
+  it.each(['关闭欢迎语', '关闭快速上手', '关闭桌面集成', '卡片视图'])(
     'retains home preferences when saving %s fails and permits retry',
     async (action) => {
       const persistence = {
@@ -2635,6 +2740,8 @@ describe('App', () => {
 
       expect(await screen.findByRole('dialog', { name: '设置保存失败' })).toBeInTheDocument();
       expect(screen.getByRole('region', { name: '欢迎使用 SmartReader' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: '快速上手' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: '桌面集成' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: '列表视图' })).toHaveAttribute('aria-pressed', 'true');
       fireEvent.click(screen.getByRole('button', { name: '关闭' }));
       fireEvent.click(screen.getByRole('button', { name: action }));
@@ -2642,6 +2749,8 @@ describe('App', () => {
       await waitFor(() => {
         if (action === '关闭欢迎语') {
           expect(screen.queryByRole('region', { name: '欢迎使用 SmartReader' })).not.toBeInTheDocument();
+        } else if (action === '关闭快速上手' || action === '关闭桌面集成') {
+          expect(screen.queryByRole('heading', { name: action.slice(2) })).not.toBeInTheDocument();
         } else {
           expect(screen.getByRole('button', { name: '卡片视图' })).toHaveAttribute('aria-pressed', 'true');
         }

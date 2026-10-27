@@ -4,10 +4,13 @@ import {
   Highlighter,
   Keyboard,
   Search,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 
 type HomeQuickTipsCardProps = {
+  disabled?: boolean;
+  onClose(): void;
   onOpenGlobalSearch(): void;
   onOpenBookmarks(): void;
   onOpenAnnotations(): void;
@@ -23,6 +26,8 @@ type QuickTip = {
 };
 
 export function HomeQuickTipsCard({
+  disabled,
+  onClose,
   onOpenGlobalSearch,
   onOpenBookmarks,
   onOpenAnnotations,
@@ -66,6 +71,16 @@ export function HomeQuickTipsCard({
         <button type="button" className="assist-link-button" onClick={onOpenShortcutSettings}>
           <span>更多技巧</span>
           <ChevronRight size={14} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="关闭快速上手"
+          title="关闭快速上手，可在设置的外观中重新开启"
+          disabled={disabled}
+          onClick={onClose}
+        >
+          <X size={16} />
         </button>
       </div>
       <div className="quick-tip-list">

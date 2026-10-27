@@ -51,10 +51,6 @@ function renderToolbar(searchState: ViewerSearchState) {
       onJumpToPage={vi.fn()}
       onPagePrevious={vi.fn()}
       onPageNext={vi.fn()}
-      onFitWidth={vi.fn()}
-      onFitPage={vi.fn()}
-      onZoomIn={vi.fn()}
-      onZoomOut={vi.fn()}
       onToggleSidebar={vi.fn()}
       onToggleRightPanel={vi.fn()}
       onHistoryBack={vi.fn()}
@@ -80,8 +76,8 @@ describe('ReaderToolbar search state', () => {
     expect(screen.getByRole('button', { name: 'Toggle right sidebar' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Previous page' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Next page' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Zoom in' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Zoom out' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Zoom in' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Zoom out' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add bookmark' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '新建批注' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '收藏当前文档' })).toBeInTheDocument();

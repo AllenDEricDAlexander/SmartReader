@@ -8,6 +8,9 @@ export type HomeRecentViewMode = 'list' | 'cards';
 export type ReaderPreferences = {
   theme: ReaderTheme;
   homeWelcomeEnabled: boolean;
+  homeQuickTipsEnabled: boolean;
+  homeDesktopIntegrationEnabled: boolean;
+  homeZoom: number;
   homeRecentViewMode: HomeRecentViewMode;
   sessionRestoreEnabled: boolean;
   restoreScope: SessionRestoreScope;

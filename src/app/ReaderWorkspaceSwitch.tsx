@@ -246,6 +246,7 @@ export function ReaderWorkspaceSwitch({
     <>
       {activeWorkspace === 'settings' ? (
         <SettingsWorkspace
+          appVersion={appVersion}
           commandRegistry={commandRegistry}
           preferences={readerPreferences}
           openSessionCount={documents.sessions.length}
@@ -328,6 +329,7 @@ export function ReaderWorkspaceSwitch({
       ) : null}
       {activeWorkspace === 'reader' && activeSession ? (
         <ReaderWorkspaceView
+          key={activeSession.id}
           themeSwitcher={themeSwitcher}
           activeAnnotations={activeAnnotations}
           activeBookmarks={activeBookmarks}

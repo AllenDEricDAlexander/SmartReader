@@ -438,13 +438,14 @@ describe('HomeDashboard', () => {
     expect(within(statusBar).getByText('无任务运行中')).toBeInTheDocument();
   });
 
-  it('shows a deferred notice when opening status bar view controls', () => {
+  it('opens zoom controls from the home status bar', () => {
     renderDashboard({ activeSidebarPage: 'home' });
 
     fireEvent.click(screen.getByRole('button', { name: '打开首页视图控制，当前缩放 125%' }));
 
-    expect(screen.getByRole('dialog', { name: '首页视图控制待接入' })).toBeInTheDocument();
-    expect(screen.getByText('当前版本暂未接入首页视图控制。')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '首页视图控制' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Zoom in' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '检查更新' })).toBeInTheDocument();
   });
 
   it('does not render the home assist rail for blank sidebar pages', () => {
@@ -494,9 +495,9 @@ describe('HomeDashboard', () => {
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开首页视图控制' }));
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
-    expect(screen.getByRole('dialog', { name: '检查更新能力待接入' })).toBeInTheDocument();
-    expect(screen.getByText('当前版本暂未接入自动检查更新。')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('当前版本暂未接入自动检查更新。');
   });
 
   it('renders the recent files workspace for the recent files sidebar page', () => {

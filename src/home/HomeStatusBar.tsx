@@ -1,10 +1,14 @@
-import { CheckCircle2, ChevronDown, Info, ZoomIn } from 'lucide-react';
+import { CheckCircle2, Info } from 'lucide-react';
+import { CheckUpdatesButton } from '../settings/CheckUpdatesButton';
+import { ViewControls } from '../viewer/ViewControls';
 import type { HomeTaskStatus } from './homeTypes';
 
 type HomeStatusBarProps = {
-  viewScale?: string;
+  scale: number;
+  disabled?: boolean;
   taskStatus?: HomeTaskStatus;
-  onOpenViewControls?(): void;
+  onScaleChange(scale: number): void;
+  onCheckUpdates?(): void | Promise<void>;
 };
 
 const taskStatusLabels: Record<HomeTaskStatus, string> = {
@@ -16,9 +20,11 @@ const taskStatusLabels: Record<HomeTaskStatus, string> = {
 };
 
 export function HomeStatusBar({
-  viewScale = '125%',
+  scale,
+  disabled,
   taskStatus = 'idle',
-  onOpenViewControls,
+  onScaleChange,
+  onCheckUpdates,
 }: HomeStatusBarProps) {
   return (
     <footer className="home-status-bar" aria-label="首页状态栏">
@@ -30,27 +36,22 @@ export function HomeStatusBar({
         <Info size={14} aria-hidden="true" />
       </div>
       <div className="home-status-right">
-        <button
-          type="button"
-          className="home-view-scale"
-          aria-label={`打开首页视图控制，当前缩放 ${viewScale}`}
-          onClick={onOpenViewControls}
-        >
-          <span>{viewScale}</span>
-          <ChevronDown size={14} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="home-status-icon-button"
-          aria-label="打开首页视图控制"
-          onClick={onOpenViewControls}
-        >
-          <ZoomIn size={15} />
-        </button>
         <span className={taskStatus === 'error' ? 'home-task-status error' : 'home-task-status'}>
           <CheckCircle2 size={15} aria-hidden="true" />
           <span>{taskStatusLabels[taskStatus]}</span>
         </span>
+        <ViewControls
+          label="首页"
+          scale={scale}
+          disabled={disabled}
+          canZoomIn={scale < 2}
+          canZoomOut={scale > 0.5}
+          onZoomIn={() => onScaleChange(Math.min(2, Math.round((scale + 0.1) * 100) / 100))}
+          onZoomOut={() => onScaleChange(Math.max(0.5, Math.round((scale - 0.1) * 100) / 100))}
+          onReset={() => onScaleChange(1)}
+        >
+          <CheckUpdatesButton onCheckUpdates={onCheckUpdates} />
+        </ViewControls>
       </div>
     </footer>
   );

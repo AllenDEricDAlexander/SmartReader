@@ -1,6 +1,8 @@
-import { FileCheck2, FolderCog, HardDrive, type LucideIcon } from 'lucide-react';
+import { FileCheck2, FolderCog, HardDrive, X, type LucideIcon } from 'lucide-react';
 
 type HomeDesktopIntegrationCardProps = {
+  disabled?: boolean;
+  onClose(): void;
   onSetupFileAssociation(): void;
   onOpenCacheManagement(): void;
 };
@@ -14,6 +16,8 @@ type DesktopIntegrationItem = {
 };
 
 export function HomeDesktopIntegrationCard({
+  disabled,
+  onClose,
   onSetupFileAssociation,
   onOpenCacheManagement,
 }: HomeDesktopIntegrationCardProps) {
@@ -43,6 +47,16 @@ export function HomeDesktopIntegrationCard({
     <section className="home-assist-card" aria-labelledby="desktop-integration-title">
       <div className="assist-card-heading">
         <h2 id="desktop-integration-title">桌面集成</h2>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="关闭桌面集成"
+          title="关闭桌面集成，可在设置的外观中重新开启"
+          disabled={disabled}
+          onClick={onClose}
+        >
+          <X size={16} />
+        </button>
       </div>
       <div className="desktop-integration-list">
         {integrationItems.map((item) => (

@@ -260,19 +260,6 @@ export function HomeDashboard({
     );
   }, [onSetupFileAssociation, showNotice]);
 
-  const handleCheckUpdates = useCallback(() => {
-    if (onCheckUpdates) {
-      void onCheckUpdates();
-      return;
-    }
-
-    showNotice('检查更新能力待接入', '当前版本暂未接入自动检查更新。');
-  }, [onCheckUpdates, showNotice]);
-
-  const handleOpenViewControls = useCallback(() => {
-    showNotice('首页视图控制待接入', '当前版本暂未接入首页视图控制。');
-  }, [showNotice]);
-
   const blockHomeDrop: DragEventHandler<HTMLElement> = useCallback((event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -323,13 +310,17 @@ export function HomeDashboard({
       </div>
       <HomeAssistPanel
         appVersion={appVersion}
+        quickTipsEnabled={preferencesReady && preferences.homeQuickTipsEnabled}
+        desktopIntegrationEnabled={preferencesReady && preferences.homeDesktopIntegrationEnabled}
+        disabled={homePreferencesDisabled}
+        onCloseQuickTips={() => void updateHomePreferences({ homeQuickTipsEnabled: false })}
+        onCloseDesktopIntegration={() => void updateHomePreferences({ homeDesktopIntegrationEnabled: false })}
         onOpenGlobalSearch={onOpenGlobalSearch}
         onOpenBookmarks={onOpenBookmarks}
         onOpenAnnotations={onOpenAnnotations}
         onOpenShortcutSettings={openShortcutSettings}
         onOpenCacheManagement={onOpenCacheManagement}
         onSetupFileAssociation={handleSetupFileAssociation}
-        onCheckUpdates={handleCheckUpdates}
       />
     </div>
   );
@@ -454,9 +445,15 @@ export function HomeDashboard({
           onOpenAi={onOpenAi}
           onOpenCacheManagement={onOpenCacheManagement}
         />
-        <div className="home-main">{mainContent}</div>
+        <div className="home-main" style={{ zoom: preferences.homeZoom }}>{mainContent}</div>
       </section>
-      <HomeStatusBar taskStatus={taskStatus} onOpenViewControls={handleOpenViewControls} />
+      <HomeStatusBar
+        scale={preferences.homeZoom}
+        disabled={homePreferencesDisabled}
+        taskStatus={taskStatus}
+        onScaleChange={(homeZoom) => void updateHomePreferences({ homeZoom })}
+        onCheckUpdates={onCheckUpdates}
+      />
       {notice ? (
         <HomeActionNotice
           key={notice.title}

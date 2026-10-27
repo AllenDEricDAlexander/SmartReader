@@ -15,7 +15,8 @@ function renderAssistPanel() {
     onOpenShortcutSettings: vi.fn(),
     onOpenCacheManagement: vi.fn(),
     onSetupFileAssociation: vi.fn(),
-    onCheckUpdates: vi.fn(),
+    onCloseQuickTips: vi.fn(),
+    onCloseDesktopIntegration: vi.fn(),
   };
 
   renderApp(<HomeAssistPanel {...props} />);
@@ -55,7 +56,7 @@ describe('HomeAssistPanel', () => {
     expect(within(assist).getByText('SmartReader')).toBeInTheDocument();
     expect(within(assist).getByText('版本 0.1.0')).toBeInTheDocument();
     expect(within(assist).getByText('本地优先 · 隐私安全 · 高效阅读')).toBeInTheDocument();
-    expect(within(assist).getByRole('button', { name: '检查更新' })).toBeInTheDocument();
+    expect(within(assist).queryByRole('button', { name: '检查更新' })).not.toBeInTheDocument();
   });
 
   it('formats build metadata when available', () => {
@@ -70,7 +71,8 @@ describe('HomeAssistPanel', () => {
       onOpenShortcutSettings: vi.fn(),
       onOpenCacheManagement: vi.fn(),
       onSetupFileAssociation: vi.fn(),
-      onCheckUpdates: vi.fn(),
+      onCloseQuickTips: vi.fn(),
+      onCloseDesktopIntegration: vi.fn(),
     };
 
     renderApp(<HomeAssistPanel {...props} />);
@@ -88,7 +90,8 @@ describe('HomeAssistPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /快捷键总览/ }));
     fireEvent.click(screen.getByRole('button', { name: '设置关联' }));
     fireEvent.click(screen.getByRole('button', { name: '管理缓存' }));
-    fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
+    fireEvent.click(screen.getByRole('button', { name: '关闭快速上手' }));
+    fireEvent.click(screen.getByRole('button', { name: '关闭桌面集成' }));
 
     expect(props.onOpenShortcutSettings).toHaveBeenCalledTimes(2);
     expect(props.onOpenGlobalSearch).toHaveBeenCalledTimes(1);
@@ -96,6 +99,7 @@ describe('HomeAssistPanel', () => {
     expect(props.onOpenAnnotations).toHaveBeenCalledTimes(1);
     expect(props.onSetupFileAssociation).toHaveBeenCalledTimes(1);
     expect(props.onOpenCacheManagement).toHaveBeenCalledTimes(1);
-    expect(props.onCheckUpdates).toHaveBeenCalledTimes(1);
+    expect(props.onCloseQuickTips).toHaveBeenCalledOnce();
+    expect(props.onCloseDesktopIntegration).toHaveBeenCalledOnce();
   });
 });

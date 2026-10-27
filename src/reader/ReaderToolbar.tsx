@@ -2,7 +2,6 @@ import {
   BookmarkPlus,
   ChevronLeft,
   ChevronRight,
-  Maximize2,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -10,8 +9,6 @@ import {
   Search,
   Star,
   StickyNote,
-  ZoomIn,
-  ZoomOut,
 } from 'lucide-react';
 import type { ReactNode, RefObject } from 'react';
 import type { DocumentSession } from '../documents/documentModels';
@@ -34,10 +31,6 @@ type ReaderToolbarProps = {
   onJumpToPage(): void;
   onPagePrevious(): void;
   onPageNext(): void;
-  onFitWidth(): void;
-  onFitPage(): void;
-  onZoomIn(): void;
-  onZoomOut(): void;
   onToggleSidebar(): void;
   onToggleRightPanel(): void;
   onHistoryBack(): void;
@@ -66,10 +59,6 @@ export function ReaderToolbar({
   onJumpToPage,
   onPagePrevious,
   onPageNext,
-  onFitWidth,
-  onFitPage,
-  onZoomIn,
-  onZoomOut,
   onToggleSidebar,
   onToggleRightPanel,
   onHistoryBack,
@@ -81,7 +70,6 @@ export function ReaderToolbar({
   onOpenPreferences,
 }: ReaderToolbarProps) {
   const totalPages = activeSession?.totalPages ?? null;
-  const zoomPercent = Math.round((activeSession?.zoom ?? 1) * 100);
   const hasMatches = searchState.matches.length > 0;
   // Only report counts once a search has actually run, so an empty result is
   // distinguishable from "no search yet".
@@ -227,27 +215,6 @@ export function ReaderToolbar({
           disabled={!activeSession}
         >
           <ChevronRight size={16} />
-        </button>
-      </div>
-
-      <div className="toolbar-divider" aria-hidden="true" />
-
-      <div className="toolbar-group">
-        <button type="button" className="toolbar-icon-button" onClick={onZoomOut} aria-label="Zoom out" title="缩小">
-          <ZoomOut size={16} />
-        </button>
-        <span className="toolbar-zoom-label" aria-live="polite">
-          {zoomPercent}%
-        </span>
-        <button type="button" className="toolbar-icon-button" onClick={onZoomIn} aria-label="Zoom in" title="放大">
-          <ZoomIn size={16} />
-        </button>
-        <button type="button" className="toolbar-text-button" onClick={onFitWidth} aria-label="Fit width" title="适合宽度">
-          适宽
-        </button>
-        <button type="button" className="toolbar-text-button" onClick={onFitPage} aria-label="Fit page" title="适合整页">
-          <Maximize2 size={14} />
-          整页
         </button>
       </div>
 

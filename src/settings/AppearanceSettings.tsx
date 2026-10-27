@@ -45,6 +45,32 @@ export function AppearanceSettings({ preferences, onChange }: AppearanceSettings
           <small>关闭首页欢迎语后，可在这里重新开启，保存设置后生效。</small>
         </span>
       </label>
+      <label className="settings-toggle">
+        <input
+          type="checkbox"
+          checked={preferences.homeQuickTipsEnabled}
+          onChange={(event) =>
+            onChange({ ...preferences, homeQuickTipsEnabled: event.target.checked })
+          }
+        />
+        <span>
+          <strong>首页显示快速上手</strong>
+          <small>关闭快速上手卡片后，可在这里重新开启，保存设置后生效。</small>
+        </span>
+      </label>
+      <label className="settings-toggle">
+        <input
+          type="checkbox"
+          checked={preferences.homeDesktopIntegrationEnabled}
+          onChange={(event) =>
+            onChange({ ...preferences, homeDesktopIntegrationEnabled: event.target.checked })
+          }
+        />
+        <span>
+          <strong>首页显示桌面集成</strong>
+          <small>关闭桌面集成卡片后，可在这里重新开启，保存设置后生效。</small>
+        </span>
+      </label>
     </section>
   );
 }

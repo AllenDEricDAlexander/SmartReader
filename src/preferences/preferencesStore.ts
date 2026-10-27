@@ -4,6 +4,9 @@ import type { PartialReaderPreferences, ReaderPreferences } from './preferencesM
 export const defaultReaderPreferences: ReaderPreferences = {
   theme: 'light',
   homeWelcomeEnabled: true,
+  homeQuickTipsEnabled: true,
+  homeDesktopIntegrationEnabled: true,
+  homeZoom: 1.25,
   homeRecentViewMode: 'list',
   sessionRestoreEnabled: true,
   restoreScope: 'all',
@@ -45,6 +48,16 @@ export function mergeReaderPreferences(
     homeWelcomeEnabled: typeof stored?.homeWelcomeEnabled === 'boolean'
       ? stored.homeWelcomeEnabled
       : defaultReaderPreferences.homeWelcomeEnabled,
+    homeQuickTipsEnabled: typeof stored?.homeQuickTipsEnabled === 'boolean'
+      ? stored.homeQuickTipsEnabled
+      : defaultReaderPreferences.homeQuickTipsEnabled,
+    homeDesktopIntegrationEnabled: typeof stored?.homeDesktopIntegrationEnabled === 'boolean'
+      ? stored.homeDesktopIntegrationEnabled
+      : defaultReaderPreferences.homeDesktopIntegrationEnabled,
+    homeZoom: typeof stored?.homeZoom === 'number' && Number.isFinite(stored.homeZoom)
+      && stored.homeZoom >= 0.5 && stored.homeZoom <= 2
+      ? stored.homeZoom
+      : defaultReaderPreferences.homeZoom,
     homeRecentViewMode: stored?.homeRecentViewMode === 'list' || stored?.homeRecentViewMode === 'cards'
       ? stored.homeRecentViewMode
       : defaultReaderPreferences.homeRecentViewMode,
