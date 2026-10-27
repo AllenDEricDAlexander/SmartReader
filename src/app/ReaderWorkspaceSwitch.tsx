@@ -104,6 +104,7 @@ type ReaderWorkspaceSwitchProps = {
   handleBrowserFileChange(event: ChangeEvent<HTMLInputElement>): void;
   handleImportBrowserFileChange(event: ChangeEvent<HTMLInputElement>): void;
   handleDrop(event: DragEvent<HTMLElement>): void | Promise<void>;
+  handleHomePathDrop?(paths: string[]): void | Promise<void>;
   handleSaveAnnotationNote(annotation: ReaderAnnotation, text: string): void | Promise<void>;
   handleSavePreferences(preferences: ReaderPreferences): Promise<void>;
   handleToggleActiveFavorite(): void;
@@ -204,6 +205,7 @@ export function ReaderWorkspaceSwitch({
   handleBrowserFileChange,
   handleImportBrowserFileChange,
   handleDrop,
+  handleHomePathDrop,
   handleSaveAnnotationNote,
   handleSavePreferences,
   handleToggleActiveFavorite,
@@ -411,6 +413,7 @@ export function ReaderWorkspaceSwitch({
           }
           onOpenPdf={openPdf}
           onDropPdf={handleDrop}
+          onDropPaths={handleHomePathDrop}
           onBrowserFileChange={handleBrowserFileChange}
           onReopenRecentDocument={(document) => void reopenRecentDocument(document)}
           onOpenFavoriteDocument={(document) => openFavoriteDocument(document)}

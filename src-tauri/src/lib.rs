@@ -85,6 +85,7 @@ pub fn run() {
             file_commands::read_desktop_pdf_bytes,
             file_commands::read_cached_pdf,
             file_commands::list_desktop_pdfs,
+            file_commands::resolve_dropped_pdf_paths,
             library_storage::read_library_storage,
             library_storage::write_library_storage,
             library_storage::write_library_storage_binary,

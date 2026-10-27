@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { BlobUrlCache } from '../cache/blobUrlCache';
 import { PdfByteCache } from '../cache/pdfByteCache';
+import { hasDroppedDirectory, readDroppedPdfs } from '../platform/dropZone';
 import {
   createEmptyDocumentState,
   closeDocumentSession,
@@ -109,6 +110,7 @@ export function ReaderApp({
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState('');
   const importingRef = useRef(false);
+  const homeDropPendingRef = useRef(false);
   const { bridge, persistence, sessionPersistence } = useReaderPersistence({
     bridge: providedBridge,
     persistence: providedPersistence,
@@ -503,6 +505,7 @@ export function ReaderApp({
     handleBrowserFileChange,
     handleDrop,
     openPdf,
+    openDesktopPath,
     openLibraryPaper,
     reopenDesktopSession,
     reopenRecentDocument,
@@ -522,21 +525,23 @@ export function ReaderApp({
     setViewerSource,
   });
 
-  const importPdfs = useCallback(async (folderId?: string, chooseDirectory = false) => {
+  const importPdfs = useCallback(async (folderId?: string, chooseDirectory = false, droppedFiles?: Array<string | File>) => {
     if (!research || importingRef.current) return [];
     const importedIds: string[] = [];
     importingRef.current = true;
     setImporting(true);
-    setImportProgress('请选择要导入的 PDF…');
+    setImportProgress(droppedFiles ? '正在准备导入 PDF…' : '请选择要导入的 PDF…');
     try {
-      const paths = chooseDirectory ? await bridge.selectNativePdfFolder?.() : await bridge.selectNativePdfPaths?.();
+      const paths = droppedFiles ?? (chooseDirectory ? await bridge.selectNativePdfFolder?.() : await bridge.selectNativePdfPaths?.());
       let imported = 0;
       const failures: string[] = [];
       if (paths) {
         for (let index = 0; index < paths.length; index += 1) {
           setImportProgress(`正在导入并建立索引 ${index + 1} / ${paths.length}`);
           try {
-            const opened = await bridge.readDesktopPdf(paths[index]);
+            const source = paths[index];
+            const opened = typeof source === 'string' ? await bridge.readDesktopPdf(source)
+              : { bytes: new Uint8Array(await source.arrayBuffer()), source: { name: source.name } };
             const paper = await research.library.importPdf(opened.bytes, opened.source.name, { folderId });
             importedIds.push(paper.id);
             imported += 1;
@@ -551,7 +556,8 @@ export function ReaderApp({
         }
       }
       setImportProgress(imported ? `已导入 ${imported} 份 PDF，相同内容会自动合并。${failures.length ? ` ${failures.length} 份失败。` : ''}`
-        : chooseDirectory && paths?.length === 0 ? '所选文件夹没有 PDF，或已取消选择。' : '未导入文件。');
+        : droppedFiles?.length === 0 ? '拖入的文件夹中没有 PDF。'
+          : chooseDirectory && paths?.length === 0 ? '所选文件夹没有 PDF，或已取消选择。' : '未导入文件。');
       if (failures.length) setAppError(`部分文件导入失败：${[...new Set(failures)].join('；')}`);
       if (imported && homeSidebarPage === 'home') setHomeSidebarPage('myDocuments');
     } catch (error) {
@@ -563,6 +569,43 @@ export function ReaderApp({
     }
     return [...new Set(importedIds)];
   }, [bridge, homeSidebarPage, research]);
+
+  const handleHomeDrop = useCallback(async (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (importingRef.current || homeDropPendingRef.current) return;
+    homeDropPendingRef.current = true;
+    try {
+      if (!hasDroppedDirectory(event.dataTransfer)) {
+        await handleDrop(event);
+        return;
+      }
+      if (!research) throw new Error('文件夹批量导入仅在桌面客户端可用。');
+      const { files } = await readDroppedPdfs(event.dataTransfer);
+      if (!files.length) throw new Error('拖入的文件夹中没有 PDF。');
+      await importPdfs(undefined, false, files);
+    } catch (error) { setAppError(errorMessage(error)); }
+    finally { homeDropPendingRef.current = false; }
+  }, [handleDrop, importPdfs, research]);
+
+  const handleHomePathDrop = useCallback(async (paths: string[]) => {
+    if (importingRef.current || homeDropPendingRef.current) return;
+    homeDropPendingRef.current = true;
+    try {
+      if (!bridge.resolveDroppedPdfPaths) throw new Error('当前环境无法读取拖入的文件或文件夹。');
+      const resolved = await bridge.resolveDroppedPdfPaths(paths);
+      if (!resolved.pdfPaths.length) throw new Error(resolved.hasDirectories ? '拖入的文件夹中没有 PDF。' : '仅支持 PDF 文件或文件夹');
+      if (resolved.hasDirectories) {
+        if (!research) throw new Error('文件夹批量导入仅在桌面客户端可用。');
+        await importPdfs(undefined, false, resolved.pdfPaths);
+      } else {
+        for (const path of resolved.pdfPaths) {
+          try { await openDesktopPath(path); } catch (error) { setAppError(errorMessage(error)); }
+        }
+      }
+    } catch (error) { setAppError(errorMessage(error)); }
+    finally { homeDropPendingRef.current = false; }
+  }, [bridge, importPdfs, openDesktopPath, research]);
 
   const openResearchPaper = useCallback(async (id: string, page?: number) => {
     try {
@@ -1480,7 +1523,8 @@ export function ReaderApp({
         deleteAnnotationForDocument={deleteAnnotationForDocument}
         handleBrowserFileChange={handleBrowserFileChange}
         handleImportBrowserFileChange={handleImportBrowserFileChange}
-        handleDrop={handleDrop}
+        handleDrop={handleHomeDrop}
+        handleHomePathDrop={handleHomePathDrop}
         handleSaveAnnotationNote={handleSaveAnnotationNote}
         handleSavePreferences={handleSavePreferences}
         handleToggleActiveFavorite={handleToggleActiveFavorite}

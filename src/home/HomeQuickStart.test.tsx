@@ -1,7 +1,11 @@
-import { fireEvent, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderApp } from '../test/renderApp';
 import { HomeQuickStart } from './HomeQuickStart';
+
+const nativeDrop = vi.hoisted(() => vi.fn());
+vi.mock('../platform/nativeFileDrop', () => ({ listenForNativeFileDrop: nativeDrop }));
+beforeEach(() => nativeDrop.mockReset().mockResolvedValue(null));
 
 describe('HomeQuickStart', () => {
   it('combines PDF, folder selection and drag-and-drop in one import area', () => {
@@ -68,7 +72,38 @@ describe('HomeQuickStart', () => {
     });
 
     expect(onDropPdf).not.toHaveBeenCalled();
-    expect(onRejectDrop).toHaveBeenCalledWith('仅支持 PDF 文件');
+    expect(onRejectDrop).toHaveBeenCalledWith('仅支持 PDF 文件或文件夹');
+  });
+
+  it('accepts a folder drop even when its file list has no PDF entries', () => {
+    const onDropPdf = vi.fn();
+    const onRejectDrop = vi.fn();
+    renderApp(<HomeQuickStart onOpenPdf={vi.fn()} onOpenFolder={vi.fn()} onDropPdf={onDropPdf} onRejectDrop={onRejectDrop} />);
+    fireEvent.drop(screen.getByRole('group', { name: 'PDF 拖拽区域' }), {
+      dataTransfer: { files: [], items: [{ kind: 'file', webkitGetAsEntry: () => ({ isDirectory: true }) }] },
+    });
+    expect(onDropPdf).toHaveBeenCalledOnce();
+    expect(onRejectDrop).not.toHaveBeenCalled();
+  });
+
+  it('forwards a native path drop once and removes its listener when leaving home', async () => {
+    let drop!: (paths: string[]) => void;
+    const stop = vi.fn();
+    nativeDrop.mockImplementation(async (_element, onDrop) => { drop = onDrop; return stop; });
+    const onDropPaths = vi.fn();
+    const onDropPdf = vi.fn();
+    const mounted = renderApp(<HomeQuickStart onOpenPdf={vi.fn()} onOpenFolder={vi.fn()} onDropPdf={onDropPdf} onDropPaths={onDropPaths} />);
+    await waitFor(() => expect(nativeDrop).toHaveBeenCalledOnce());
+    await act(async () => { drop(['/tmp/papers']); });
+    fireEvent.drop(screen.getByRole('group', { name: 'PDF 拖拽区域' }), {
+      dataTransfer: { files: [new File(['%PDF-1.7'], 'paper.pdf')] },
+    });
+    expect(onDropPaths).toHaveBeenCalledExactlyOnceWith(['/tmp/papers']);
+    expect(onDropPdf).not.toHaveBeenCalled();
+    mounted.unmount();
+    await act(async () => { drop(['/tmp/late.pdf']); });
+    expect(stop).toHaveBeenCalledOnce();
+    expect(onDropPaths).toHaveBeenCalledOnce();
   });
 
   it('handles a drop over an inner button once without clicking it or bubbling to the parent', () => {

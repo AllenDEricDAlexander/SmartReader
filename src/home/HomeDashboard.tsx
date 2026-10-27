@@ -72,6 +72,7 @@ type HomeDashboardProps = {
   ): void | Promise<void>;
   onOpenPdf(): void | Promise<unknown>;
   onDropPdf: DragEventHandler<HTMLElement>;
+  onDropPaths?(paths: string[]): void | Promise<void>;
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
   onReopenRecentDocument(document: PersistedDocument): void | Promise<void>;
   onOpenFavoriteDocument?(document: FavoriteDocument): boolean | void | Promise<boolean | void>;
@@ -144,6 +145,7 @@ export function HomeDashboard({
   onOpenTagDocument,
   onOpenPdf,
   onDropPdf,
+  onDropPaths,
   onBrowserFileChange,
   onReopenRecentDocument,
   onOpenFavoriteDocument,
@@ -277,6 +279,7 @@ export function HomeDashboard({
         <HomeQuickStart
           onOpenPdf={handleOpenPdf}
           onDropPdf={onDropPdf}
+          onDropPaths={onDropPaths}
           onRejectDrop={(message) => showNotice('无法打开文件', message)}
           onOpenFolder={onImportFolder ? () => void onImportFolder() : onOpenFolders}
         />

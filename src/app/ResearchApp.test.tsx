@@ -6,7 +6,7 @@ import { emptyMetadata, type LibrarySnapshot } from '../library/libraryModels';
 import { LibraryService } from '../library/libraryService';
 import type { LibraryStorage } from '../library/libraryStorage';
 import type { PersistenceApi, PersistedReaderSession, PersistedDocument, PersistedAnnotation, PersistedBookmark } from '../persistence/persistenceApi';
-import type { OpenedDesktopPdf, TauriBridge } from '../platform/tauriBridge';
+import type { DroppedPdfPaths, OpenedDesktopPdf, TauriBridge } from '../platform/tauriBridge';
 import { defaultReaderPreferences } from '../preferences/preferencesStore';
 import type { PdfRenderer } from '../viewer/PdfViewerBridge';
 import { ViewerController } from '../viewer/viewerController';
@@ -15,6 +15,9 @@ import { App } from './App';
 vi.mock('../platform/openWithEvents', () => ({
   listenForOpenWith: vi.fn(async () => () => undefined),
 }));
+
+const nativeDropMock = vi.hoisted(() => vi.fn());
+vi.mock('../platform/nativeFileDrop', () => ({ listenForNativeFileDrop: nativeDropMock }));
 
 const title = 'Cognitive circuits research';
 const secretNote = 'Private circuit interpretation';
@@ -161,12 +164,29 @@ async function openNative() {
   await screen.findByLabelText('测试 PDF 视图');
 }
 
+function directoryDrop(files: File[]) {
+  const entries = files.map((file) => ({
+    isDirectory: false, isFile: true, name: file.name, file: (resolve: (value: File) => void) => resolve(file),
+  }));
+  return {
+    files: [],
+    items: [{ kind: 'file', getAsFile: () => null, webkitGetAsEntry: () => ({
+      isDirectory: true, isFile: false, name: 'papers',
+      createReader: () => {
+        let read = false;
+        return { readEntries: (resolve: (value: unknown[]) => void) => { resolve(read ? [] : entries); read = true; } };
+      },
+    }) }],
+  };
+}
+
 function openGlobalSearch() {
   fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
   return screen.findByRole('dialog', { name: '全局搜索' });
 }
 
 beforeEach(() => {
+  nativeDropMock.mockReset().mockResolvedValue(null);
   vi.stubGlobal('crypto', webcrypto);
   let sequence = 0;
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => `blob:research-app-${++sequence}`) });
@@ -175,6 +195,96 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('desktop research App integration', () => {
+  it.each([1, 3])('batch imports a dropped folder containing %i PDFs without opening reader tabs', async (count) => {
+    const app = fixture();
+    render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);
+    const files = [new File([primaryPdf()], 'first.pdf', { type: 'application/pdf' })];
+    if (count === 3) files.push(new File(['%PDF-1.7\nsecond paper'], 'second.pdf'), new File([primaryPdf()], 'duplicate.pdf'));
+    fireEvent.drop(screen.getByRole('group', { name: 'PDF 拖拽区域' }), { dataTransfer: directoryDrop(files) });
+    await waitFor(() => expect(app.snapshot()?.papers).toHaveLength(count === 1 ? 1 : 2));
+    expect(await screen.findByText(new RegExp(`已导入 ${count} 份 PDF`))).toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(app.bridge.openNativePdf).not.toHaveBeenCalled();
+    expect(app.bridge.readDesktopPdf).not.toHaveBeenCalled();
+  });
+
+  it('opens a single PDF dropped into the same import box for immediate reading', async () => {
+    const app = fixture();
+    render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);
+    fireEvent.drop(screen.getByRole('group', { name: 'PDF 拖拽区域' }), {
+      dataTransfer: { files: [new File([primaryPdf()], 'single.pdf', { type: 'application/pdf' })] },
+    });
+    expect(await screen.findByRole('tab', { name: 'single.pdf' })).toBeInTheDocument();
+    expect(await screen.findByLabelText('测试 PDF 视图')).toBeInTheDocument();
+    expect(app.snapshot()?.papers).toHaveLength(1);
+    expect(app.bridge.openNativePdf).not.toHaveBeenCalled();
+  });
+
+  it('continues a native folder import after one PDF fails and reports the partial result', async () => {
+    const app = fixture();
+    nativeDropMock.mockResolvedValue(vi.fn());
+    app.bridge.resolveDroppedPdfPaths = vi.fn(async () => ({ pdfPaths: ['/papers/broken.pdf', '/papers/cognition.pdf'], hasDirectories: true }));
+    vi.mocked(app.bridge.readDesktopPdf).mockRejectedValueOnce(new Error('invalid PDF')).mockResolvedValueOnce(app.opened);
+    render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);
+    await waitFor(() => expect(nativeDropMock).toHaveBeenCalled());
+    await act(async () => { nativeDropMock.mock.calls.at(-1)![1](['/papers']); });
+    expect(await screen.findByText(/已导入 1 份 PDF.*1 份失败/)).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('部分文件导入失败：invalid PDF');
+    expect(app.snapshot()?.papers).toHaveLength(1);
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(app.bridge.resolveDroppedPdfPaths).toHaveBeenCalledExactlyOnceWith(['/papers']);
+    expect(app.bridge.openNativePdf).not.toHaveBeenCalled();
+  });
+
+  it('opens a single native PDF drop without displaying a file selection dialog', async () => {
+    const app = fixture();
+    nativeDropMock.mockResolvedValue(vi.fn());
+    app.bridge.resolveDroppedPdfPaths = vi.fn(async () => ({ pdfPaths: ['/research/cognition.pdf'], hasDirectories: false }));
+    vi.mocked(app.bridge.readDesktopPdf).mockResolvedValue(app.opened);
+    render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);
+    await waitFor(() => expect(nativeDropMock).toHaveBeenCalled());
+    await act(async () => { nativeDropMock.mock.calls.at(-1)![1](['/research/cognition.pdf']); });
+    expect(await screen.findByRole('tab', { name: 'cognition.pdf' })).toBeInTheDocument();
+    expect(await screen.findByLabelText('测试 PDF 视图')).toBeInTheDocument();
+    expect(app.bridge.readDesktopPdf).toHaveBeenCalledExactlyOnceWith('/research/cognition.pdf');
+    expect(app.bridge.openNativePdf).not.toHaveBeenCalled();
+  });
+
+  it('reports an empty folder without importing or opening documents', async () => {
+    const app = fixture();
+    render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);
+    fireEvent.drop(screen.getByRole('group', { name: 'PDF 拖拽区域' }), { dataTransfer: directoryDrop([]) });
+    expect(await screen.findByRole('alert')).toHaveTextContent('拖入的文件夹中没有 PDF。');
+    expect(app.snapshot()?.papers ?? []).toHaveLength(0);
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+  });
+
+  it('ignores repeated native drops while directory scanning or importing is still running', async () => {
+    const app = fixture();
+    nativeDropMock.mockResolvedValue(vi.fn());
+    let resolvePaths!: (value: DroppedPdfPaths) => void;
+    app.bridge.resolveDroppedPdfPaths = vi.fn(() => new Promise<DroppedPdfPaths>((resolve) => { resolvePaths = resolve; }));
+    vi.mocked(app.bridge.readDesktopPdf).mockResolvedValue(app.opened);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const extract = app.extract.getMockImplementation()!;
+    app.extract.mockImplementationOnce(async (bytes) => { await pending; return extract(bytes); });
+    render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);
+    await waitFor(() => expect(nativeDropMock).toHaveBeenCalled());
+    const drop = nativeDropMock.mock.calls.at(-1)![1];
+    await act(async () => { drop(['/research']); });
+    await waitFor(() => expect(app.bridge.resolveDroppedPdfPaths).toHaveBeenCalledOnce());
+    await act(async () => { drop(['/research']); });
+    expect(app.bridge.resolveDroppedPdfPaths).toHaveBeenCalledOnce();
+    await act(async () => { resolvePaths({ pdfPaths: ['/research/cognition.pdf'], hasDirectories: true }); });
+    await waitFor(() => expect(app.extract).toHaveBeenCalledOnce());
+    await act(async () => { drop(['/research']); });
+    expect(app.bridge.resolveDroppedPdfPaths).toHaveBeenCalledOnce();
+    await act(async () => { release(); });
+    expect(await screen.findByText(/已导入 1 份 PDF/)).toBeInTheDocument();
+    expect(app.snapshot()?.papers).toHaveLength(1);
+  });
+
   it('imports a local PDF into an empty knowledge library from the AI assistant and answers using that selected file', async () => {
     const app = fixture();
     await app.ai.saveProvider({ name: 'Aliyun compatible', baseUrl: 'https://api.example.org/v1', model: 'chat-model' }, 'test-key');

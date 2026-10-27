@@ -162,6 +162,40 @@ pub fn list_desktop_pdfs(directory: String) -> Result<Vec<String>, FileCommandEr
     Ok(files)
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DroppedPdfPaths {
+    pub pdf_paths: Vec<String>,
+    pub has_directories: bool,
+}
+
+#[tauri::command]
+pub fn resolve_dropped_pdf_paths(paths: Vec<String>) -> Result<DroppedPdfPaths, FileCommandError> {
+    let mut pdf_paths = std::collections::BTreeSet::new();
+    let mut has_directories = false;
+    for path in paths {
+        let path = fs::canonicalize(path)?;
+        if path.is_dir() {
+            has_directories = true;
+            pdf_paths.extend(list_desktop_pdfs(path.to_string_lossy().into_owned())?);
+        } else if path.is_file()
+            && path
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case("pdf"))
+        {
+            pdf_paths.insert(path.to_string_lossy().into_owned());
+        }
+        if pdf_paths.len() > 2000 {
+            return Err(FileCommandError::FolderLimit);
+        }
+    }
+    Ok(DroppedPdfPaths {
+        pdf_paths: pdf_paths.into_iter().collect(),
+        has_directories,
+    })
+}
+
 pub fn validate_pdf_bytes(bytes: &[u8]) -> Result<(), FileCommandError> {
     if bytes.starts_with(b"%PDF-") {
         Ok(())
@@ -184,6 +218,46 @@ pub fn cache_file_name(document_key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolves_dropped_folders_and_files_without_duplicates() {
+        let dir = std::env::temp_dir().join(format!("smartreader-drop-{}", std::process::id()));
+        fs::create_dir_all(dir.join("nested")).expect("create folder");
+        fs::write(dir.join("a.PDF"), b"%PDF-1.7").expect("write pdf");
+        fs::write(dir.join("nested/b.pdf"), b"%PDF-1.7").expect("write nested pdf");
+        fs::write(dir.join("notes.txt"), b"notes").expect("write text");
+        let paths = vec![
+            dir.to_string_lossy().into_owned(),
+            dir.join("a.PDF").to_string_lossy().into_owned(),
+        ];
+        let result = resolve_dropped_pdf_paths(paths).expect("resolve mixed drop");
+        assert!(result.has_directories);
+        assert_eq!(result.pdf_paths.len(), 2);
+        let single =
+            resolve_dropped_pdf_paths(vec![dir.join("a.PDF").to_string_lossy().into_owned()])
+                .expect("resolve single pdf");
+        assert!(!single.has_directories);
+        assert_eq!(single.pdf_paths.len(), 1);
+        fs::remove_dir_all(dir).expect("remove fixture");
+    }
+
+    #[test]
+    fn distinguishes_empty_dropped_folders_from_unsupported_files() {
+        let dir =
+            std::env::temp_dir().join(format!("smartreader-empty-drop-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create folder");
+        fs::write(dir.join("notes.txt"), b"notes").expect("write text");
+        let folder = resolve_dropped_pdf_paths(vec![dir.to_string_lossy().into_owned()])
+            .expect("resolve folder");
+        assert!(folder.has_directories);
+        assert!(folder.pdf_paths.is_empty());
+        let file =
+            resolve_dropped_pdf_paths(vec![dir.join("notes.txt").to_string_lossy().into_owned()])
+                .expect("resolve text");
+        assert!(!file.has_directories);
+        assert!(file.pdf_paths.is_empty());
+        fs::remove_dir_all(dir).expect("remove fixture");
+    }
 
     #[test]
     fn lists_nested_pdfs_without_following_links() {

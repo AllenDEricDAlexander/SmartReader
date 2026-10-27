@@ -40,12 +40,18 @@ export type OpenedDesktopPdf = {
   modifiedAt: string | null;
 };
 
+export type DroppedPdfPaths = {
+  pdfPaths: string[];
+  hasDirectories: boolean;
+};
+
 export type TauriBridge = {
   canOpenNativePdf?(): boolean;
   openNativePdf(): Promise<OpenedDesktopPdf | null>;
   readDesktopPdf(path: string): Promise<OpenedDesktopPdf>;
   selectNativePdfPaths?(): Promise<string[]>;
   selectNativePdfFolder?(): Promise<string[]>;
+  resolveDroppedPdfPaths?(paths: string[]): Promise<DroppedPdfPaths>;
   setWindowBackgroundColor?(color: string, theme?: 'light' | 'dark'): Promise<void>;
 };
 
@@ -87,6 +93,9 @@ export function createTauriBridge(
       const selected = await open({ directory: true, multiple: false });
       if (!selected || Array.isArray(selected)) return [];
       return invoke<string[]>('list_desktop_pdfs', { directory: selected });
+    },
+    resolveDroppedPdfPaths(paths) {
+      return invoke<DroppedPdfPaths>('resolve_dropped_pdf_paths', { paths });
     },
     setWindowBackgroundColor(color, theme) {
       if (!dependencies.invoke && !isTauriRuntimeAvailable()) {

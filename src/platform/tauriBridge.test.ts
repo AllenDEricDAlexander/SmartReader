@@ -143,6 +143,16 @@ describe('tauriBridge', () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
+  it('resolves dropped paths without opening a selection dialog or eagerly loading PDF bytes', async () => {
+    const open = vi.fn();
+    const result = { pdfPaths: ['/tmp/papers/a.pdf', '/tmp/papers/nested/b.pdf'], hasDirectories: true };
+    const invoke = vi.fn().mockResolvedValue(result);
+    const bridge = createTauriBridge({ open, invoke });
+    await expect(bridge.resolveDroppedPdfPaths?.(['/tmp/papers'])).resolves.toEqual(result);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('resolve_dropped_pdf_paths', { paths: ['/tmp/papers'] });
+    expect(open).not.toHaveBeenCalled();
+  });
+
   it('reports native PDF opening as unavailable outside the Tauri runtime', () => {
     Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
 

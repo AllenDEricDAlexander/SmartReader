@@ -744,7 +744,7 @@ describe('HomeDashboard', () => {
 
     expect(onDropPdf).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog', { name: '无法打开文件' })).toBeInTheDocument();
-    expect(screen.getByText('仅支持 PDF 文件')).toBeInTheDocument();
+    expect(screen.getByText('仅支持 PDF 文件或文件夹')).toBeInTheDocument();
   });
 
   it('blocks non-drop-card home drops from reaching the PDF or parent drop handlers', () => {
