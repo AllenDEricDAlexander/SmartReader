@@ -1,6 +1,6 @@
 import { Keyboard, Pencil } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { CommandRegistry } from '../commands/commandRegistry';
+import { defaultShortcutAliases, type CommandRegistry } from '../commands/commandRegistry';
 import type { ReaderPreferences } from '../preferences/preferencesModels';
 
 type ShortcutSettingsProps = {
@@ -26,7 +26,10 @@ export function ShortcutSettings({
         continue;
       }
 
-      byShortcut.set(shortcut, [...(byShortcut.get(shortcut) ?? []), command.label]);
+      const aliases = shortcut === command.shortcut ? command.shortcutAliases ?? [] : [];
+      for (const key of new Set([shortcut, ...defaultShortcutAliases(command.id, shortcut), ...aliases])) {
+        byShortcut.set(key, [...(byShortcut.get(key) ?? []), command.label]);
+      }
     }
 
     return [...byShortcut.entries()].filter(([, labels]) => labels.length > 1);

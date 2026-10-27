@@ -1,5 +1,5 @@
 import { useEffect, useMemo, type Dispatch, type SetStateAction } from 'react';
-import { CommandRegistry, defaultShortcuts, type CommandId } from '../../commands/commandRegistry';
+import { CommandRegistry, defaultShortcutAliases, type CommandId } from '../../commands/commandRegistry';
 import {
   handleShortcutEvent,
   preventRegisteredShortcutDefault,
@@ -83,8 +83,7 @@ export function useReaderCommands({
       id: 'global.search.open',
       label: 'Global Search',
       shortcut: shortcuts['global.search.open'],
-      shortcutAliases:
-        shortcuts['global.search.open'] === defaultShortcuts.globalSearch ? ['Control+K'] : [],
+      shortcutAliases: defaultShortcutAliases('global.search.open', shortcuts['global.search.open']),
       run: openGlobalSearch,
     });
     registry.register({
@@ -139,6 +138,7 @@ export function useReaderCommands({
       id: 'tab.previous',
       label: 'Previous Tab',
       shortcut: shortcuts['tab.previous'],
+      shortcutAliases: defaultShortcutAliases('tab.previous', shortcuts['tab.previous']),
       run: selectPreviousSession,
     });
     registry.register({

@@ -58,6 +58,12 @@ export const defaultShortcuts = {
   importAnnotations: null,
 } as const;
 
+export function defaultShortcutAliases(id: CommandId, shortcut: string | null): string[] {
+  if (id === 'global.search.open' && shortcut === defaultShortcuts.globalSearch) return ['Control+K'];
+  if (id === 'tab.previous' && shortcut === defaultShortcuts.previousTab) return ['Control+Shift+Tab'];
+  return [];
+}
+
 export class CommandRegistry {
   private readonly commands = new Map<CommandId, Command>();
 
