@@ -1,4 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PdfViewerBridge, type PdfRenderer } from './PdfViewerBridge';
 import { ViewerController } from './viewerController';
@@ -123,6 +125,47 @@ vi.mock('@react-pdf-viewer/highlight', async () => {
 });
 
 describe('PdfViewerBridge', () => {
+  it('maps white PDF pixels to the eye-care paper color while preserving black and opacity', () => {
+    const { container } = render(<PdfViewerBridge
+      source={{ sessionId: 'eye-care', url: 'blob:eye-care', restore: { page: 1, zoom: 1.1 } }}
+      onProgressChange={vi.fn()}
+    />);
+    const matrix = container.querySelector('feColorMatrix')!;
+    expect(matrix.closest('filter')).toHaveAttribute('color-interpolation-filters', 'sRGB');
+    const values = matrix.getAttribute('values')!.trim().split(/\s+/).map(Number);
+    const transform = (pixel: number[]) => Array.from({ length: 4 }, (_, channel) => {
+      const row = values.slice(channel * 5, channel * 5 + 5);
+      return Math.round(row.slice(0, 4).reduce((value, coefficient, index) => value + coefficient * pixel[index], row[4] * 255));
+    });
+    expect(values).toHaveLength(20);
+    expect(transform([255, 255, 255, 255])).toEqual([199, 237, 204, 255]);
+    expect(transform([0, 0, 0, 255])).toEqual([0, 0, 0, 255]);
+    expect(transform([255, 255, 255, 128])).toEqual([199, 237, 204, 128]);
+  });
+
+  it('keeps each PDF tint reference valid when zoom crosses 100–120% and another viewer closes', () => {
+    const onProgressChange = vi.fn();
+    const first = render(<PdfViewerBridge source={{ sessionId: 'first', url: 'blob:first' }} onProgressChange={onProgressChange} />);
+    const second = render(<PdfViewerBridge source={{ sessionId: 'second', url: 'blob:second' }} onProgressChange={onProgressChange} />);
+    const firstId = first.container.querySelector('filter')!.id;
+    const secondId = second.container.querySelector('filter')!.id;
+    expect(firstId).not.toBe(secondId);
+    first.unmount();
+    const zoomed = pdfViewerCoreMock.lastViewerProps?.onZoom as (event: { scale: number }) => void;
+    for (const scale of [0.9, 1, 1.1, 1.2, 1.3, 1.5]) {
+      act(() => zoomed({ scale }));
+      expect(onProgressChange).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'second', zoom: scale }));
+      expect(second.container.querySelector('.pdf-viewer-bridge')).toHaveStyle({ '--sr-eye-care-filter': `url("#${secondId}")` });
+      expect(document.getElementById(secondId)).toBeInTheDocument();
+    }
+  });
+
+  it('scopes the eye-care filter to the PDF canvas and removes its dependency on background blending', () => {
+    const styles = readFileSync(join(process.cwd(), 'src/app/styles.css'), 'utf8');
+    expect(styles).toMatch(/:root\[data-theme="eye-care"\]\s*{[^}]*--sr-page-bg:\s*#C7EDCC;[^}]*--sr-pdf-blend:\s*normal;/s);
+    expect(styles).toMatch(/:root\[data-theme="eye-care"\] \.pdf-viewer-bridge \.rpv-core__canvas-layer > canvas\s*{\s*filter:\s*var\(--sr-eye-care-filter, none\);\s*}/);
+  });
+
   it('ignores renderer callbacks from a replaced URL even when the session id is reused', () => {
     let old!: Parameters<PdfRenderer>[0];
     const renderer: PdfRenderer = (props) => {

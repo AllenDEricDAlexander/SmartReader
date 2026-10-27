@@ -90,7 +90,7 @@
   --sr-purple-text: #674b7e;
   --sr-reader-bg: #b3d6b8;
   --sr-page-bg: #C7EDCC;
-  --sr-pdf-blend: multiply;
+  --sr-pdf-blend: normal;
 }
 
 * {
@@ -2999,6 +2999,17 @@ select {
 .pdf-viewer-bridge .rpv-core__canvas-layer {
   filter: var(--sr-pdf-filter, none);
   mix-blend-mode: var(--sr-pdf-blend, normal);
+}
+
+.pdf-theme-filters {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* Apply the eye-care tint to canvas pixels, rather than blending a composited
+   canvas wrapper with the page background, which can turn white when zooming. */
+:root[data-theme="eye-care"] .pdf-viewer-bridge .rpv-core__canvas-layer > canvas {
+  filter: var(--sr-eye-care-filter, none);
 }
 
 .viewer-loading,

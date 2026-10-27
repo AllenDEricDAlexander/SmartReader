@@ -3,7 +3,7 @@ import type { PdfJs } from '@react-pdf-viewer/core';
 import { highlightPlugin, Trigger, type HighlightArea } from '@react-pdf-viewer/highlight';
 import type { Match } from '@react-pdf-viewer/search';
 import { toolbarPlugin } from '@react-pdf-viewer/toolbar';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   annotationColors,
   defaultAnnotationColor,
@@ -325,6 +325,7 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
   // position never animates through the preceding pages.
   const initialPage = Math.max(0, (restore?.page ?? 1) - 1);
   const renderRange = useMemo(() => createRenderRange(), []);
+  const eyeCareFilterId = `pdf-eye-care-${useId().replace(/:/g, '')}`;
 
   // Embedded metadata is read once per document. It is descriptive only, so a
   // document that carries none of it, or refuses to report it, still opens.
@@ -512,7 +513,25 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
   const plugins = [toolbarPluginInstance, highlightPluginInstance];
 
   return (
-    <div className="pdf-viewer-bridge">
+    <div
+      className="pdf-viewer-bridge"
+      style={{ '--sr-eye-care-filter': `url("#${eyeCareFilterId}")` } as CSSProperties}
+    >
+      <svg className="pdf-theme-filters" width="0" height="0" aria-hidden="true" focusable="false">
+        <defs>
+          <filter id={eyeCareFilterId} colorInterpolationFilters="sRGB">
+            {/* Tint the bitmap directly: white becomes #C7EDCC and black stays
+                black, independently of the canvas compositor at each zoom. */}
+            <feColorMatrix
+              type="matrix"
+              values={`${199 / 255} 0 0 0 0
+                0 ${237 / 255} 0 0 0
+                0 0 ${204 / 255} 0 0
+                0 0 0 1 0`}
+            />
+          </filter>
+        </defs>
+      </svg>
       <Worker workerUrl="/pdf.worker.min.js">
         <Viewer
           fileUrl={fileUrl}
