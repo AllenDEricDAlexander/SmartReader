@@ -8,6 +8,7 @@
     "core:window:allow-set-background-color",
     "core:webview:allow-set-webview-background-color",
     "core:event:allow-listen",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "dialog:allow-save"
   ]
 }

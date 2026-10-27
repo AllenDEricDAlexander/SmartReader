@@ -4,6 +4,7 @@ mod db;
 mod file_commands;
 mod knowledge_vectors;
 mod library_storage;
+mod notes_export;
 mod window_appearance;
 
 use tauri::{Emitter, Manager};
@@ -86,6 +87,12 @@ pub fn run() {
             file_commands::read_cached_pdf,
             file_commands::list_desktop_pdfs,
             file_commands::resolve_dropped_pdf_paths,
+            notes_export::begin_notes_export,
+            notes_export::write_notes_export,
+            notes_export::flush_notes_export,
+            notes_export::finish_notes_export,
+            notes_export::release_notes_export,
+            notes_export::abort_notes_export,
             library_storage::read_library_storage,
             library_storage::write_library_storage,
             library_storage::write_library_storage_binary,

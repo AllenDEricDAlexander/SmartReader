@@ -3268,6 +3268,7 @@ dependencies = [
  "objc2-quartz-core",
  "reqwest",
  "rusqlite",
+ "same-file",
  "serde",
  "serde_json",
  "tauri",
