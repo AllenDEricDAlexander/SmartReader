@@ -1279,6 +1279,8 @@ button:disabled,
 }
 
 .quick-start-icon {
+  position: relative;
+  z-index: 1;
   width: 72px;
   height: 64px;
   display: grid;
@@ -1293,8 +1295,10 @@ button:disabled,
   stroke: var(--sr-surface);
 }
 
-.quick-start-dropzone .quick-start-file-trigger {
+.quick-start-dropzone .quick-start-file-trigger,
+.quick-start-dropzone .quick-start-file-trigger:hover:not(:disabled) {
   position: absolute;
+  z-index: 0;
   inset: 0;
   width: 100%;
   height: 100%;
@@ -1310,6 +1314,8 @@ button:disabled,
 }
 
 .quick-start-copy {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   display: grid;
   gap: 6px;

@@ -1,4 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderApp } from '../test/renderApp';
 import { HomeQuickStart } from './HomeQuickStart';
@@ -8,6 +10,33 @@ vi.mock('../platform/nativeFileDrop', () => ({ listenForNativeFileDrop: nativeDr
 beforeEach(() => nativeDrop.mockReset().mockResolvedValue(null));
 
 describe('HomeQuickStart', () => {
+  it.each(['light', 'dark', 'eye-care'])('keeps the import prompt above a transparent hover target in the %s theme', (theme) => {
+    const previousTheme = document.documentElement.getAttribute('data-theme');
+    const style = document.createElement('style');
+    // jsdom has no pointer compositor. The attribute keeps :hover specificity
+    // while exercising the real global and component stylesheet together.
+    style.textContent = readFileSync(join(process.cwd(), 'src/app/styles.css'), 'utf8')
+      .replaceAll(':hover', '[data-test-hover]');
+    document.head.appendChild(style);
+    document.documentElement.setAttribute('data-theme', theme);
+    try {
+      renderApp(<HomeQuickStart onOpenPdf={vi.fn()} onDropPdf={vi.fn()} onOpenFolder={vi.fn()} />);
+      const dropzone = screen.getByRole('group', { name: 'PDF 拖拽区域' });
+      const trigger = within(dropzone).getByRole('button', { name: '打开本地 PDF' });
+      dropzone.setAttribute('data-test-hover', '');
+      trigger.setAttribute('data-test-hover', '');
+      expect(getComputedStyle(trigger).backgroundColor).toBe('rgba(0, 0, 0, 0)');
+      expect(getComputedStyle(trigger).zIndex).toBe('0');
+      expect(getComputedStyle(dropzone.querySelector('.quick-start-copy')!).zIndex).toBe('1');
+      expect(within(dropzone).getByText('点击选择 PDF / 拖拽文件到此处')).toBeVisible();
+      expect(within(dropzone).getByRole('button', { name: '选择文件夹' })).toBeVisible();
+    } finally {
+      style.remove();
+      if (previousTheme === null) document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', previousTheme);
+    }
+  });
+
   it('combines PDF, folder selection and drag-and-drop in one import area', () => {
     renderApp(
       <HomeQuickStart onOpenPdf={vi.fn()} onDropPdf={vi.fn()} onOpenFolder={vi.fn()} />,
