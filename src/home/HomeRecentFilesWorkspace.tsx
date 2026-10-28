@@ -2,7 +2,6 @@ import {
   FileText,
   Grid2X2,
   List,
-  MoreVertical,
   Search,
   Star,
   Tags,
@@ -11,13 +10,16 @@ import {
 import {
   useEffect,
   useMemo,
-  useRef,
   useState,
   type CSSProperties,
   type ChangeEvent,
-  type KeyboardEvent,
 } from 'react';
 import type { PersistedDocument } from '../persistence/persistenceApi';
+import { BookList } from '../components/book-list/BookList';
+import { BookListMenu } from '../components/book-list/BookListMenu';
+import { documentBookItem, matchesBookSource, type BookSourceFilter } from '../components/book-list/bookListAdapters';
+import { useBookListPagination } from '../components/book-list/useBookListPagination';
+import type { Paper } from '../library/libraryModels';
 import type { Tag } from '../tags/tagModels';
 import { formatDateTime, formatProgressPercent, getDirectoryPath } from './homeDisplayUtils';
 import {
@@ -38,6 +40,7 @@ type ConfirmDialog = 'clear' | 'batchRemove';
 type HomeRecentFilesWorkspaceProps = {
   documents: PersistedDocument[];
   favoriteDocumentKeys: Set<string>;
+  papersByKey?: ReadonlyMap<string, Paper>;
   tags?: Tag[];
   onOpenPdf(): void | Promise<unknown>;
   onReopenDocument(document: PersistedDocument): void | Promise<void>;
@@ -75,6 +78,7 @@ function sameSelectedKeys(first: Set<string>, second: Set<string>) {
 export function HomeRecentFilesWorkspace({
   documents,
   favoriteDocumentKeys,
+  papersByKey,
   tags = [],
   onOpenPdf,
   onReopenDocument,
@@ -91,14 +95,11 @@ export function HomeRecentFilesWorkspace({
   const [progressFilter, setProgressFilter] = useState<RecentProgressFilter>('all');
   const [tagFilter, setTagFilter] = useState<RecentTagFilter>('all');
   const [favoriteFilter, setFavoriteFilter] = useState<RecentFavoriteFilter>('all');
+  const [sourceFilter, setSourceFilter] = useState<BookSourceFilter>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
-  const [openTagEditorKey, setOpenTagEditorKey] = useState<string | null>(null);
   const [selectedDocumentKeys, setSelectedDocumentKeys] = useState<Set<string>>(() => new Set());
   const [batchTagId, setBatchTagId] = useState('');
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialog | null>(null);
-  const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
-  const menuItemRefs = useRef(new Map<string, Array<HTMLButtonElement | null>>());
   const tagOptions = useMemo(() => buildRecentTagOptions(documents, tags), [documents, tags]);
   const tagsById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
   const visibleDocuments = useMemo(
@@ -113,15 +114,16 @@ export function HomeRecentFilesWorkspace({
             favoriteFilter,
           },
           favoriteDocumentKeys,
-        ),
+        ).filter((document) => matchesBookSource(document, sourceFilter)),
         sortMode,
       ),
-    [documents, favoriteDocumentKeys, favoriteFilter, progressFilter, query, sortMode, tagFilter],
+    [documents, favoriteDocumentKeys, favoriteFilter, progressFilter, query, sortMode, sourceFilter, tagFilter],
   );
   const selectedDocuments = useMemo(
     () => documents.filter((document) => selectedDocumentKeys.has(document.documentKey)),
     [documents, selectedDocumentKeys],
   );
+  const page = useBookListPagination(visibleDocuments, JSON.stringify([query, sortMode, progressFilter, tagFilter, favoriteFilter, sourceFilter]));
   const selectedBatchTag = useMemo(
     () => tags.find((tag) => String(tag.id) === batchTagId) ?? null,
     [batchTagId, tags],
@@ -139,11 +141,14 @@ export function HomeRecentFilesWorkspace({
   ).length;
   const allVisibleSelected =
     visibleDocuments.length > 0 && selectedVisibleCount === visibleDocuments.length;
+  const shownKeys = new Set((viewMode === 'list' ? page.items : visibleDocuments).map((document) => document.documentKey));
+  const selectedOutsidePage = selectedDocuments.filter((document) => !shownKeys.has(document.documentKey)).length;
   const filtering =
     query.trim() !== '' ||
     progressFilter !== 'all' ||
     tagFilter !== 'all' ||
-    favoriteFilter !== 'all';
+    favoriteFilter !== 'all' ||
+    sourceFilter !== 'all';
 
   useEffect(() => {
     setSelectedDocumentKeys((previous) => {
@@ -154,13 +159,6 @@ export function HomeRecentFilesWorkspace({
     });
   }, [documents]);
 
-  useEffect(() => {
-    if (!openMenuKey) {
-      return;
-    }
-
-    menuItemRefs.current.get(openMenuKey)?.[0]?.focus();
-  }, [openMenuKey]);
 
   const clearFilters = () => {
     setQuery('');
@@ -168,97 +166,11 @@ export function HomeRecentFilesWorkspace({
     setProgressFilter('all');
     setTagFilter('all');
     setFavoriteFilter('all');
+    setSourceFilter('all');
   };
 
   const handleQueryChange = (event: ChangeEvent<HTMLInputElement>) => {
     setQuery(event.target.value);
-  };
-
-  const closeMenu = () => {
-    setOpenMenuKey(null);
-  };
-
-  const closeMenuAndFocusTrigger = (documentKey: string) => {
-    closeMenu();
-    triggerRefs.current.get(documentKey)?.focus();
-  };
-
-  const handleMenuAction = (action: () => void | Promise<void>) => {
-    closeMenu();
-    void action();
-  };
-
-  const setTriggerRef = (documentKey: string, element: HTMLButtonElement | null) => {
-    if (element) {
-      triggerRefs.current.set(documentKey, element);
-      return;
-    }
-
-    triggerRefs.current.delete(documentKey);
-  };
-
-  const setMenuItemRef = (
-    documentKey: string,
-    index: number,
-    element: HTMLButtonElement | null,
-  ) => {
-    const items = menuItemRefs.current.get(documentKey) ?? [];
-
-    if (element) {
-      items[index] = element;
-      menuItemRefs.current.set(documentKey, items);
-      return;
-    }
-
-    items[index] = null;
-    if (items.some(Boolean)) {
-      menuItemRefs.current.set(documentKey, items);
-      return;
-    }
-
-    menuItemRefs.current.delete(documentKey);
-  };
-
-  const handleMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>, documentKey: string) => {
-    const menuItems = menuItemRefs.current.get(documentKey)?.filter(Boolean) ?? [];
-
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      closeMenuAndFocusTrigger(documentKey);
-      return;
-    }
-
-    if (menuItems.length === 0) {
-      return;
-    }
-
-    const currentIndex = Math.max(
-      menuItems.findIndex((item) => item === document.activeElement),
-      0,
-    );
-
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      menuItems[(currentIndex + 1) % menuItems.length]?.focus();
-      return;
-    }
-
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      menuItems[(currentIndex - 1 + menuItems.length) % menuItems.length]?.focus();
-      return;
-    }
-
-    if (event.key === 'Home') {
-      event.preventDefault();
-      menuItems[0]?.focus();
-      return;
-    }
-
-    if (event.key === 'End') {
-      event.preventDefault();
-      menuItems[menuItems.length - 1]?.focus();
-    }
   };
 
   const toggleDocumentSelection = (documentKey: string, selected: boolean) => {
@@ -331,11 +243,10 @@ export function HomeRecentFilesWorkspace({
     void onToggleDocumentTag?.(document, tag, selected);
   };
 
-  const renderTags = (document: PersistedDocument) => {
+  const renderTags = (document: PersistedDocument, table = false) => {
     const documentTags = document.tagIds
       .map((tagId) => tagsById.get(tagId))
       .filter((tag): tag is Tag => Boolean(tag));
-    const tagEditorOpen = openTagEditorKey === document.documentKey;
 
     return (
       <div className="recent-tag-cell">
@@ -345,8 +256,8 @@ export function HomeRecentFilesWorkspace({
               <button
                 key={tag.id}
                 type="button"
-                className="recent-tag-chip"
-                style={{ '--recent-tag-color': tag.color } as CSSProperties}
+                className={table ? 'book-list-tag' : 'recent-tag-chip'}
+                style={table ? { color: tag.color, borderColor: tag.color } : { '--recent-tag-color': tag.color } as CSSProperties}
                 onClick={() => setTagFilter(String(tag.id) as RecentTagFilter)}
               >
                 {tag.name}
@@ -357,42 +268,13 @@ export function HomeRecentFilesWorkspace({
           )}
         </div>
         <div className="recent-tag-editor-wrap">
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={`编辑标签 ${document.displayName}`}
-            aria-expanded={tagEditorOpen}
-            onClick={() => setOpenTagEditorKey(tagEditorOpen ? null : document.documentKey)}
-          >
-            <Tags size={15} />
-          </button>
-          {tagEditorOpen ? (
-            <div className="recent-tag-picker">
-              {tags.length > 0 ? (
-                tags.map((tag) => {
-                  const selected = document.tagIds.includes(tag.id);
-
-                  return (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      aria-label={`切换标签 ${tag.name}`}
-                      aria-pressed={selected}
-                      onClick={() => handleToggleDocumentTag(document, tag)}
-                    >
-                      <span style={{ background: tag.color }} />
-                      {tag.name}
-                    </button>
-                  );
-                })
-              ) : (
-                <span>暂无标签</span>
-              )}
-              <button type="button" className="text-link-button" onClick={() => onOpenTags?.()}>
-                管理标签
-              </button>
-            </div>
-          ) : null}
+          <BookListMenu name={document.displayName} triggerLabel={`编辑标签 ${document.displayName}`} icon={<Tags size={15} />}
+            actions={[
+              ...tags.map((tag) => ({ label: tag.name, ariaLabel: `切换标签 ${tag.name}`,
+                checked: document.tagIds.includes(tag.id), keepOpen: true,
+                onSelect: () => handleToggleDocumentTag(document, tag) })),
+              { label: '管理标签', onSelect: () => onOpenTags?.() },
+            ]} />
         </div>
       </div>
     );
@@ -420,91 +302,22 @@ export function HomeRecentFilesWorkspace({
 
   const renderActions = (document: PersistedDocument) => {
     const favorite = favoriteDocumentKeys.has(document.documentKey);
-    const menuOpen = openMenuKey === document.documentKey;
-
-    return (
-      <div className="recent-workspace-actions">
-        <button
-          type="button"
-          className="secondary-button"
-          aria-label={`继续阅读 ${document.displayName}`}
-          onClick={() => void onReopenDocument(document)}
-        >
-          继续阅读
-        </button>
-        <button
-          type="button"
-          className={favorite ? 'icon-button active' : 'icon-button'}
-          aria-label={`${favorite ? '取消收藏' : '收藏'} ${document.displayName}`}
-          onClick={() => void onToggleFavorite(document.documentKey, !favorite)}
-        >
-          <Star size={16} fill={favorite ? 'currentColor' : 'none'} />
-        </button>
-        <div className="recent-workspace-menu-wrap">
-          <button
-            type="button"
-            ref={(element) => setTriggerRef(document.documentKey, element)}
-            className="icon-button"
-            aria-label={`更多操作 ${document.displayName}`}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onClick={() => setOpenMenuKey(menuOpen ? null : document.documentKey)}
-          >
-            <MoreVertical size={16} />
-          </button>
-          {menuOpen ? (
-            <div
-              className="recent-file-menu"
-              role="menu"
-              onKeyDown={(event) => handleMenuKeyDown(event, document.documentKey)}
-            >
-              <button
-                type="button"
-                ref={(element) => setMenuItemRef(document.documentKey, 0, element)}
-                role="menuitem"
-                onClick={() => handleMenuAction(() => onReopenDocument(document))}
-              >
-                打开
-              </button>
-              <button
-                type="button"
-                ref={(element) => setMenuItemRef(document.documentKey, 1, element)}
-                role="menuitem"
-                onClick={() =>
-                  handleMenuAction(() => onToggleFavorite(document.documentKey, !favorite))
-                }
-              >
-                {favorite ? '取消收藏' : '收藏'}
-              </button>
-              <button
-                type="button"
-                ref={(element) => setMenuItemRef(document.documentKey, 2, element)}
-                role="menuitem"
-                onClick={() => handleMenuAction(() => onLocateFile(document))}
-              >
-                定位文件
-              </button>
-              <button
-                type="button"
-                ref={(element) => setMenuItemRef(document.documentKey, 3, element)}
-                role="menuitem"
-                onClick={() => handleMenuAction(() => onOpenTags?.())}
-              >
-                管理标签
-              </button>
-              <button
-                type="button"
-                ref={(element) => setMenuItemRef(document.documentKey, 4, element)}
-                role="menuitem"
-                onClick={() => handleMenuAction(() => removeDocuments([document]))}
-              >
-                从最近记录移除
-              </button>
-            </div>
-          ) : null}
-        </div>
-      </div>
-    );
+    return <div className="recent-workspace-actions">
+      <button type="button" className="secondary-button" aria-label={`继续阅读 ${document.displayName}`}
+        onClick={() => void onReopenDocument(document)}>继续阅读</button>
+      <button type="button" className={favorite ? 'icon-button active' : 'icon-button'}
+        aria-label={`${favorite ? '取消收藏' : '收藏'} ${document.displayName}`}
+        onClick={() => void onToggleFavorite(document.documentKey, !favorite)}>
+        <Star size={16} fill={favorite ? 'currentColor' : 'none'} />
+      </button>
+      <BookListMenu name={document.displayName} actions={[
+        { label: '打开', onSelect: () => onReopenDocument(document) },
+        { label: favorite ? '取消收藏' : '收藏', onSelect: () => onToggleFavorite(document.documentKey, !favorite) },
+        { label: '定位文件', onSelect: () => onLocateFile(document) },
+        { label: '管理标签', onSelect: () => onOpenTags?.() },
+        { label: '从最近记录移除', onSelect: () => removeDocuments([document]) },
+      ]} />
+    </div>;
   };
 
   const renderFileMain = (document: PersistedDocument) => (
@@ -547,61 +360,25 @@ export function HomeRecentFilesWorkspace({
   );
 
   const renderTable = () => (
-    <div className="recent-workspace-table-wrap" data-testid="recent-workspace-results">
-      <table className="recent-workspace-table">
-        <thead>
-          <tr>
-            <th scope="col">
-              <input
-                type="checkbox"
-                aria-label="选择当前可见文件"
-                checked={allVisibleSelected}
-                ref={(element) => {
-                  if (element) {
-                    element.indeterminate = selectedVisibleCount > 0 && !allVisibleSelected;
-                  }
-                }}
-                onChange={(event) => toggleVisibleSelection(event.target.checked)}
-              />
-            </th>
-            <th scope="col">文件名</th>
-            <th scope="col">本地路径</th>
-            <th scope="col">最近打开</th>
-            <th scope="col">阅读进度</th>
-            <th scope="col">标签</th>
-            <th scope="col">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {visibleDocuments.map((document) => (
-            <tr key={document.documentKey} data-testid="recent-workspace-document">
-              <td>
-                <input
-                  type="checkbox"
-                  aria-label={`选择 ${document.displayName}`}
-                  checked={selectedDocumentKeys.has(document.documentKey)}
-                  onChange={(event) =>
-                    toggleDocumentSelection(document.documentKey, event.target.checked)
-                  }
-                />
-              </td>
-              <td>{renderFileMain(document)}</td>
-              <td className="path-cell" title={document.path ?? (document.documentKey.startsWith('paper:') ? '本地文献库' : '本地浏览器文件')}>
-                {getDirectoryPath(document.path, document.documentKey)}
-              </td>
-              <td>{formatDateTime(document.lastOpenedAt ?? document.modifiedAt)}</td>
-              <td>
-                <div className="recent-table-progress">
-                  {renderProgress(document)}
-                  <span>{formatPageProgress(document)}</span>
-                </div>
-              </td>
-              <td>{renderTags(document)}</td>
-              <td>{renderActions(document)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div data-testid="recent-workspace-results">
+      <BookList label="最近文件列表"
+        items={page.items.map((document) => ({ ...documentBookItem(document, papersByKey?.get(document.documentKey)), favorite: favoriteDocumentKeys.has(document.documentKey) }))}
+        columns={['selection', 'name', 'authors', 'journal', 'path', 'opened', 'progress', 'page', 'tags', 'actions']}
+        rowTestId="recent-workspace-document" nameTestId="recent-workspace-document-name"
+        selection={{ selectedKeys: selectedDocumentKeys, selectPageLabel: '选择当前页全部文件',
+          onChange: (item, selected) => toggleDocumentSelection(item.key, selected),
+          onSelectPage: (selected) => setSelectedDocumentKeys((previous) => {
+            const next = new Set(previous);
+            for (const document of page.items) selected ? next.add(document.documentKey) : next.delete(document.documentKey);
+            return next;
+          }) }}
+        onOpen={(item) => void onReopenDocument(item.source)}
+        renderTags={(item) => renderTags(item.source, true)} renderActions={(item) => renderActions(item.source)}
+        pagination={page.pagination} />
+      {visibleDocuments.length > page.items.length ? <button type="button" className="text-link-button"
+        onClick={() => toggleVisibleSelection(!allVisibleSelected)}>
+        {allVisibleSelected ? '取消选择全部筛选结果' : `选择全部 ${visibleDocuments.length} 条筛选结果`}
+      </button> : null}
     </div>
   );
 
@@ -723,6 +500,13 @@ export function HomeRecentFilesWorkspace({
                 </select>
               </label>
               <label>
+                <span>文件来源筛选</span>
+                <select value={sourceFilter} aria-label="文件来源筛选" onChange={(event) => setSourceFilter(event.target.value as BookSourceFilter)}>
+                  <option value="all">全部来源</option><option value="paper">本地文献库</option>
+                  <option value="desktop">本地路径</option><option value="browser">浏览器文件</option>
+                </select>
+              </label>
+              <label>
                 <span>收藏状态筛选</span>
                 <select
                   value={favoriteFilter}
@@ -769,6 +553,7 @@ export function HomeRecentFilesWorkspace({
             {selectedDocuments.length > 0 ? (
               <div className="recent-batch-bar">
                 <span>已选择 {selectedDocuments.length} 个文件</span>
+                {selectedOutsidePage ? <span>其中 {selectedOutsidePage} 个不在当前显示范围</span> : null}
                 <select
                   value={batchTagId}
                   aria-label="批量选择标签"

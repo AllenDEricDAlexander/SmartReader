@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useMemo,
   useRef,
   useState,
   type ChangeEventHandler,
@@ -8,6 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
+import { paperDocumentKey, type Paper } from '../library/libraryModels';
 import type { BookmarkDashboard, PersistedDocument } from '../persistence/persistenceApi';
 import type { ReaderPreferences } from '../preferences/preferencesModels';
 import { defaultReaderPreferences } from '../preferences/preferencesStore';
@@ -53,6 +55,7 @@ type HomeDashboardProps = {
   onOpenAi?(): void;
   recentDocuments: PersistedDocument[];
   favoriteDocuments: FavoriteDocument[];
+  libraryPapers?: readonly Paper[];
   bookmarkDashboard?: BookmarkDashboard | null;
   bookmarkDashboardLoading?: boolean;
   bookmarkDashboardError?: string | null;
@@ -85,6 +88,7 @@ type HomeDashboardProps = {
   ): Promise<BookmarkDeleteResult>;
   onRefreshBookmarks?(): void | Promise<void>;
   onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
+  onBatchUnfavorite?(documentKeys: string[]): Promise<string[]>;
   onToggleDocumentTag(document: PersistedDocument, tag: Tag, selected: boolean): void | Promise<void>;
   onRemoveRecentDocuments(documents: PersistedDocument[]): void | Promise<void>;
   onClearRecentDocuments(): void | Promise<void>;
@@ -120,6 +124,7 @@ export function HomeDashboard({
   onOpenAi,
   recentDocuments,
   favoriteDocuments,
+  libraryPapers,
   bookmarkDashboard = null,
   bookmarkDashboardLoading = false,
   bookmarkDashboardError = null,
@@ -146,6 +151,7 @@ export function HomeDashboard({
   onDeleteBookmarks = async () => ({ succeededIds: [], failedIds: [] }),
   onRefreshBookmarks = noop,
   onToggleFavorite,
+  onBatchUnfavorite,
   onToggleDocumentTag,
   onRemoveRecentDocuments,
   onClearRecentDocuments,
@@ -173,6 +179,7 @@ export function HomeDashboard({
   const [notice, setNotice] = useState<HomeNoticeState | null>(null);
   const homePreferencesDisabled = !preferencesReady || preferencesDisabled;
   const favoriteDocumentKeys = new Set(favoriteDocuments.map((document) => document.documentKey));
+  const papersByKey = useMemo(() => new Map((libraryPapers ?? []).map((paper) => [paperDocumentKey(paper.id), paper])), [libraryPapers]);
   const openShortcutSettings = onOpenShortcutSettings ?? onOpenSettings;
 
   const openBrowserFilePicker = useCallback(() => {
@@ -275,6 +282,8 @@ export function HomeDashboard({
         />
         <HomeRecentFiles
           documents={recentDocuments}
+          papersByKey={papersByKey}
+          tags={availableTags}
           viewMode={preferences.homeRecentViewMode}
           viewModeDisabled={homePreferencesDisabled}
           onViewModeChange={(homeRecentViewMode) => void updateHomePreferences({ homeRecentViewMode })}
@@ -320,6 +329,7 @@ export function HomeDashboard({
     <div className="home-content home-blank-content">
       <HomeRecentFilesWorkspace
         documents={recentDocuments}
+        papersByKey={papersByKey}
         favoriteDocumentKeys={favoriteDocumentKeys}
         tags={availableTags}
         onOpenPdf={handleOpenPdf}
@@ -340,10 +350,12 @@ export function HomeDashboard({
     <div className="home-content home-blank-content">
       <HomeFavoriteFilesWorkspace
         documents={favoriteDocuments}
+        papersByKey={papersByKey}
         tags={availableTags}
         onOpenPdf={handleOpenPdf}
         onOpenDocument={handleOpenFavoriteDocument}
         onToggleFavorite={onToggleFavorite}
+        onBatchUnfavorite={onBatchUnfavorite}
         onLocateFile={() =>
           showNotice('定位文件功能待补充', '定位文件将在最近文件管理功能中补充。')
         }

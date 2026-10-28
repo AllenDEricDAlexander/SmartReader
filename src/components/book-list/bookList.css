@@ -1,0 +1,40 @@
+.book-list { min-width: 0; color: var(--sr-text); }
+.book-list-table-wrap { min-width: 0; overflow: auto; border: 1px solid var(--sr-border); border-radius: 9px; background: var(--sr-surface); }
+.book-list-table { width: 100%; min-width: 900px; border-collapse: collapse; text-align: left; font-size: 12px; }
+.book-list-table th, .book-list-table td { padding: 13px 10px; border-bottom: 1px solid var(--sr-border); vertical-align: middle; }
+.book-list-table th { background: var(--sr-surface-muted); color: var(--sr-text-muted); font-weight: 600; white-space: nowrap; }
+.book-list-table tbody tr:last-child td { border-bottom: 0; }
+.book-list-table tbody tr:not(.book-list-details):hover { background: var(--sr-hover-bg, #f8fbff); }
+.book-list-table .book-list-cell--selection { width: 38px; text-align: center; }
+.book-list-table input[type="checkbox"] { accent-color: var(--sr-primary); }
+.book-list-name { display: flex; align-items: center; gap: 9px; min-width: 135px; }
+.book-list-name-content { display: grid; min-width: 0; gap: 3px; overflow-wrap: anywhere; }
+.book-list-name-content small { color: var(--sr-text-muted); font-size: 11px; }
+.book-list-pdf { display: grid; place-items: center; width: 23px; height: 27px; flex-shrink: 0; border-radius: 4px; background: #ef4444; color: white; }
+.book-list-open { display: inline; min-height: 0; border: 0; padding: 0; background: transparent; color: var(--sr-text); text-align: left; overflow-wrap: anywhere; }
+.book-list-open:hover:not(:disabled) { color: var(--sr-primary); background: transparent; }
+.book-list-pin { flex-shrink: 0; color: var(--sr-primary); }
+.book-list-star { flex-shrink: 0; color: var(--sr-warning-text, #d97706); }
+.book-list-missing { color: var(--sr-danger-text, #b91c1c) !important; }
+.book-list-path { display: block; max-width: 190px; overflow-wrap: anywhere; color: var(--sr-text-muted); font-size: 11px; }
+.book-list-time-source { display: block; color: var(--sr-text-muted); font-size: 10px; }
+.book-list-progress { display: grid; gap: 5px; min-width: 65px; color: var(--sr-text-muted); }
+.book-list-progress-track { display: block; width: 66px; height: 6px; border-radius: 9px; background: var(--sr-surface-muted, #e5e7eb); overflow: hidden; }
+.book-list-progress-track > span { display: block; height: 100%; border-radius: inherit; background: var(--sr-primary); }
+.book-list-progress-track > span.complete { background: var(--sr-success-text, #16a34a); }
+.book-list-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.book-list-tag { min-height: 22px; padding: 2px 5px; border: 1px solid; border-radius: 4px; background: color-mix(in srgb, currentColor 8%, var(--sr-surface)); font-size: 11px; white-space: nowrap; }
+.book-list-actions { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.book-list-actions > button { min-height: 28px; }
+.book-list-table tr.previewed { background: var(--sr-hover-bg, #f8fbff); box-shadow: inset 2px 0 var(--sr-primary); }
+.book-list-details td { padding: 0 12px 12px; }
+.book-list-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0 0; color: var(--sr-text-muted); font-size: 12px; }
+.book-list-page-buttons { display: flex; align-items: center; gap: 10px; }
+.book-list-page-buttons button { min-width: 30px; min-height: 30px; padding: 0 8px; }
+.book-list-page-buttons button[aria-current="page"] { color: var(--sr-primary); border-color: var(--sr-primary); background: var(--sr-primary-soft, #eff6ff); }
+.book-list-pager select { min-height: 30px; }
+.book-list-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.book-list--compact .book-list-table { min-width: 0; }
+.book-list--compact .book-list-table th, .book-list--compact .book-list-table td { padding: 9px; }
+.book-list-menu { position: fixed; z-index: 1000; display: grid; min-width: 150px; max-height: min(320px, calc(100vh - 8px)); overflow-y: auto; gap: 2px; padding: 5px; border: 1px solid var(--sr-border); border-radius: 8px; background: var(--sr-surface); box-shadow: 0 8px 24px rgba(15, 23, 42, .18); }
+.book-list-menu button { min-height: 30px; justify-content: flex-start; padding: 4px 8px; border: 0; background: transparent; color: var(--sr-text); text-align: left; }

@@ -10,6 +10,7 @@ import type {
 import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
 import type { DocumentSession, DocumentState } from '../documents/documentModels';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
+import type { Paper } from '../library/libraryModels';
 import { HomeDashboard } from '../home/HomeDashboard';
 import type { HomeSidebarPage } from '../home/HomeSidebar';
 import type {
@@ -67,6 +68,7 @@ type ReaderWorkspaceSwitchProps = {
   commandRegistry: Parameters<typeof SettingsWorkspace>[0]['commandRegistry'];
   documents: DocumentState;
   favoriteDocuments: FavoriteDocument[];
+  libraryPapers?: readonly Paper[];
   globalSearchAnnotationError: string | null;
   globalSearchAnnotations: PersistedAnnotationRecord[];
   bookmarkDashboard: BookmarkDashboard | null;
@@ -114,6 +116,7 @@ type ReaderWorkspaceSwitchProps = {
   handleToggleAnnotationTag(annotation: ReaderAnnotation, tag: Tag, selected: boolean): void | Promise<void>;
   handleToggleDocumentTag(document: PersistedDocument, tag: Tag, selected: boolean): void | Promise<void>;
   handleToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
+  handleBatchUnfavorite?(documentKeys: string[]): Promise<string[]>;
   handleRemoveRecentDocuments(documents: PersistedDocument[]): void | Promise<void>;
   handleClearRecentDocuments(): void | Promise<void>;
   handleViewerWheel(event: WheelEvent<HTMLElement>): void;
@@ -173,6 +176,7 @@ export function ReaderWorkspaceSwitch({
   commandRegistry,
   documents,
   favoriteDocuments,
+  libraryPapers,
   globalSearchAnnotationError,
   globalSearchAnnotations,
   bookmarkDashboard,
@@ -218,6 +222,7 @@ export function ReaderWorkspaceSwitch({
   handleToggleAnnotationTag,
   handleToggleDocumentTag,
   handleToggleFavorite,
+  handleBatchUnfavorite,
   handleRemoveRecentDocuments,
   handleClearRecentDocuments,
   handleViewerWheel,
@@ -404,6 +409,7 @@ export function ReaderWorkspaceSwitch({
           taskStatus={importing ? 'importing' : 'idle'}
           recentDocuments={recentDocuments}
           favoriteDocuments={favoriteDocuments}
+          libraryPapers={libraryPapers}
           bookmarkDashboard={bookmarkDashboard}
           bookmarkDashboardLoading={bookmarkDashboardLoading}
           bookmarkDashboardError={bookmarkDashboardError}
@@ -440,6 +446,7 @@ export function ReaderWorkspaceSwitch({
           onDeleteBookmarks={deleteManagedBookmarks}
           onRefreshBookmarks={refreshBookmarkDashboard}
           onToggleFavorite={handleToggleFavorite}
+          onBatchUnfavorite={handleBatchUnfavorite}
           onToggleDocumentTag={handleToggleDocumentTag}
           onRemoveRecentDocuments={handleRemoveRecentDocuments}
           onClearRecentDocuments={handleClearRecentDocuments}

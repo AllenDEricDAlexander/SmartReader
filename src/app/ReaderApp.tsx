@@ -1003,6 +1003,24 @@ export function ReaderApp({
     [documents.sessions, persistence, recentDocuments],
   );
 
+  const handleBatchUnfavorite = useCallback(async (documentKeys: string[]) => {
+    const failed: string[] = [];
+    const access = research?.library.captureAccess();
+    for (const key of documentKeys) {
+      try {
+        const paperId = paperIdFromDocumentKey(key);
+        if (paperId !== null && research && access !== undefined && !research.library.canAccess(paperId, access)) {
+          throw new Error('文献访问状态已变化。');
+        }
+        await persistence.setDocumentFavorite(key, false);
+        setFavoriteDocuments((current) => current.filter((document) => document.documentKey !== key));
+      } catch {
+        failed.push(key);
+      }
+    }
+    return failed;
+  }, [persistence, research]);
+
   const handleToggleDocumentTag = useCallback(
     async (document: PersistedDocument, tag: Tag, selected: boolean) => {
       try {
@@ -1474,7 +1492,7 @@ export function ReaderApp({
   const reportExportError = (failure: unknown) => {
     if (failure instanceof Error && failure.name === 'NotesExportCleanupError') setAppError(failure.message);
   };
-  const libraryWorkspace = research ? <LibraryWorkspace library={research.library} ai={research.ai} persistence={persistence} onExportError={reportExportError}
+  const libraryWorkspace = research ? <LibraryWorkspace library={research.library} ai={research.ai} persistence={persistence} tags={availableTags} onExportError={reportExportError}
     onOpenPaper={openResearchPaper} onImport={async (folderId) => { await importPdfs(folderId); }} onOpenAiSettings={() => openSettingsWorkspace('ai')}
     importing={importing} importProgress={importProgress} initialFolderView={homeSidebarPage === 'folders'} /> : null;
   const workspaceContent = research && (homeSidebarPage === 'myDocuments' || homeSidebarPage === 'folders') ? libraryWorkspace
@@ -1549,6 +1567,7 @@ export function ReaderApp({
         commandRegistry={commandRegistry}
         documents={displayDocuments}
         favoriteDocuments={displayFavoriteDocuments}
+        libraryPapers={libraryView.papers}
         globalSearchAnnotationError={globalSearchAnnotationError}
         globalSearchAnnotations={displayAnnotations}
         bookmarkDashboard={displayBookmarkDashboard}
@@ -1594,6 +1613,7 @@ export function ReaderApp({
         handleToggleAnnotationTag={handleToggleAnnotationTag}
         handleToggleDocumentTag={handleToggleDocumentTag}
         handleToggleFavorite={handleToggleFavorite}
+        handleBatchUnfavorite={handleBatchUnfavorite}
         handleRemoveRecentDocuments={handleRemoveRecentDocuments}
         handleClearRecentDocuments={handleClearRecentDocuments}
         handleViewerWheel={handleViewerWheel}

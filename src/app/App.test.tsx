@@ -364,7 +364,7 @@ describe('App', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '最近文件 1' }));
     fireEvent.click(await screen.findByRole('button', { name: '编辑标签 Recent.pdf' }));
-    fireEvent.click(await screen.findByRole('button', { name: '切换标签 AI' }));
+    fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: '切换标签 AI' }));
 
     await waitFor(() => {
       expect(persistence.attachDocumentTag).toHaveBeenCalledWith(
@@ -999,7 +999,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '最近文件 1' }));
 
     expect(await screen.findByText('progress.pdf')).toBeInTheDocument();
-    expect(screen.getByText('4 / 10 页')).toBeInTheDocument();
+    expect(screen.getByText('4 / 10')).toBeInTheDocument();
     expect(screen.getByText('40%')).toBeInTheDocument();
 
     await waitFor(() => {
@@ -2564,6 +2564,32 @@ describe('App', () => {
       expect(readDesktopPdf).toHaveBeenCalledWith('/tmp/favorite.pdf');
     });
     expect(await screen.findByText('PDF blob:favorite-recent')).toBeInTheDocument();
+  });
+
+  it('keeps failed files selected when batch unfavorite partially succeeds', async () => {
+    let favorites = ['first', 'second'].map((name) => ({
+      documentKey: `desktop:/tmp/${name}.pdf`, displayName: `${name}.pdf`, path: `/tmp/${name}.pdf`,
+      lastPage: 1, progress: 0, pageCount: 10, missing: false, lastOpenedAt: null, tagIds: [],
+    }));
+    const persistence = {
+      ...createEmptyPersistence(),
+      listFavoriteDocuments: vi.fn(async () => favorites),
+      setDocumentFavorite: vi.fn(async (key: string) => {
+        if (key.endsWith('second.pdf')) throw new Error('storage failed');
+        favorites = favorites.filter((item) => item.documentKey !== key);
+      }),
+    };
+    renderApp(<App bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn() }} persistence={persistence} viewerRenderer={testViewerRenderer} />);
+    fireEvent.click(await screen.findByRole('button', { name: '收藏文件 2' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 first.pdf' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 second.pdf' }));
+    fireEvent.click(screen.getByRole('button', { name: '批量取消收藏' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('1 个文件取消收藏失败');
+    expect(persistence.setDocumentFavorite).toHaveBeenCalledWith('desktop:/tmp/first.pdf', false);
+    expect(persistence.setDocumentFavorite).toHaveBeenCalledWith('desktop:/tmp/second.pdf', false);
+    expect(screen.queryByRole('checkbox', { name: '选择 first.pdf' })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: '选择 second.pdf' })).toBeChecked();
   });
 
   it('shows a notice when a favorite file has no matching recent document', async () => {

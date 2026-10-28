@@ -271,6 +271,10 @@ function readAppStyles() {
   return readFileSync(join(process.cwd(), 'src/app/styles.css'), 'utf8');
 }
 
+function readBookListStyles() {
+  return readFileSync(join(process.cwd(), 'src/components/book-list/bookList.css'), 'utf8');
+}
+
 describe('HomeDashboard', () => {
   it('wraps the overview by available space and degrades recent files on narrow screens', () => {
     const styles = readAppStyles();
@@ -281,19 +285,15 @@ describe('HomeDashboard', () => {
     expect(styles).toMatch(/\.home-overview-content \.home-primary\s*{[^}]*flex:\s*3 1 620px;/s);
     expect(styles).toMatch(/\.home-assist\s*{[^}]*display:\s*grid;/s);
     expect(styles).toMatch(/@media \(max-width: 1180px\)\s*{[^@]*\.home-content\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
-    expect(styles).toMatch(/@media \(max-width: 720px\)\s*{[^@]*\.recent-files-table\s*{[^}]*min-width:\s*0;/s);
-    expect(styles).toMatch(/@media \(max-width: 720px\)\s*{[^@]*\.recent-files-table td::before\s*{[^}]*content:\s*attr\(data-label\);/s);
-    expect(styles).toMatch(/@media \(max-width: 720px\)\s*{[^@]*\.recent-files-table \.recent-file-menu\s*{[^}]*grid-column:\s*1 \/ -1;[^}]*justify-self:\s*stretch;[^}]*width:\s*100%;/s);
+    expect(readBookListStyles()).toMatch(/\.book-list-table-wrap\s*{[^}]*overflow:\s*auto;/s);
+    expect(readBookListStyles()).toMatch(/\.book-list--compact \.book-list-table\s*{[^}]*min-width:\s*0;/s);
     expect(styles).not.toMatch(/span:nth-of-type\(3\)/);
     expect(styles).toMatch(/\.home-status-left span\[aria-hidden="true"\]:not\(\.local-mode-dot\),\s*\.home-status-left svg\s*{[^}]*display:\s*none;/s);
     expect(styles).not.toMatch(/@media \(max-width: 1280px\)\s*{[^@]*\.home-content\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
   });
 
   it('keeps workspace row menus floating instead of expanding cards or rows', () => {
-    const styles = readAppStyles();
-
-    expect(styles).toMatch(/\.recent-workspace-menu-wrap\s*{[^}]*position:\s*relative;/s);
-    expect(styles).toMatch(/\.recent-workspace-menu-wrap \.recent-file-menu\s*{[^}]*position:\s*absolute;[^}]*right:\s*0;[^}]*top:\s*calc\(100% \+ 6px\);[^}]*width:\s*150px;[^}]*max-width:\s*none;[^}]*z-index:\s*30;/s);
+    expect(readBookListStyles()).toMatch(/\.book-list-menu\s*{[^}]*position:\s*fixed;[^}]*z-index:\s*1000;/s);
   });
 
   it('keeps tag management as a single framed home content page', () => {
@@ -529,7 +529,7 @@ describe('HomeDashboard', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: '编辑标签 Design Notes.pdf' }));
-    fireEvent.click(screen.getByRole('button', { name: '切换标签 AI' }));
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: '切换标签 AI' }));
     expect(onToggleDocumentTag).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: '清空历史记录' }));
@@ -775,8 +775,8 @@ describe('HomeDashboard', () => {
     const restoreRegion = screen.getByRole('region', { name: '最近阅读' });
 
     expect(within(restoreRegion).getByText('Design Notes.pdf')).toBeInTheDocument();
-    expect(within(restoreRegion).getByText('/Users/mario/Documents/')).toBeInTheDocument();
-    expect(within(restoreRegion).getByText('上次阅读到 第 12 / 86 页')).toBeInTheDocument();
+    expect(within(restoreRegion).getByText('/Users/mario/Documents/Design Notes.pdf')).toBeInTheDocument();
+    expect(within(restoreRegion).getByText('12 / 86')).toBeInTheDocument();
     expect(
       within(restoreRegion).getByText(expectedLocalDateTime(recentSessionDocuments[0].modifiedAt)),
     ).toBeInTheDocument();
@@ -805,7 +805,7 @@ describe('HomeDashboard', () => {
     fireEvent.click(within(card).getByRole('button', { name: '打开 Design Notes.pdf' }));
     expect(onReopenRecentDocument).toHaveBeenCalledExactlyOnceWith(recentTableDocuments[0]);
     fireEvent.click(within(card).getByRole('button', { name: '更多操作 Design Notes.pdf' }));
-    fireEvent.click(within(card).getByRole('menuitem', { name: '收藏' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '收藏' }));
     expect(onToggleFavorite).toHaveBeenCalledWith(recentTableDocuments[0].documentKey, true);
   });
 
@@ -818,12 +818,12 @@ describe('HomeDashboard', () => {
     expect(within(recentFilesRegion).getByRole('heading', { name: '最近阅读' })).toBeInTheDocument();
     expect(within(recentFilesRegion).getByRole('button', { name: '查看全部（6）' })).toBeInTheDocument();
     expect(within(recentFilesRegion).getByRole('columnheader', { name: '文件名' })).toBeInTheDocument();
-    expect(within(recentFilesRegion).getByRole('columnheader', { name: '路径' })).toBeInTheDocument();
-    expect(within(recentFilesRegion).getByRole('columnheader', { name: '上次打开' })).toBeInTheDocument();
+    expect(within(recentFilesRegion).getByRole('columnheader', { name: '本地路径' })).toBeInTheDocument();
+    expect(within(recentFilesRegion).getByRole('columnheader', { name: '最近打开' })).toBeInTheDocument();
     expect(within(recentFilesRegion).getByRole('columnheader', { name: '阅读进度' })).toBeInTheDocument();
     expect(within(recentFilesRegion).getByRole('columnheader', { name: '操作' })).toBeInTheDocument();
     expect(within(recentFilesRegion).getByText('Design Notes.pdf')).toBeInTheDocument();
-    expect(within(recentFilesRegion).getByText('/Users/mario/Documents/')).toBeInTheDocument();
+    expect(within(recentFilesRegion).getByText('/Users/mario/Documents/Design Notes.pdf')).toBeInTheDocument();
     expect(
       within(recentFilesRegion).getByText(expectedLocalDateTime(recentTableDocuments[0].modifiedAt)),
     ).toBeInTheDocument();
@@ -839,14 +839,14 @@ describe('HomeDashboard', () => {
     ).toHaveAttribute('data-label', '文件名');
     expect(
       within(designNotesRow as HTMLTableRowElement)
-        .getByText('/Users/mario/Documents/')
+        .getByText('/Users/mario/Documents/Design Notes.pdf')
         .closest('td'),
-    ).toHaveAttribute('data-label', '路径');
+    ).toHaveAttribute('data-label', '本地路径');
     expect(
       within(designNotesRow as HTMLTableRowElement)
         .getByText(expectedLocalDateTime(recentTableDocuments[0].modifiedAt))
         .closest('td'),
-    ).toHaveAttribute('data-label', '上次打开');
+    ).toHaveAttribute('data-label', '最近打开');
     expect(
       within(designNotesRow as HTMLTableRowElement)
         .getByRole('progressbar', { name: '阅读进度 Design Notes.pdf' })
@@ -886,7 +886,7 @@ describe('HomeDashboard', () => {
 
     const recentRegion = screen.getByRole('region', { name: '最近阅读' });
     expect(within(recentRegion).getByText('文件已移动或删除')).toBeInTheDocument();
-    expect(within(recentRegion).getByText('上次阅读到 第 12 页')).toBeInTheDocument();
+    expect(within(recentRegion).getByText(homeRecentViewMode === 'list' ? '第 12 页（总页数未知）' : '上次阅读到 第 12 页')).toBeInTheDocument();
     expect(within(recentRegion).getByText(expectedLocalDateTime(document.lastOpenedAt), { exact: false })).toBeInTheDocument();
   });
 
@@ -1014,26 +1014,26 @@ describe('HomeDashboard', () => {
     fireEvent.click(
       within(recentFilesRegion).getByRole('button', { name: '更多操作 Design Notes.pdf' }),
     );
-    fireEvent.click(within(recentFilesRegion).getByRole('menuitem', { name: '打开' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '打开' }));
     expect(onReopenRecentDocument).toHaveBeenCalledTimes(1);
     expect(onReopenRecentDocument).toHaveBeenCalledWith(recentTableDocuments[0]);
 
     fireEvent.click(
       within(recentFilesRegion).getByRole('button', { name: '更多操作 Design Notes.pdf' }),
     );
-    fireEvent.click(within(recentFilesRegion).getByRole('menuitem', { name: '收藏' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '收藏' }));
     expect(onToggleFavorite).toHaveBeenCalledWith(recentTableDocuments[0].documentKey, true);
 
     fireEvent.click(
       within(recentFilesRegion).getByRole('button', { name: '更多操作 Reader Spec.pdf' }),
     );
-    fireEvent.click(within(recentFilesRegion).getByRole('menuitem', { name: '取消收藏' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '取消收藏' }));
     expect(onToggleFavorite).toHaveBeenCalledWith(recentTableDocuments[1].documentKey, false);
 
     fireEvent.click(
       within(recentFilesRegion).getByRole('button', { name: '更多操作 Design Notes.pdf' }),
     );
-    fireEvent.click(within(recentFilesRegion).getByRole('menuitem', { name: '定位文件' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '定位文件' }));
     expect(screen.getByRole('dialog', { name: '定位文件功能待补充' })).toBeInTheDocument();
     expect(screen.getByText('定位文件将在最近文件管理功能中补充。')).toBeInTheDocument();
   });
@@ -1047,10 +1047,10 @@ describe('HomeDashboard', () => {
     fireEvent.click(
       within(recentFilesRegion).getByRole('button', { name: '更多操作 Design Notes.pdf' }),
     );
-    fireEvent.click(within(recentFilesRegion).getByRole('menuitem', { name: '从最近记录移除' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '从最近记录移除' }));
 
     await waitFor(() => expect(onRemoveRecentDocuments).toHaveBeenCalledExactlyOnceWith([recentTableDocuments[0]]));
-    expect(within(recentFilesRegion).queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
   it('closes the recent files menu with Escape and returns focus to its trigger', () => {
@@ -1062,13 +1062,13 @@ describe('HomeDashboard', () => {
     });
 
     fireEvent.click(menuButton);
-    const menu = within(recentFilesRegion).getByRole('menu');
+    const menu = screen.getByRole('menu');
 
     expect(within(menu).getByRole('menuitem', { name: '打开' })).toHaveFocus();
 
     fireEvent.keyDown(menu, { key: 'Escape' });
 
-    expect(within(recentFilesRegion).queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     expect(menuButton).toHaveFocus();
   });
 
@@ -1081,7 +1081,7 @@ describe('HomeDashboard', () => {
       within(recentFilesRegion).getByRole('button', { name: '更多操作 Design Notes.pdf' }),
     );
 
-    const menu = within(recentFilesRegion).getByRole('menu');
+    const menu = screen.getByRole('menu');
     const openItem = within(menu).getByRole('menuitem', { name: '打开' });
     const favoriteItem = within(menu).getByRole('menuitem', { name: '收藏' });
     const removeItem = within(menu).getByRole('menuitem', { name: '从最近记录移除' });

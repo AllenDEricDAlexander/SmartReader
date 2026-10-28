@@ -166,6 +166,23 @@ describe('library reader persistence adapter', () => {
     expect(await createLibraryPersistence({ ...base, getDocument: undefined }, library).getDocument!('desktop:unknown')).toBeNull();
   });
 
+  it('rejects a queued favorite change after a vault locks and unlocks', async () => {
+    const { api, base, library, paper, key, encrypt } = await fixture();
+    const vault = await encrypt();
+    const entered = deferred();
+    const release = deferred();
+    base.clearRecentDocuments.mockImplementationOnce(async () => { entered.resolve(); await release.promise; });
+    const clearing = api.clearRecentDocuments();
+    await entered.promise;
+    const changing = api.setDocumentFavorite(key, true);
+    const rejected = expect(changing).rejects.toThrow('访问状态已变化');
+    await library.lockVault(vault.id);
+    await library.unlockVault(vault.id, 'strong password');
+    release.resolve();
+    await Promise.all([clearing, rejected]);
+    expect(library.getPaper(paper.id)?.favorite).toBe(false);
+  });
+
   it('does not return a managed document lookup that spans locking and unlocking', async () => {
     const { api, base, library, key, encrypt } = await fixture();
     const vault = await encrypt();

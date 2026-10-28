@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
@@ -87,7 +87,7 @@ function listedNames() {
 }
 
 describe('HomeFavoriteFilesWorkspace', () => {
-  it('renders favorites in card view with overview and real tag stats', () => {
+  it('renders favorites in list view with overview and real tag stats', () => {
     renderWorkspace();
 
     expect(screen.getByRole('heading', { name: '收藏文件' })).toBeInTheDocument();
@@ -97,7 +97,7 @@ describe('HomeFavoriteFilesWorkspace', () => {
     expect(screen.getByRole('combobox', { name: '阅读进度筛选' })).toHaveValue('all');
     expect(screen.getByRole('combobox', { name: '标签筛选' })).toHaveValue('all');
     expect(screen.getByRole('combobox', { name: '目录筛选' })).toHaveValue('all');
-    expect(screen.getByRole('button', { name: '卡片视图' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '列表视图' })).toHaveAttribute('aria-pressed', 'true');
     expect(listedNames()).toEqual(['Alpha Notes.pdf', 'Beta Research.pdf', 'Local Upload.pdf']);
     expect(screen.getByText('收藏概览')).toBeInTheDocument();
     expect(screen.getByText('常用标签')).toBeInTheDocument();
@@ -176,6 +176,46 @@ describe('HomeFavoriteFilesWorkspace', () => {
     fireEvent.click(within(screen.getAllByTestId('favorite-workspace-document')[0]).getByRole('button', { name: '更多操作 Alpha Notes.pdf' }));
     fireEvent.click(screen.getByRole('menuitem', { name: '定位文件' }));
     expect(props.onLocateFile).toHaveBeenCalledWith(documents[1]);
+  });
+
+  it('reports partial batch failures and keeps only failed favorites selected', async () => {
+    const onBatchUnfavorite = vi.fn().mockResolvedValue([documents[0].documentKey]);
+    renderWorkspace({ onBatchUnfavorite });
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 Beta Research.pdf' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 Alpha Notes.pdf' }));
+    fireEvent.click(screen.getByRole('button', { name: '批量取消收藏' }));
+
+    await waitFor(() => expect(onBatchUnfavorite).toHaveBeenCalledWith([documents[0].documentKey, documents[1].documentKey]));
+    expect(await screen.findByRole('alert')).toHaveTextContent('1 个文件取消收藏失败');
+    expect(screen.getByRole('checkbox', { name: '选择 Beta Research.pdf' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '选择 Alpha Notes.pdf' })).not.toBeChecked();
+  });
+
+  it('keeps batch selection when switching between list and card views', () => {
+    renderWorkspace({ onBatchUnfavorite: vi.fn().mockResolvedValue([]) });
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 Beta Research.pdf' }));
+    fireEvent.click(screen.getByRole('button', { name: '卡片视图' }));
+    expect(screen.getByRole('checkbox', { name: '选择 Beta Research.pdf' })).toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 Alpha Notes.pdf' }));
+    fireEvent.click(screen.getByRole('button', { name: '列表视图' }));
+    expect(screen.getByRole('checkbox', { name: '选择 Beta Research.pdf' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '选择 Alpha Notes.pdf' })).toBeChecked();
+  });
+
+  it('does not restore an invalidated selection when a pending batch finishes after access returns', async () => {
+    let finish!: (failed: string[]) => void;
+    const onBatchUnfavorite = vi.fn(() => new Promise<string[]>((resolve) => { finish = resolve; }));
+    const props: ComponentProps<typeof HomeFavoriteFilesWorkspace> = {
+      documents: [documents[0]], tags, onBatchUnfavorite, onOpenPdf: vi.fn(), onOpenDocument: vi.fn(),
+      onToggleFavorite: vi.fn(), onLocateFile: vi.fn(), onOpenTags: vi.fn(),
+    };
+    const view = renderApp(<HomeFavoriteFilesWorkspace {...props} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 Beta Research.pdf' }));
+    fireEvent.click(screen.getByRole('button', { name: '批量取消收藏' }));
+    view.rerender(<HomeFavoriteFilesWorkspace {...props} documents={[]} />);
+    view.rerender(<HomeFavoriteFilesWorkspace {...props} />);
+    await act(async () => finish([documents[0].documentKey]));
+    expect(screen.getByRole('checkbox', { name: '选择 Beta Research.pdf' })).not.toBeChecked();
   });
 
   it('shows empty, no-result, and recommendation empty states', () => {

@@ -2,6 +2,7 @@ import { fireEvent, screen, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { PersistedDocument } from '../persistence/persistenceApi';
+import { paperFixture } from '../library/libraryUiTestUtils';
 import type { Tag } from '../tags/tagModels';
 import { renderApp } from '../test/renderApp';
 import { HomeRecentFilesWorkspace } from './HomeRecentFilesWorkspace';
@@ -319,9 +320,14 @@ describe('HomeRecentFilesWorkspace', () => {
     const props = renderWorkspace();
 
     fireEvent.click(screen.getByRole('button', { name: '编辑标签 Beta Research.pdf' }));
-    fireEvent.click(screen.getByRole('button', { name: '切换标签 医学' }));
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: '切换标签 医学' }));
 
     expect(props.onToggleDocumentTag).toHaveBeenCalledWith(documents[0], tags[1], true);
+    const menu = screen.getByRole('menu');
+    fireEvent.scroll(menu);
+    expect(menu).toBeInTheDocument();
+    fireEvent.keyDown(menu, { key: 'Escape' });
+    expect(screen.getByRole('button', { name: '编辑标签 Beta Research.pdf' })).toHaveFocus();
   });
 
   it('supports batch tag binding, batch tag removal, and batch remove recent', () => {
@@ -343,6 +349,44 @@ describe('HomeRecentFilesWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '批量移出最近' }));
     fireEvent.click(screen.getByRole('button', { name: '确认移出' }));
     expect(props.onRemoveRecentDocuments).toHaveBeenCalledWith([documents[0], documents[2]]);
+  });
+
+  it('selects a page or all filtered results without losing selections on other pages', () => {
+    const many = Array.from({ length: 12 }, (_, index) => ({ ...documents[0],
+      documentKey: `desktop:/books/book-${index}.pdf`, displayName: `book-${String(index).padStart(2, '0')}.pdf`,
+    }));
+    const props = renderWorkspace({ documents: many });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择当前页全部文件' }));
+    expect(screen.getByText('已选择 10 个文件')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(listedNames()).toHaveLength(2);
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择当前页全部文件' }));
+    expect(screen.getByText('已选择 12 个文件')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索最近文件' }), { target: { value: 'book-00' } });
+    expect(screen.getByText('已选择 12 个文件')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '批量移出最近' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认移出' }));
+    expect(props.onRemoveRecentDocuments).toHaveBeenCalledWith(many);
+  });
+
+  it('shows library metadata without inventing it for legacy records and filters real sources', () => {
+    const managed = { ...documents[0], documentKey: 'paper:managed', displayName: 'managed.pdf', path: null };
+    const paper = paperFixture('managed');
+    paper.metadata = { ...paper.metadata, authors: ['作者甲'], journal: '期刊乙' };
+    paper.pinned = true;
+    const legacy = { ...documents[1], documentKey: 'path:/legacy.pdf' };
+    renderWorkspace({ documents: [managed, legacy], papersByKey: new Map([['paper:managed', paper]]) });
+    const row = screen.getByRole('button', { name: '打开 managed.pdf' }).closest('tr')!;
+    expect(within(row).getByText('作者甲')).toBeInTheDocument();
+    expect(within(row).getByText('期刊乙')).toBeInTheDocument();
+    expect(within(row).getByText('本地文献库')).toBeInTheDocument();
+    expect(within(screen.getByRole('button', { name: '打开 Alpha Notes.pdf' }).closest('tr')!).getAllByText('—')).toHaveLength(2);
+    fireEvent.change(screen.getByRole('combobox', { name: '文件来源筛选' }), { target: { value: 'paper' } });
+    expect(listedNames()).toEqual(['managed.pdf']);
+    fireEvent.change(screen.getByRole('combobox', { name: '文件来源筛选' }), { target: { value: 'desktop' } });
+    expect(listedNames()).toEqual(['Alpha Notes.pdf']);
   });
 
   it('clears recent history after confirmation', () => {

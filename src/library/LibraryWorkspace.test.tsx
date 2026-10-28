@@ -20,6 +20,11 @@ async function setup(papers = [paperFixture(), { ...paperFixture('paper-2', '教
   return { ...fixture, onOpenPaper, onImport };
 }
 
+function choosePaperAction(title: string, label: string) {
+  fireEvent.click(screen.getByRole('button', { name: `更多操作 ${title}` }));
+  return screen.getByRole('menuitem', { name: label });
+}
+
 function chooseFolderAction(name: string) {
   fireEvent.click(screen.getByRole('button', { name: '当前分类操作' }));
   fireEvent.click(screen.getByRole('menuitem', { name }));
@@ -30,7 +35,7 @@ describe('library workspace', () => {
     const props = await setup();
     vi.mocked(exportPaperNotesPdf).mockResolvedValue(true);
     render(<LibraryWorkspace {...props} />);
-    fireEvent.click(screen.getByRole('button', { name: '导出 认知研究 的笔记 PDF' }));
+    fireEvent.click(choosePaperAction('认知研究', '导出 认知研究 的笔记 PDF'));
     await waitFor(() => expect(exportPaperNotesPdf).toHaveBeenCalledWith(props.library, ['paper-1']));
     expect(await screen.findByText(/笔记 PDF 已导出/)).toBeInTheDocument();
 
@@ -44,11 +49,10 @@ describe('library workspace', () => {
     const props = await setup();
     vi.mocked(exportPaperNotesPdf).mockResolvedValueOnce(false).mockRejectedValueOnce(new Error('写入失败'));
     render(<LibraryWorkspace {...props} />);
-    const button = screen.getByRole('button', { name: '导出 认知研究 的笔记 PDF' });
-    fireEvent.click(button);
-    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(choosePaperAction('认知研究', '导出 认知研究 的笔记 PDF'));
+    await waitFor(() => expect(screen.getByRole('button', { name: '更多操作 认知研究' })).toBeEnabled());
     expect(screen.queryByText(/笔记 PDF 已导出/)).not.toBeInTheDocument();
-    fireEvent.click(button);
+    fireEvent.click(choosePaperAction('认知研究', '导出 认知研究 的笔记 PDF'));
     expect(await screen.findByRole('alert')).toHaveTextContent('写入失败');
   });
 
@@ -58,7 +62,7 @@ describe('library workspace', () => {
     let reject!: (failure: Error) => void;
     vi.mocked(exportPaperNotesPdf).mockReturnValue(new Promise<boolean>((_resolve, fail) => { reject = fail; }));
     const { unmount } = render(<LibraryWorkspace {...props} onExportError={onExportError} />);
-    fireEvent.click(screen.getByRole('button', { name: '导出 认知研究 的笔记 PDF' }));
+    fireEvent.click(choosePaperAction('认知研究', '导出 认知研究 的笔记 PDF'));
     unmount();
     const error = new Error('清理新文件失败');
     error.name = 'NotesExportCleanupError';
@@ -70,7 +74,7 @@ describe('library workspace', () => {
     const props = await setup();
     render(<LibraryWorkspace {...props} />);
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索文献' }), { target: { value: 'synapse' } });
-    const list = screen.getByRole('list', { name: '文献列表' });
+    const list = screen.getByRole('table', { name: '文献列表' });
     expect(within(list).queryByText('教育研究')).not.toBeInTheDocument();
     fireEvent.click(within(list).getByRole('button', { name: '打开匹配 第 2 页 认知研究' }));
     await waitFor(() => expect(props.onOpenPaper).toHaveBeenCalledWith('paper-1', 2));
@@ -177,6 +181,29 @@ describe('library workspace', () => {
     expect(props.files.size).toBe(2);
   });
 
+  it('applies a batch action to all filtered papers across pages', async () => {
+    const props = await setup(Array.from({ length: 12 }, (_, index) => paperFixture(`paper-${index}`, `文献 ${index}`)));
+    render(<LibraryWorkspace {...props} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择当前页全部文献' }));
+    expect(screen.getByText('已选 10 篇')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '选择全部 12 条筛选结果' }));
+    expect(screen.getByText('已选 12 篇')).toBeInTheDocument();
+    expect(screen.getByText('其中 2 篇不在当前显示范围')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '批量收藏' }));
+    await waitFor(() => expect(props.library.getView().papers.every((paper) => paper.favorite)).toBe(true));
+  });
+
+  it('filters library papers by real tags and resets a removed tag filter', async () => {
+    const tagged = { ...paperFixture(), tagIds: [1] };
+    const props = await setup([tagged, paperFixture('paper-2', '教育研究')]);
+    const tag = { id: 1, name: 'AI', color: '#2563eb', documentCount: 1, annotationCount: 0, createdAt: '', updatedAt: '' };
+    const view = render(<LibraryWorkspace {...props} tags={[tag]} />);
+    fireEvent.click(within(screen.getByRole('table', { name: '文献列表' })).getByRole('button', { name: 'AI' }));
+    expect(screen.queryByRole('button', { name: '阅读 教育研究' })).not.toBeInTheDocument();
+    view.rerender(<LibraryWorkspace {...props} tags={[]} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '阅读 教育研究' })).toBeInTheDocument());
+  });
+
   it('confirms library-copy deletion and preserves papers when deleting a folder', async () => {
     const props = await setup();
     const folder = await props.library.createFolder('临时分类');
@@ -207,7 +234,7 @@ describe('library workspace', () => {
     await waitFor(() => expect(props.library.getView().snapshot.preferences.previewMode).toBe('pinned'));
     await act(async () => props.library.editMetadata('paper-2', { year: '2026' }));
     fireEvent.change(screen.getByLabelText('排序方式'), { target: { value: 'year' } });
-    fireEvent.mouseEnter(screen.getByRole('listitem', { name: '文献 教育研究' }));
+    fireEvent.mouseEnter(screen.getByRole('button', { name: '阅读 教育研究' }).closest('tr')!);
     expect(within(screen.getByLabelText('文献预览')).getByRole('heading', { name: '认知研究' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '关闭预览' }));
     await waitFor(() => expect(screen.queryByLabelText('文献预览')).not.toBeInTheDocument());
@@ -231,10 +258,26 @@ describe('library workspace', () => {
     expect(screen.getByText(/1 篇文献已锁定/)).toBeInTheDocument();
   });
 
+  it('removes selected rows and their open action menu immediately on vault lock', async () => {
+    const props = await setup([paperFixture('secret', '私密研究标题')]);
+    const folder = await props.library.createFolder('私密项目');
+    await props.library.categorize(['secret'], [folder.id], 'move');
+    const vault = await props.library.encryptFolder(folder.id, 'vault password');
+    render(<LibraryWorkspace {...props} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 私密研究标题' }));
+    fireEvent.click(screen.getByRole('button', { name: '更多操作 私密研究标题' }));
+    expect(screen.getByRole('menuitem', { name: '导出 私密研究标题 的笔记 PDF' })).toBeInTheDocument();
+
+    await act(async () => props.library.lockVault(vault.id));
+    expect(screen.queryByText('私密研究标题')).not.toBeInTheDocument();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.queryByText('已选 1 篇')).not.toBeInTheDocument();
+  });
+
   it('shows actionable failures instead of silently ignoring unavailable AI configuration', async () => {
     const props = await setup();
     render(<LibraryWorkspace {...props} />);
-    fireEvent.click(screen.getByRole('button', { name: 'AI 补全 认知研究' }));
+    fireEvent.click(choosePaperAction('认知研究', 'AI 补全 认知研究'));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/AI 设置/));
     expect(props.library.getPaper('paper-1')?.indexStatus).toBe('ready');
   });
@@ -308,7 +351,7 @@ describe('library workspace', () => {
     const props = await setup([paperFixture()]);
     const retry = vi.spyOn(props.library, 'retryIndex').mockResolvedValue({ ...paperFixture(), indexStatus: 'error', indexError: 'PDF 密码错误' });
     render(<LibraryWorkspace {...props} />);
-    fireEvent.click(screen.getByRole('button', { name: '重新索引 认知研究' }));
+    fireEvent.click(choosePaperAction('认知研究', '重新索引 认知研究'));
     const dialog = screen.getByRole('dialog', { name: '重新建立索引' });
     const input = within(dialog).getByLabelText('PDF 打开密码（可选）');
     expect(input).not.toHaveAttribute('minlength');
@@ -324,7 +367,7 @@ describe('library workspace', () => {
     let complete: () => void = () => undefined;
     vi.spyOn(props.ai, 'enrich').mockImplementation(() => new Promise<void>((resolve) => { complete = resolve; }));
     render(<LibraryWorkspace {...props} />);
-    fireEvent.click(screen.getByRole('button', { name: 'AI 补全 认知研究' }));
+    fireEvent.click(choosePaperAction('认知研究', 'AI 补全 认知研究'));
     expect(screen.getByRole('button', { name: '阅读 教育研究' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: '阅读 教育研究' }));
     await waitFor(() => expect(props.onOpenPaper).toHaveBeenCalledWith('paper-2'));

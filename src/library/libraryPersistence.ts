@@ -298,7 +298,15 @@ export function createLibraryPersistence(base: PersistenceApi, library: LibraryS
     },
     setDocumentFavorite(key, favorite) {
       if (!managed(key)) return base.setDocumentFavorite(key, favorite);
-      return write(async () => { await library.updatePaper(requirePaper(key).id, { favorite }); });
+      const access = library.captureAccess();
+      return write(async () => {
+        const paper = requirePaper(key);
+        requireAccess(paper.id, access);
+        await library.updatePaper(paper.id, () => {
+          requireAccess(paper.id, access);
+          return { favorite };
+        });
+      });
     },
     async listFavoriteDocuments() {
       const access = library.captureAccess();

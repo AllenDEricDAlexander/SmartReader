@@ -374,7 +374,7 @@ describe('desktop research App integration', () => {
 
     fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));
     let recentRegion = screen.getByRole('region', { name: '最近阅读' });
-    expect(within(recentRegion).getByText('上次阅读到 第 5 / 6 页')).toBeInTheDocument();
+    expect(within(recentRegion).getByText(homeRecentViewMode === 'list' ? '5 / 6' : '上次阅读到 第 5 / 6 页')).toBeInTheDocument();
     expect(within(recentRegion).getAllByText('cognition.pdf')).toHaveLength(1);
     if (homeRecentViewMode === 'cards') {
       expect(within(recentRegion).getByRole('article', { name: 'cognition.pdf' })).toBeInTheDocument();
@@ -389,7 +389,7 @@ describe('desktop research App integration', () => {
 
     if (action === 'remove') {
       fireEvent.click(within(recentRegion).getByRole('button', { name: '更多操作 cognition.pdf' }));
-      fireEvent.click(within(recentRegion).getByRole('menuitem', { name: '从最近记录移除' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: '从最近记录移除' }));
     } else {
       fireEvent.click(screen.getByRole('button', { name: '清除记录' }));
       fireEvent.click(screen.getByRole('button', { name: '清空记录' }));
@@ -514,6 +514,54 @@ describe('desktop research App integration', () => {
     fireEvent.change(within(freshSearch).getByLabelText('全局搜索关键词'), { target: { value: contentToken } });
     expect(within(freshSearch).queryByRole('button', { name: new RegExp(title) })).not.toBeInTheDocument();
     expect(within(freshSearch).getByText('没有找到匹配结果。')).toBeInTheDocument();
+  });
+
+  it('removes enriched recent-list metadata and selection when the vault locks', async () => {
+    const app = fixture();
+    const paper = await app.library.importPdf(primaryPdf(), 'cognition.pdf');
+    const folder = await app.library.createFolder('Private project');
+    await app.library.categorize([paper.id], [folder.id], 'move');
+    const vault = await app.library.encryptFolder(folder.id, 'strong password');
+    render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);
+    fireEvent.click(await screen.findByRole('button', { name: '最近文件 1' }));
+    expect(screen.getByText('Researcher A')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 cognition.pdf' }));
+    fireEvent.click(screen.getByRole('button', { name: '更多操作 cognition.pdf' }));
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+
+    await act(() => app.library.lockVault(vault.id));
+    expect(screen.queryByText('Researcher A')).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: '选择 cognition.pdf' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.queryByText('已选择 1 个文件')).not.toBeInTheDocument();
+  });
+
+  it('does not continue a pending batch unfavorite after a selected vault locks and unlocks', async () => {
+    const app = fixture();
+    const paper = await app.library.importPdf(primaryPdf(), 'cognition.pdf');
+    await app.library.updatePaper(paper.id, { favorite: true });
+    const folder = await app.library.createFolder('Private project');
+    await app.library.categorize([paper.id], [folder.id], 'move');
+    const vault = await app.library.encryptFolder(folder.id, 'strong password');
+    const legacy = { documentKey: 'desktop:/legacy.pdf', displayName: 'legacy.pdf', path: '/legacy.pdf',
+      lastPage: 1, progress: 0, pageCount: 5, missing: false, lastOpenedAt: null, tagIds: [] };
+    vi.mocked(app.persistence.listFavoriteDocuments).mockResolvedValue([legacy]);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(app.persistence.setDocumentFavorite).mockImplementation(async () => pending);
+    render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);
+    fireEvent.click(await screen.findByRole('button', { name: '收藏文件 2' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 legacy.pdf' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 cognition.pdf' }));
+    fireEvent.click(screen.getByRole('button', { name: '批量取消收藏' }));
+    await waitFor(() => expect(app.persistence.setDocumentFavorite).toHaveBeenCalledWith(legacy.documentKey, false));
+
+    await act(() => app.library.lockVault(vault.id));
+    await act(() => app.library.unlockVault(vault.id, 'strong password'));
+    await act(async () => release());
+    expect(await screen.findByRole('alert')).toHaveTextContent('1 个文件取消收藏失败');
+    expect(app.library.getPaper(paper.id)?.favorite).toBe(true);
+    expect(screen.getByRole('checkbox', { name: '选择 cognition.pdf' })).not.toBeChecked();
   });
 
   it('restores managed reading progress from the same storage after the App and library service are recreated', async () => {

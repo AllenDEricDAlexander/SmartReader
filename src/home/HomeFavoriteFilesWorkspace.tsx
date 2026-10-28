@@ -1,6 +1,11 @@
-import { FileText, Grid2X2, List, MoreVertical, Search, Star, Tags } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import { FileText, Grid2X2, List, Search, Star, Tags } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import type { FavoriteDocument } from '../favorites/favoriteModels';
+import { BookList } from '../components/book-list/BookList';
+import { BookListMenu } from '../components/book-list/BookListMenu';
+import { documentBookItem, matchesBookSource, type BookSourceFilter } from '../components/book-list/bookListAdapters';
+import { useBookListPagination } from '../components/book-list/useBookListPagination';
+import type { Paper } from '../library/libraryModels';
 import type { Tag } from '../tags/tagModels';
 import {
   buildFavoriteDirectoryOptions,
@@ -22,20 +27,24 @@ type ViewMode = 'cards' | 'list';
 
 type HomeFavoriteFilesWorkspaceProps = {
   documents: FavoriteDocument[];
+  papersByKey?: ReadonlyMap<string, Paper>;
   tags: Tag[];
   onOpenPdf(): void | Promise<unknown>;
   onOpenDocument(document: FavoriteDocument): void | Promise<void>;
   onToggleFavorite(documentKey: string, favorite: boolean): void | Promise<void>;
+  onBatchUnfavorite?(documentKeys: string[]): Promise<string[]>;
   onLocateFile(document: FavoriteDocument): void | Promise<void>;
   onOpenTags(): void;
 };
 
 export function HomeFavoriteFilesWorkspace({
   documents,
+  papersByKey,
   tags,
   onOpenPdf,
   onOpenDocument,
   onToggleFavorite,
+  onBatchUnfavorite,
   onLocateFile,
   onOpenTags,
 }: HomeFavoriteFilesWorkspaceProps) {
@@ -44,10 +53,21 @@ export function HomeFavoriteFilesWorkspace({
   const [progressFilter, setProgressFilter] = useState<FavoriteProgressFilter>('all');
   const [tagFilter, setTagFilter] = useState<FavoriteTagFilter>('all');
   const [directoryFilter, setDirectoryFilter] = useState<FavoriteDirectoryFilter>('all');
-  const [viewMode, setViewMode] = useState<ViewMode>('cards');
-  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
-  const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
-  const menuItemRefs = useRef(new Map<string, Array<HTMLButtonElement | null>>());
+  const [sourceFilter, setSourceFilter] = useState<BookSourceFilter>('all');
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchError, setBatchError] = useState<string | null>(null);
+  const batchRunning = useRef(false);
+  const availableKeys = useRef(new Set(documents.map((document) => document.documentKey)));
+  const batchKeys = useRef<Set<string> | null>(null);
+
+  useLayoutEffect(() => {
+    availableKeys.current = new Set(documents.map((document) => document.documentKey));
+    if (batchKeys.current) {
+      for (const key of batchKeys.current) if (!availableKeys.current.has(key)) batchKeys.current.delete(key);
+    }
+  }, [documents]);
 
   const tagOptions = useMemo(() => buildFavoriteTagOptions(documents, tags), [documents, tags]);
   const directoryOptions = useMemo(() => buildFavoriteDirectoryOptions(documents), [documents]);
@@ -59,8 +79,11 @@ export function HomeFavoriteFilesWorkspace({
       directoryFilter,
     });
 
-    return sortFavoriteDocuments(filteredDocuments, sortMode);
-  }, [directoryFilter, documents, progressFilter, query, sortMode, tagFilter]);
+    return sortFavoriteDocuments(filteredDocuments.filter((document) => matchesBookSource(document, sourceFilter)), sortMode);
+  }, [directoryFilter, documents, progressFilter, query, sortMode, sourceFilter, tagFilter]);
+  const page = useBookListPagination(visibleDocuments, JSON.stringify([query, sortMode, progressFilter, tagFilter, directoryFilter, sourceFilter]));
+  const shownKeys = new Set((viewMode === 'list' ? page.items : visibleDocuments).map((document) => document.documentKey));
+  const selectedOutsidePage = [...selectedKeys].filter((key) => !shownKeys.has(key)).length;
   const overview = useMemo(() => deriveFavoriteOverview(documents), [documents]);
   const recentActivity = useMemo(() => getRecentFavoriteActivity(documents), [documents]);
   const recommendations = useMemo(
@@ -69,122 +92,104 @@ export function HomeFavoriteFilesWorkspace({
   );
   const tagsById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
 
+  useEffect(() => {
+    const available = new Set(documents.map((document) => document.documentKey));
+    setSelectedKeys((current) => {
+      const next = new Set([...current].filter((key) => available.has(key)));
+      return next.size === current.size ? current : next;
+    });
+  }, [documents]);
+
+  const selectKeys = (keys: readonly string[], checked: boolean) => setSelectedKeys((current) => {
+    const next = new Set(current);
+    for (const key of keys) checked ? next.add(key) : next.delete(key);
+    return next;
+  });
+
+  const batchUnfavorite = async () => {
+    if (!onBatchUnfavorite || batchRunning.current || !selectedKeys.size) return;
+    batchRunning.current = true;
+    setBatchBusy(true);
+    setBatchError(null);
+    batchKeys.current = new Set(selectedKeys);
+    try {
+      const failed = await onBatchUnfavorite([...selectedKeys]);
+      setSelectedKeys(new Set(failed.filter((key) => availableKeys.current.has(key) && batchKeys.current?.has(key))));
+      if (failed.length) setBatchError(`${failed.length} 个文件取消收藏失败，请重试。`);
+    } catch (failure) {
+      setBatchError(failure instanceof Error ? failure.message : '批量取消收藏失败，请重试。');
+    } finally {
+      batchKeys.current = null;
+      batchRunning.current = false;
+      setBatchBusy(false);
+    }
+  };
+
   const clearFilters = () => {
     setQuery('');
     setSortMode('recent');
     setProgressFilter('all');
     setTagFilter('all');
     setDirectoryFilter('all');
+    setSourceFilter('all');
   };
 
   const handleQueryChange = (event: ChangeEvent<HTMLInputElement>) => {
     setQuery(event.target.value);
   };
 
-  useEffect(() => {
-    if (!openMenuKey) {
-      return;
-    }
+  const renderTags = (document: FavoriteDocument, table = false) => (
+    <div className="favorite-workspace-tags" aria-label={`${document.displayName} 标签`}>
+      {document.tagIds.length > 0 ? (
+        document.tagIds.map((tagId) => {
+          const tag = tagsById.get(tagId);
+          return tag ? (
+            <button
+              type="button"
+              key={tag.id}
+              className={table ? 'book-list-tag' : 'favorite-tag-chip'}
+              style={{ borderColor: tag.color, color: tag.color }}
+              onClick={() => setTagFilter(`${tag.id}`)}
+            >
+              {tag.name}
+            </button>
+          ) : null;
+        })
+      ) : (
+        <span>暂无标签</span>
+      )}
+    </div>
+  );
 
-    menuItemRefs.current.get(openMenuKey)?.[0]?.focus();
-  }, [openMenuKey]);
-
-  const closeMenu = () => setOpenMenuKey(null);
-
-  const closeMenuAndFocusTrigger = (documentKey: string) => {
-    closeMenu();
-    triggerRefs.current.get(documentKey)?.focus();
-  };
-
-  const handleMenuAction = (action: () => void | Promise<void>) => {
-    closeMenu();
-    void action();
-  };
-
-  const setTriggerRef = (documentKey: string, element: HTMLButtonElement | null) => {
-    if (element) {
-      triggerRefs.current.set(documentKey, element);
-      return;
-    }
-
-    triggerRefs.current.delete(documentKey);
-  };
-
-  const setMenuItemRef = (
-    documentKey: string,
-    index: number,
-    element: HTMLButtonElement | null,
-  ) => {
-    const items = menuItemRefs.current.get(documentKey) ?? [];
-
-    if (element) {
-      items[index] = element;
-      menuItemRefs.current.set(documentKey, items);
-      return;
-    }
-
-    items[index] = null;
-    if (items.some(Boolean)) {
-      menuItemRefs.current.set(documentKey, items);
-      return;
-    }
-
-    menuItemRefs.current.delete(documentKey);
-  };
-
-  const handleMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>, documentKey: string) => {
-    const menuItems = menuItemRefs.current.get(documentKey)?.filter(Boolean) ?? [];
-
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      closeMenuAndFocusTrigger(documentKey);
-      return;
-    }
-
-    if (menuItems.length === 0) {
-      return;
-    }
-
-    const currentIndex = Math.max(
-      menuItems.findIndex((item) => item === document.activeElement),
-      0,
-    );
-
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      menuItems[(currentIndex + 1) % menuItems.length]?.focus();
-      return;
-    }
-
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      menuItems[(currentIndex - 1 + menuItems.length) % menuItems.length]?.focus();
-      return;
-    }
-
-    if (event.key === 'Home') {
-      event.preventDefault();
-      menuItems[0]?.focus();
-      return;
-    }
-
-    if (event.key === 'End') {
-      event.preventDefault();
-      menuItems[menuItems.length - 1]?.focus();
-    }
-  };
+  const renderActions = (document: FavoriteDocument) => (
+    <div className="favorite-workspace-actions">
+      <button type="button" className="secondary-button" aria-label={`继续阅读 ${document.displayName}`}
+        onClick={() => void onOpenDocument(document)}>继续阅读</button>
+      <button type="button" className="icon-button active" aria-label={`取消收藏 ${document.displayName}`}
+        aria-pressed="true" disabled={batchBusy} onClick={() => void onToggleFavorite(document.documentKey, false)}>
+        <Star size={16} fill="currentColor" />
+      </button>
+      <BookListMenu name={document.displayName} disabled={batchBusy} actions={[
+        { label: '打开', onSelect: () => onOpenDocument(document) },
+        { label: '取消收藏', onSelect: () => onToggleFavorite(document.documentKey, false) },
+        { label: '定位文件', onSelect: () => onLocateFile(document) },
+      ]} />
+    </div>
+  );
 
   const renderDocument = (document: FavoriteDocument) => {
     const progressPercent = formatProgressPercent(document.progress);
     const directory = getFavoriteDirectoryLabel(document);
-    const menuOpen = openMenuKey === document.documentKey;
 
     return (
       <article
         key={document.documentKey}
-        className={viewMode === 'cards' ? 'favorite-workspace-card' : 'favorite-workspace-row'}
+        className="favorite-workspace-card"
         data-testid="favorite-workspace-document"
       >
+        {onBatchUnfavorite ? <label className="recent-selection"><input type="checkbox" aria-label={`选择 ${document.displayName}`}
+          checked={selectedKeys.has(document.documentKey)} disabled={batchBusy}
+          onChange={(event) => selectKeys([document.documentKey], event.target.checked)} /></label> : null}
         <div className="favorite-workspace-file-main">
           <span className="pdf-file-icon" aria-hidden="true">
             <FileText size={16} />
@@ -213,92 +218,8 @@ export function HomeFavoriteFilesWorkspace({
           </div>
           <strong>{progressPercent}</strong>
         </div>
-        <div className="favorite-workspace-tags" aria-label={`${document.displayName} 标签`}>
-          {document.tagIds.length > 0 ? (
-            document.tagIds.map((tagId) => {
-              const tag = tagsById.get(tagId);
-              return tag ? (
-                <button
-                  type="button"
-                  key={tag.id}
-                  className="favorite-tag-chip"
-                  style={{ borderColor: tag.color, color: tag.color }}
-                  onClick={() => setTagFilter(`${tag.id}`)}
-                >
-                  {tag.name}
-                </button>
-              ) : null;
-            })
-          ) : (
-            <span>暂无标签</span>
-          )}
-        </div>
-        <div className="favorite-workspace-actions">
-          <button
-            type="button"
-            className="secondary-button"
-            aria-label={`继续阅读 ${document.displayName}`}
-            onClick={() => void onOpenDocument(document)}
-          >
-            继续阅读
-          </button>
-          <button
-            type="button"
-            className="icon-button active"
-            aria-label={`取消收藏 ${document.displayName}`}
-            aria-pressed="true"
-            onClick={() => void onToggleFavorite(document.documentKey, false)}
-          >
-            <Star size={16} fill="currentColor" />
-          </button>
-          <div className="recent-workspace-menu-wrap">
-            <button
-              type="button"
-              ref={(element) => setTriggerRef(document.documentKey, element)}
-              className="icon-button"
-              aria-label={`更多操作 ${document.displayName}`}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              onClick={() => setOpenMenuKey(menuOpen ? null : document.documentKey)}
-            >
-              <MoreVertical size={16} />
-            </button>
-            {menuOpen ? (
-              <div
-                className="recent-file-menu"
-                role="menu"
-                onKeyDown={(event) => handleMenuKeyDown(event, document.documentKey)}
-              >
-                <button
-                  type="button"
-                  ref={(element) => setMenuItemRef(document.documentKey, 0, element)}
-                  role="menuitem"
-                  onClick={() => handleMenuAction(() => onOpenDocument(document))}
-                >
-                  打开
-                </button>
-                <button
-                  type="button"
-                  ref={(element) => setMenuItemRef(document.documentKey, 1, element)}
-                  role="menuitem"
-                  onClick={() =>
-                    handleMenuAction(() => onToggleFavorite(document.documentKey, false))
-                  }
-                >
-                  取消收藏
-                </button>
-                <button
-                  type="button"
-                  ref={(element) => setMenuItemRef(document.documentKey, 2, element)}
-                  role="menuitem"
-                  onClick={() => handleMenuAction(() => onLocateFile(document))}
-                >
-                  定位文件
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </div>
+        {renderTags(document)}
+        {renderActions(document)}
       </article>
     );
   };
@@ -375,6 +296,13 @@ export function HomeFavoriteFilesWorkspace({
                 </select>
               </label>
               <label>
+                <span>文件来源筛选</span>
+                <select value={sourceFilter} aria-label="文件来源筛选" onChange={(event) => setSourceFilter(event.target.value as BookSourceFilter)}>
+                  <option value="all">全部来源</option><option value="paper">本地文献库</option>
+                  <option value="desktop">本地路径</option><option value="browser">浏览器文件</option>
+                </select>
+              </label>
+              <label>
                 <span>目录筛选</span>
                 <select
                   value={directoryFilter}
@@ -416,12 +344,33 @@ export function HomeFavoriteFilesWorkspace({
               </button>
             </div>
 
+            {selectedKeys.size ? <div className="recent-batch-bar" aria-label="批量收藏操作">
+              <span>已选择 {selectedKeys.size} 个文件</span>
+              {selectedOutsidePage ? <span>其中 {selectedOutsidePage} 个不在当前显示范围</span> : null}
+              <button type="button" className="secondary-button" disabled={batchBusy || !onBatchUnfavorite} onClick={() => void batchUnfavorite()}>
+                {batchBusy ? '正在取消收藏…' : '批量取消收藏'}
+              </button>
+              <button type="button" className="text-link-button" disabled={batchBusy} onClick={() => setSelectedKeys(new Set())}>取消选择</button>
+            </div> : null}
+            {batchError ? <p role="alert">{batchError}</p> : null}
             {visibleDocuments.length > 0 ? (
-              <div
-                className={viewMode === 'cards' ? 'favorite-workspace-grid' : 'favorite-workspace-list'}
-                data-testid="favorite-workspace-results"
-              >
+              viewMode === 'cards' ? <div className="favorite-workspace-grid" data-testid="favorite-workspace-results">
                 {visibleDocuments.map(renderDocument)}
+              </div> : <div data-testid="favorite-workspace-results">
+                <BookList label="收藏文件列表"
+                  items={page.items.map((document) => ({ ...documentBookItem(document, papersByKey?.get(document.documentKey)), favorite: true }))}
+                  columns={onBatchUnfavorite ? ['selection', 'name', 'authors', 'journal', 'path', 'opened', 'progress', 'page', 'tags', 'actions'] : ['name', 'authors', 'journal', 'path', 'opened', 'progress', 'page', 'tags', 'actions']}
+                  rowTestId="favorite-workspace-document" nameTestId="favorite-workspace-document-name"
+                  selection={onBatchUnfavorite ? { selectedKeys, isDisabled: () => batchBusy,
+                    onChange: (item, checked) => selectKeys([item.key], checked),
+                    onSelectPage: (checked) => selectKeys(page.items.map((document) => document.documentKey), checked) } : undefined}
+                  onOpen={(item) => void onOpenDocument(item.source)}
+                  renderTags={(item) => renderTags(item.source, true)} renderActions={(item) => renderActions(item.source)}
+                  pagination={page.pagination} />
+                {onBatchUnfavorite && visibleDocuments.length > page.items.length ? <button type="button" className="text-link-button"
+                  disabled={batchBusy} onClick={() => selectKeys(visibleDocuments.map((document) => document.documentKey), true)}>
+                  选择全部 {visibleDocuments.length} 条筛选结果
+                </button> : null}
               </div>
             ) : (
               <div className="empty-block recent-workspace-empty">
