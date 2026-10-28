@@ -1,5 +1,5 @@
 import { webcrypto } from 'node:crypto';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyMetadata, type LibrarySnapshot } from '../library/libraryModels';
 import { LibraryService } from '../library/libraryService';
@@ -47,6 +47,16 @@ beforeEach(() => { vi.stubGlobal('crypto', webcrypto); });
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('AI knowledge membership', () => {
+  it('allows the document name to toggle its knowledge selection', async () => {
+    const { library, ai, paper } = await setup();
+    render(<AiAssistant library={library} ai={ai} initialPaperId={paper.id} onOpenPaper={vi.fn()} />);
+    const checkbox = screen.getByRole('checkbox', { name: '选择知识库文件 知识库论文' });
+    expect(checkbox).toBeChecked();
+    fireEvent.click(within(screen.getByRole('table', { name: '知识库文献' })).getByText('知识库论文'));
+    expect(checkbox).not.toBeChecked();
+    ai.dispose();
+  });
+
   it('removes a selected file without changing its library contents or widening the selected scope', async () => {
     const { library, ai, paper } = await setup();
     const second = await library.importPdf(new TextEncoder().encode('%PDF-1.7\nsecond knowledge paper'), 'second.pdf');

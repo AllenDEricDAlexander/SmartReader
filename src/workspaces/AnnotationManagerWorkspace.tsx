@@ -1,6 +1,7 @@
 import { Download, Highlighter, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { NotesExportSource } from '../library/exportPaperNotes';
+import { BookList } from '../components/book-list/BookList';
 import type { PersistedAnnotationRecord } from '../persistence/persistenceApi';
 import './noteExport.css';
 
@@ -73,15 +74,14 @@ export function AnnotationManagerWorkspace({
             <div className="panel-title"><Download size={18} /><h2>按文献导出笔记</h2></div>
             <p className="muted-copy">选择一篇或多篇文献，导出笔记、摘录和书签备注；PDF 不包含原文页面。加密文献需先解锁，导出文件不加密；请选择不存在的新文件名。</p>
             {exportSourcesError ? <p role="alert">{exportSourcesError}</p> : null}
-            {exportSources.length ? <div className="notes-export-list">
-              {exportSources.map((source) => <label key={source.documentKey}>
-                <input type="checkbox" aria-label={`选择导出 ${source.displayName}`} checked={selected.has(source.documentKey)} disabled={exporting} onChange={(event) => setSelected((current) => {
-                  const next = new Set(current);
-                  if (event.target.checked) next.add(source.documentKey); else next.delete(source.documentKey);
-                  return next;
-                })} />
-                <span>{source.displayName}{source.detail && source.detail !== source.displayName ? <small>{source.detail}</small> : null}</span>
-              </label>)}
+            {exportSources.length ? <div className="notes-export-list"><BookList compact showHeader={false} label="选择导出文献"
+              items={exportSources.map((source) => ({ key: source.documentKey, name: source.displayName, source,
+                subtitle: source.detail !== source.displayName ? source.detail : null }))}
+              columns={['selection', 'name']}
+              selection={{ selectedKeys: selected, nameSelects: true, itemLabel: (item) => `选择导出 ${item.name}`, isDisabled: () => exporting,
+                onChange: (item, checked) => setSelected((current) => {
+                  const next = new Set(current); if (checked) next.add(item.key); else next.delete(item.key); return next;
+                }) }} />
             </div> : <p className="muted-copy">暂无可导出的文献。</p>}
             <button type="button" disabled={!selected.size || exporting} onClick={() => void exportSelected()}><Download size={14} />{exporting ? '正在导出…' : `导出笔记 PDF（${selected.size}）`}</button>
             {exportMessage ? <p role="status">{exportMessage}</p> : null}

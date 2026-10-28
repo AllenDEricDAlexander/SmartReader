@@ -2,6 +2,8 @@ import { ArrowDown, BookOpen, FileSearch, Plus, Send, Settings, ShieldCheck, Spa
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { errorMessage, type LibraryService } from '../library/libraryService';
 import { providerModels, type Paper } from '../library/libraryModels';
+import { BookList } from '../components/book-list/BookList';
+import { paperBookItem } from '../components/book-list/bookListAdapters';
 import type { AiChatMessage, AiChatTurn, AiRetrieval, AiService, AiSource } from './aiService';
 import { AiConversationHistory } from './AiConversationHistory';
 import './aiWorkspace.css';
@@ -516,37 +518,39 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
                 </div>
                 <input type="search" aria-label="搜索知识库文件" placeholder="按论文标题或文件名查找" disabled={grounding === 'direct'} value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} />
                 <div className="ai-knowledge-list">
-                  {matchingPapers.map((paper) => <div className="ai-knowledge-file" key={paper.id}>
-                    <label>
-                      <input type="checkbox" aria-label={`选择知识库文件 ${paper.metadata.title || paper.fileName}`}
-                        checked={scope === 'all' ? usablePapers.some((item) => item.id === paper.id) : selectedIds.includes(paper.id)}
-                        disabled={grounding === 'direct' || !hasKnowledgeText(paper) || (cloudKnowledge && encryptedIds.has(paper.id))} onChange={(event) => {
-                          const checked = event.target.checked;
-                          setSelectedPaperIds((ids) => {
-                            const previous = scope === 'all' ? usablePapers.map((item) => item.id) : ids;
-                            return checked ? [...new Set([...previous, paper.id])] : previous.filter((id) => id !== paper.id);
-                          });
-                          setScope('selected');
-                        }} />
-                      <span><strong>{paper.metadata.title || paper.fileName}</strong><small>{paper.fileName} · {paper.pageCount} 页 · {hasKnowledgeText(paper) ? '文本可检索' : paper.indexStatus === 'pending' ? '正在建立索引' : '没有可检索文本，请重新索引或补充摘要'}</small>
-                        {activity.indexingPaperIds?.includes(paper.id) ? <small>正在生成向量…</small> : activity.indexedPaperIds?.includes(paper.id) ? <small>向量已建立</small> : null}
-                        {activity.knowledgeErrors?.[paper.id] ? <small className="settings-error">{activity.knowledgeErrors[paper.id]}</small> : null}
-                      </span>
-                    </label>
-                    <button type="button" aria-label={`移除知识库文件 ${paper.metadata.title || paper.fileName}`}
-                      title="仅从 AI 知识库移除，保留文献库中的文献" onClick={() => void changeKnowledge(paper, false)}><Trash2 size={14} aria-hidden="true" />移除</button>
-                  </div>)}
+                  {matchingPapers.length ? <BookList compact showHeader={false} label="知识库文献"
+                    items={matchingPapers.map(paperBookItem)} columns={['selection', 'name', 'actions']}
+                    selection={{
+                      selectedKeys: new Set((scope === 'all' ? usablePapers.map((paper) => paper.id) : selectedIds).map((id) => `paper:${id}`)),
+                      nameSelects: true,
+                      itemLabel: (item) => `选择知识库文件 ${item.name}`,
+                      isDisabled: ({ source: paper }) => grounding === 'direct' || !hasKnowledgeText(paper) || (cloudKnowledge && encryptedIds.has(paper.id)),
+                      onChange: ({ source: paper }, checked) => {
+                        setSelectedPaperIds((ids) => {
+                          const previous = scope === 'all' ? usablePapers.map((item) => item.id) : ids;
+                          return checked ? [...new Set([...previous, paper.id])] : previous.filter((id) => id !== paper.id);
+                        });
+                        setScope('selected');
+                      },
+                    }}
+                    renderNameDetails={({ source: paper }) => <>
+                      <small>{paper.pageCount} 页 · {hasKnowledgeText(paper) ? '文本可检索' : paper.indexStatus === 'pending' ? '正在建立索引' : '没有可检索文本，请重新索引或补充摘要'}</small>
+                      {activity.indexingPaperIds?.includes(paper.id) ? <small>正在生成向量…</small> : activity.indexedPaperIds?.includes(paper.id) ? <small>向量已建立</small> : null}
+                      {activity.knowledgeErrors?.[paper.id] ? <small className="settings-error">{activity.knowledgeErrors[paper.id]}</small> : null}
+                    </>}
+                    renderActions={({ source: paper, name }) => <button type="button" aria-label={`移除知识库文件 ${name}`}
+                      title="仅从 AI 知识库移除，保留文献库中的文献" onClick={() => void changeKnowledge(paper, false)}><Trash2 size={14} aria-hidden="true" />移除</button>} /> : null}
                   {!matchingPapers.length ? <p className="ai-muted">没有匹配的知识库文件。</p> : null}
                 </div>
               </>}
               {removedPapers.length ? <details className="ai-knowledge-removed">
                 <summary>已移除文件（{removedPapers.length}）</summary>
                 <div className="ai-knowledge-list">
-                  {removedPapers.map((paper) => <div className="ai-knowledge-file" key={paper.id}>
-                    <span><strong>{paper.metadata.title || paper.fileName}</strong><small>{paper.fileName} · 仍保存在文献库中</small></span>
-                    <button type="button" aria-label={`重新加入知识库文件 ${paper.metadata.title || paper.fileName}`}
-                      onClick={() => void changeKnowledge(paper, true)}><Plus size={14} aria-hidden="true" />重新加入</button>
-                  </div>)}
+                  <BookList compact showHeader={false} label="已移除的知识库文献"
+                    items={removedPapers.map(paperBookItem)} columns={['name', 'actions']}
+                    renderNameDetails={() => <small>仍保存在文献库中</small>}
+                    renderActions={({ source: paper, name }) => <button type="button" aria-label={`重新加入知识库文件 ${name}`}
+                      onClick={() => void changeKnowledge(paper, true)}><Plus size={14} aria-hidden="true" />重新加入</button>} />
                 </div>
               </details> : null}
                 {grounding === 'library' && scope === 'selected' && !scopedCount && knowledgePapers.length ? <p className="ai-muted">请选择至少一份有可检索文本的文件。</p> : null}

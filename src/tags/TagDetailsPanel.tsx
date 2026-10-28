@@ -1,4 +1,5 @@
-import { FileText, Lightbulb, Pencil, X } from 'lucide-react';
+import { Lightbulb, Pencil, X } from 'lucide-react';
+import { BookList } from '../components/book-list/BookList';
 import type { TagDashboardDetail, TagDashboardRecommendation } from './tagModels';
 
 type TagDetailsPanelProps = {
@@ -40,12 +41,11 @@ export function TagDetailsPanel({
           </section>
           <section className="tag-detail-card">
             <div className="tag-detail-card-heading"><h3>代表性文献</h3><span>{detail.documents.length}</span></div>
-            {detail.documents.length > 0 ? detail.documents.map((document) => (
-              <button key={document.documentKey} type="button" onClick={() => onOpenDocument(document.documentKey, document.path, document.missing)}>
-                <FileText size={16} />
-                <span><strong>{document.displayName}</strong><small>{document.relationCount} 个关联</small></span>
-              </button>
-            )) : <p className="tag-dashboard-empty">暂无关联文献</p>}
+            {detail.documents.length > 0 ? <BookList compact showHeader={false} label="标签关联文献"
+              items={detail.documents.map((document) => ({ key: document.documentKey, name: document.displayName, source: document,
+                subtitle: `${document.relationCount} 个关联`, missing: document.missing }))}
+              columns={['name']} onOpen={(item) => onOpenDocument(item.key, item.source.path, item.source.missing)} />
+              : <p className="tag-dashboard-empty">暂无关联文献</p>}
           </section>
           <section className="tag-detail-card">
             <div className="tag-detail-card-heading"><h3>文件夹分布</h3></div>

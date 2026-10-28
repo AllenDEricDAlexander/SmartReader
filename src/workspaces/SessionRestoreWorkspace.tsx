@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { DocumentSession } from '../documents/documentModels';
 import type { PersistedDocument } from '../persistence/persistenceApi';
+import { BookList } from '../components/book-list/BookList';
+import { documentBookItem } from '../components/book-list/bookListAdapters';
 
 type SessionRestoreWorkspaceProps = {
   sessions: DocumentSession[];
@@ -30,18 +32,16 @@ export function SessionRestoreWorkspace({ sessions, documents, onSelectSession, 
       </header>
       {message ? <p role="status">{message}</p> : null}
       <h2>当前标签页</h2>
-      {sessions.length ? <div className="workspace-list">{sessions.map((session) => (
-        <button key={session.id} type="button" className="workspace-list-row" onClick={() => onSelectSession(session.id)}>
-          <strong>{session.title}</strong><span>第 {session.page} 页 · {session.status === 'error' ? '需要重新打开' : '继续阅读'}</span>
-        </button>
-      ))}</div> : <p className="muted-copy">当前没有打开的标签页。</p>}
+      {sessions.length ? <BookList compact showHeader={false} label="当前标签页列表"
+        items={sessions.map((session) => ({ key: `session:${session.id}`, name: session.title, source: session,
+          subtitle: session.status === 'error' ? '需要重新打开' : '继续阅读', progress: session.progress,
+          lastPage: session.page, pageCount: session.totalPages }))}
+        columns={['name', 'progress', 'page']} rowOpens onOpen={(item) => onSelectSession(item.source.id)} />
+        : <p className="muted-copy">当前没有打开的标签页。</p>}
       <h2>继续阅读最近文献</h2>
-      <div className="workspace-list">{documents.map((document) => (
-        <button key={document.documentKey} type="button" className="workspace-list-row" disabled={document.missing}
-          onClick={() => void onOpenDocument(document)}>
-          <strong>{document.displayName}</strong><span>第 {document.lastPage} 页 · {document.missing ? '原文件不可用' : '打开文献'}</span>
-        </button>
-      ))}</div>
+      {documents.length ? <BookList compact showHeader={false} label="继续阅读最近文献列表"
+        items={documents.map((document) => documentBookItem(document))} columns={['name', 'progress', 'page']}
+        rowOpens onOpen={(item) => void onOpenDocument(item.source)} openDisabled={(item) => item.source.missing} /> : null}
       {!documents.length ? <p className="muted-copy">导入并阅读 PDF 后，这里会保留阅读进度。</p> : null}
     </section>
   );

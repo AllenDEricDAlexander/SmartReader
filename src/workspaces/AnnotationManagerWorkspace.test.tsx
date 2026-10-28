@@ -13,7 +13,8 @@ describe('notes management export', () => {
     const onExportNotes = vi.fn().mockResolvedValue(true);
     render(<AnnotationManagerWorkspace {...base} exportSources={sources} onExportNotes={onExportNotes} />);
     expect(screen.getByRole('button', { name: '导出笔记 PDF（0）' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox', { name: '选择导出 库内文献' }));
+    fireEvent.click(screen.getByText('库内文献'));
+    expect(screen.getByRole('checkbox', { name: '选择导出 库内文献' })).toBeChecked();
     fireEvent.click(screen.getByRole('checkbox', { name: '选择导出 旧文献' }));
     fireEvent.click(screen.getByRole('button', { name: '导出笔记 PDF（2）' }));
     await waitFor(() => expect(onExportNotes).toHaveBeenCalledWith(sources));

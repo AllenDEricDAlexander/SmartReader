@@ -1,5 +1,7 @@
 import { Columns2, X } from 'lucide-react';
 import type { PersistedDocument } from '../persistence/persistenceApi';
+import { BookList } from '../components/book-list/BookList';
+import { documentBookItem } from '../components/book-list/bookListAdapters';
 
 type CompareWorkspaceProps = {
   recentDocuments: PersistedDocument[];
@@ -54,20 +56,8 @@ function DocumentPickList({
     return <p className="muted-copy">暂无最近文件。先打开 PDF 后可从这里选择。</p>;
   }
 
-  return (
-    <div className="workspace-list">
-      {documents.slice(0, 8).map((document) => (
-        <button
-          key={document.documentKey}
-          type="button"
-          className="workspace-list-row"
-          disabled={document.missing || !document.path}
-          onClick={() => void onOpenDocument(document)}
-        >
-          <strong>{document.displayName}</strong>
-          <span>{document.path ?? '浏览器选择的本地文件'}</span>
-        </button>
-      ))}
-    </div>
-  );
+  return <BookList compact showHeader={false} label="选择对比文献"
+    items={documents.slice(0, 8).map((document) => ({ ...documentBookItem(document), subtitle: document.path ?? '浏览器选择的本地文件' }))}
+    columns={['name', 'progress', 'page']} rowOpens openDisabled={(item) => item.source.missing || !item.source.path}
+    onOpen={(item) => void onOpenDocument(item.source)} />;
 }
