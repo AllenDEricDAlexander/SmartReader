@@ -2184,9 +2184,45 @@ select {
   margin: 0;
 }
 
+.pdf-outline-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 10px;
+}
+
 .pdf-outline-panel nav {
-  max-height: min(40vh, 320px);
+  min-height: 0;
   overflow: auto;
+}
+
+.pdf-outline-actions,
+.pdf-outline-branch-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.pdf-outline-actions {
+  flex-shrink: 0;
+}
+
+.pdf-outline-actions button {
+  flex: 1;
+  font-size: 12px;
+}
+
+.pdf-outline-branch-actions {
+  flex-shrink: 0;
+}
+
+.pdf-outline-branch-actions button {
+  width: 22px;
+  min-height: 28px;
+  padding: 3px;
+  border: 0;
+  background: transparent;
+  color: var(--sr-text-muted);
 }
 
 .pdf-outline-children {

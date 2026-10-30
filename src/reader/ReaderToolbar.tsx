@@ -2,6 +2,7 @@ import {
   BookmarkPlus,
   ChevronLeft,
   ChevronRight,
+  ListTree,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -23,6 +24,8 @@ type ReaderToolbarProps = {
   pageInput: string;
   sidebarOpen: boolean;
   rightPanelOpen: boolean;
+  outlineOpen?: boolean;
+  onOpenOutline?(): void;
   onSearchTextChange(value: string): void;
   onPageInputChange(value: string): void;
   onSearch(): void;
@@ -51,6 +54,8 @@ export function ReaderToolbar({
   pageInput,
   sidebarOpen,
   rightPanelOpen,
+  outlineOpen = false,
+  onOpenOutline,
   onSearchTextChange,
   onPageInputChange,
   onSearch,
@@ -82,6 +87,11 @@ export function ReaderToolbar({
   return (
     <section className="reader-toolbar" aria-label="阅读工具栏">
       <div className="toolbar-group">
+        <button type="button" className="toolbar-icon-button" onClick={onOpenOutline}
+          aria-label="打开 PDF 目录" title="目录" aria-haspopup="dialog" aria-expanded={outlineOpen}
+          disabled={!activeSession || activeSession.status === 'error' || !onOpenOutline}>
+          <ListTree size={16} />
+        </button>
         <button
           type="button"
           className="toolbar-icon-button"

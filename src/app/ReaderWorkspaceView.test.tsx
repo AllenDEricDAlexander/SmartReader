@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ComponentType } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReaderAnnotation } from '../annotations/annotationModels';
@@ -101,8 +101,23 @@ describe('ReaderWorkspaceView', () => {
     expect(screen.getByRole('button', { name: 'More options' })).toBeInTheDocument();
     expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
     expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('阅读侧栏')).queryByLabelText('目录内容')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'PDF 目录' })).not.toBeInTheDocument();
+    const outlineButton = screen.getByRole('button', { name: '打开 PDF 目录' });
+    outlineButton.focus();
+    fireEvent.click(outlineButton);
+    const drawer = screen.getByRole('dialog', { name: 'PDF 目录' });
+    expect(drawer).toHaveClass('library-drawer');
+    expect(outlineButton).toHaveAttribute('aria-expanded', 'true');
+    expect(within(drawer).queryByText('书签与批注')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '第一章，第 3 页' }));
     expect(jumpToActiveDocumentPage).toHaveBeenCalledExactlyOnceWith(3);
+    fireEvent.keyDown(drawer, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'PDF 目录' })).not.toBeInTheDocument();
+    expect(outlineButton).toHaveFocus();
+    fireEvent.click(outlineButton);
+    fireEvent.click(screen.getByRole('button', { name: '关闭PDF 目录' }));
+    expect(outlineButton).toHaveAttribute('aria-expanded', 'false');
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle sidebar' }));
     fireEvent.click(screen.getByRole('button', { name: 'Toggle right sidebar' }));

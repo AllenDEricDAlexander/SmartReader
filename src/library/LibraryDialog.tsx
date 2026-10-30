@@ -7,13 +7,14 @@ type LibraryDialogProps = {
   title: string;
   busy?: boolean;
   wide?: boolean;
+  drawer?: boolean;
   children: ReactNode;
   onClose(): void;
 };
 
 const focusableSelector = 'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export function LibraryDialog({ title, busy = false, wide = false, children, onClose }: LibraryDialogProps) {
+export function LibraryDialog({ title, busy = false, wide = false, drawer = false, children, onClose }: LibraryDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -44,10 +45,10 @@ export function LibraryDialog({ title, busy = false, wide = false, children, onC
   };
 
   return createPortal(
-    <div className="library-dialog-backdrop" onMouseDown={(event) => {
+    <div className={`library-dialog-backdrop${drawer ? ' library-drawer-backdrop' : ''}`} onMouseDown={(event) => {
       if (event.target === event.currentTarget && !busy) onClose();
     }}>
-      <div ref={dialogRef} className={`library-dialog${wide ? ' library-dialog-wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} aria-busy={busy} onKeyDown={handleKeyDown}>
+      <div ref={dialogRef} className={`library-dialog${wide ? ' library-dialog-wide' : ''}${drawer ? ' library-drawer' : ''}`} role="dialog" aria-modal="true" aria-label={title} aria-busy={busy} onKeyDown={handleKeyDown}>
         <header>
           <h2>{title}</h2>
           <button type="button" aria-label={`关闭${title}`} disabled={busy} onClick={onClose}><X size={17} aria-hidden="true" /></button>

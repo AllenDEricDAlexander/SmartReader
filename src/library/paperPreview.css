@@ -28,6 +28,8 @@
 .library-dialog-backdrop { position: fixed; inset: 0; z-index: 300; background: rgba(15, 23, 42, .32); display: grid; place-items: center; padding: 24px; }
 .library-dialog { min-width: 0; width: min(480px, 100%); max-height: min(90vh, 800px); overflow: auto; padding: 20px; background: var(--sr-surface); border: 1px solid var(--sr-border); border-radius: 12px; box-shadow: 0 18px 70px rgba(15, 23, 42, .2); }
 .library-dialog-wide { width: min(720px, 100%); }
+.library-drawer-backdrop { place-items: stretch start; padding: 0; }
+.library-drawer { display: flex; flex-direction: column; width: min(420px, 100vw); height: 100%; max-height: 100vh; overflow: hidden; border-radius: 0; border-width: 0 1px 0 0; }
 .library-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .library-dialog h2 { margin: 0; font-size: 17px; }
 .library-dialog > header button { min-width: 30px; padding: 0 6px; }
