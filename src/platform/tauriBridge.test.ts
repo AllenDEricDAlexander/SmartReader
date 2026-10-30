@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { createTauriBridge } from './tauriBridge';
 
 describe('tauriBridge', () => {
+  it('reveals the configured main window through the native command', async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    await createTauriBridge({ invoke }).showWindow?.();
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('show_main_window');
+  });
+
   it('updates the native theme, window, webview and backing layers through one command', async () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
     const bridge = createTauriBridge({ invoke });

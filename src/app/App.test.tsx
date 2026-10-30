@@ -2880,6 +2880,65 @@ describe('App', () => {
     },
   );
 
+  it('uses startup preferences on the first render and reveals the window after native appearance is ready', async () => {
+    const style = document.createElement('style');
+    const css = readFileSync(join(process.cwd(), 'src/app/styles.css'), 'utf8');
+    style.textContent = css.slice(0, css.indexOf('\n* {'));
+    document.head.appendChild(style);
+    try {
+      let resolveAppearance!: () => void;
+      const setWindowBackgroundColor = vi.fn(() => new Promise<void>((resolve) => { resolveAppearance = resolve; }));
+      const showWindow = vi.fn().mockResolvedValue(undefined);
+      const persistence = createEmptyPersistence();
+      renderApp(<App
+        startupPreferences={{ preferences: { ...defaultReaderPreferences, theme: 'eye-care' }, error: null }}
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn(), setWindowBackgroundColor, showWindow }}
+        persistence={persistence}
+        viewerRenderer={testViewerRenderer}
+      />);
+      expect(screen.getByRole('main', { name: 'SmartReader workbench' })).toBeInTheDocument();
+      expect(document.documentElement).toHaveAttribute('data-theme', 'eye-care');
+      expect(persistence.loadPreferences).not.toHaveBeenCalled();
+      expect(setWindowBackgroundColor).toHaveBeenCalledExactlyOnceWith('#C7EDCC', 'light');
+      expect(showWindow).not.toHaveBeenCalled();
+      await act(async () => { resolveAppearance(); });
+      expect(showWindow).toHaveBeenCalledOnce();
+    } finally {
+      style.remove();
+    }
+  });
+
+  it('reveals a usable fallback and reports startup preference failures', async () => {
+    const showWindow = vi.fn().mockResolvedValue(undefined);
+    renderApp(<App
+      startupPreferences={{ preferences: defaultReaderPreferences, error: '设置加载失败：database unavailable' }}
+      bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn(), showWindow }}
+      persistence={createEmptyPersistence()}
+      viewerRenderer={testViewerRenderer}
+    />);
+    expect(screen.getByRole('alert')).toHaveTextContent('设置加载失败：database unavailable');
+    await waitFor(() => expect(showWindow).toHaveBeenCalledOnce());
+    expect(screen.getByRole('combobox', { name: '切换主题' })).toBeDisabled();
+  });
+
+  it('still reveals the startup window when native appearance synchronization fails', async () => {
+    document.documentElement.style.setProperty('--sr-bg', '#C7EDCC');
+    try {
+      const showWindow = vi.fn().mockResolvedValue(undefined);
+      renderApp(<App
+        startupPreferences={{ preferences: { ...defaultReaderPreferences, theme: 'eye-care' }, error: null }}
+        bridge={{ openNativePdf: vi.fn(), readDesktopPdf: vi.fn(), showWindow,
+          setWindowBackgroundColor: vi.fn().mockRejectedValue(new Error('native appearance unavailable')) }}
+        persistence={createEmptyPersistence()}
+        viewerRenderer={testViewerRenderer}
+      />);
+      await waitFor(() => expect(showWindow).toHaveBeenCalledOnce());
+      expect(screen.getByRole('alert')).toHaveTextContent('窗口外观同步失败');
+    } finally {
+      document.documentElement.style.removeProperty('--sr-bg');
+    }
+  });
+
   it('keeps native title appearance and backgrounds paired on load, dark-to-eye-care switches and failed-save rollbacks', async () => {
     const css = readFileSync(join(process.cwd(), 'src/app/styles.css'), 'utf8');
     const style = document.createElement('style');
@@ -2983,6 +3042,7 @@ describe('App', () => {
       viewerRenderer: testViewerRenderer,
     };
     const { unmount } = renderApp(<App {...props} />);
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-theme', 'light'));
     fireEvent.click(topShortcuts().getByRole('button', { name: '设置' }));
     fireEvent.click(screen.getByRole('button', { name: '外观' }));
     fireEvent.click(screen.getByRole('button', { name: '护眼色' }));

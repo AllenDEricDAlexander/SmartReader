@@ -51,6 +51,7 @@ pub fn run() {
             app_lifecycle::enable_shutdown_handler,
             app_lifecycle::complete_shutdown,
             window_appearance::set_window_background_color,
+            window_appearance::show_main_window,
             db::save_document,
             db::get_document,
             db::list_recent_documents,

@@ -1,6 +1,11 @@
 use tauri::{window::Color, Theme, WebviewWindow};
 
 #[tauri::command]
+pub fn show_main_window(window: WebviewWindow) -> Result<(), String> {
+    window.show().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn set_window_background_color(
     window: WebviewWindow,
     color: Color,

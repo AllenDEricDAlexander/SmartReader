@@ -53,6 +53,7 @@ export type TauriBridge = {
   selectNativePdfFolder?(): Promise<string[]>;
   resolveDroppedPdfPaths?(paths: string[]): Promise<DroppedPdfPaths>;
   setWindowBackgroundColor?(color: string, theme?: 'light' | 'dark'): Promise<void>;
+  showWindow?(): Promise<void>;
 };
 
 export function createTauriBridge(
@@ -105,6 +106,10 @@ export function createTauriBridge(
       const update = backgroundUpdates.then(() => invoke<void>('set_window_background_color', { color, ...(theme ? { theme } : {}) }));
       backgroundUpdates = update.catch(() => undefined);
       return update;
+    },
+    showWindow() {
+      return dependencies.invoke || isTauriRuntimeAvailable()
+        ? invoke<void>('show_main_window') : Promise.resolve();
     },
   };
 }

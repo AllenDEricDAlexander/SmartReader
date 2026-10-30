@@ -3,6 +3,7 @@ import type { TauriBridge } from '../platform/tauriBridge';
 import type { PdfRenderer } from '../viewer/PdfViewerBridge';
 import type { ViewerActions } from '../viewer/viewerController';
 import type { ResearchServices } from './ResearchContext';
+import type { StartupPreferences } from '../preferences/startupPreferences';
 
 export type AppWorkspace =
   | 'home'
@@ -15,6 +16,7 @@ export type AppWorkspace =
   | 'bookmarks';
 
 export type ReaderAppProps = {
+  startupPreferences?: StartupPreferences;
   research?: ResearchServices;
   bridge?: TauriBridge;
   persistence?: PersistenceApi;

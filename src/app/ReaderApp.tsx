@@ -99,6 +99,7 @@ const appVersion = {
 };
 
 export function ReaderApp({
+  startupPreferences,
   bridge: providedBridge,
   persistence: providedPersistence,
   viewerController,
@@ -107,7 +108,8 @@ export function ReaderApp({
   const research = useResearch();
   const libraryView = useLibraryView(research?.library);
   const [appError, setAppError] = useState<string | null>(null);
-  const [themeError, setThemeError] = useState<string | null>(null);
+  const [themeError, setThemeError] = useState<string | null>(startupPreferences?.error ?? null);
+  const windowShownRef = useRef(false);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState('');
   const importingRef = useRef(false);
@@ -143,9 +145,9 @@ export function ReaderApp({
     useState<SettingsSection>('shortcuts');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsNavigationRequest, setSettingsNavigationRequest] = useState(0);
-  const [readerPreferences, setReaderPreferences] = useState(defaultReaderPreferences);
-  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
-  const [preferencesLoadSucceeded, setPreferencesLoadSucceeded] = useState(false);
+  const [readerPreferences, setReaderPreferences] = useState(startupPreferences?.preferences ?? defaultReaderPreferences);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(Boolean(startupPreferences));
+  const [preferencesLoadSucceeded, setPreferencesLoadSucceeded] = useState(Boolean(startupPreferences && !startupPreferences.error));
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [recentDocuments, setRecentDocuments] = useState<PersistedDocument[]>([]);
   const [favoriteDocuments, setFavoriteDocuments] = useState<FavoriteDocument[]>([]);
@@ -361,45 +363,54 @@ export function ReaderApp({
 
 
   useLayoutEffect(() => {
+    if (!preferencesLoaded) return;
     const root = document.documentElement;
     const previousTheme = root.getAttribute('data-theme');
     let cancelled = false;
     root.setAttribute('data-theme', readerPreferences.theme);
     const backgroundColor = getComputedStyle(root).getPropertyValue('--sr-bg').trim();
-    if (backgroundColor && bridge.setWindowBackgroundColor) {
-      const nativeTheme = readerPreferences.theme === 'dark' ? 'dark' : 'light';
-      void bridge.setWindowBackgroundColor(backgroundColor, nativeTheme).catch((error) => {
-        if (!cancelled) setAppError(`窗口外观同步失败：${errorMessage(error)}`);
-      });
-    }
+    const nativeTheme = readerPreferences.theme === 'dark' ? 'dark' : 'light';
+    const appearance = backgroundColor && bridge.setWindowBackgroundColor
+      ? bridge.setWindowBackgroundColor(backgroundColor, nativeTheme) : Promise.resolve();
+    void appearance.catch((error) => {
+      if (!cancelled) setAppError(`窗口外观同步失败：${errorMessage(error)}`);
+    }).then(async () => {
+      if (!cancelled && !windowShownRef.current && bridge.showWindow) {
+        await bridge.showWindow();
+        windowShownRef.current = true;
+      }
+    }).catch((error) => {
+      if (!cancelled) setAppError(`窗口显示失败：${errorMessage(error)}`);
+    });
     return () => {
       cancelled = true;
       if (previousTheme === null) root.removeAttribute('data-theme');
       else root.setAttribute('data-theme', previousTheme);
     };
-  }, [bridge, readerPreferences.theme]);
+  }, [bridge, readerPreferences.theme, preferencesLoaded]);
 
   useEffect(() => {
     let cancelled = false;
-    setPreferencesLoadSucceeded(false);
-
-    persistence
-      .loadPreferences()
-      .then((preferences) => {
-        if (!cancelled) {
-          setReaderPreferences(mergeReaderPreferences(preferences));
-          setPreferencesLoadSucceeded(true);
-          setThemeError(null);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) setThemeError(`设置加载失败，暂时无法切换主题：${errorMessage(error)}`);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setPreferencesLoaded(true);
-        }
-      });
+    if (!startupPreferences) {
+      setPreferencesLoadSucceeded(false);
+      persistence
+        .loadPreferences()
+        .then((preferences) => {
+          if (!cancelled) {
+            setReaderPreferences(mergeReaderPreferences(preferences));
+            setPreferencesLoadSucceeded(true);
+            setThemeError(null);
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) setThemeError(`设置加载失败，暂时无法切换主题：${errorMessage(error)}`);
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setPreferencesLoaded(true);
+          }
+        });
+    }
 
     persistence
       .listFavoriteDocuments()
@@ -448,7 +459,7 @@ export function ReaderApp({
     return () => {
       cancelled = true;
     };
-  }, [persistence]);
+  }, [persistence, startupPreferences]);
 
   useEffect(() => {
     setSelectedAnnotationId(null);
