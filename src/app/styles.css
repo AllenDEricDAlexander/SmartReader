@@ -2178,6 +2178,61 @@ select {
   border-left: 1px solid var(--sr-border);
 }
 
+.pdf-outline-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.pdf-outline-panel nav {
+  max-height: min(40vh, 320px);
+  overflow: auto;
+}
+
+.pdf-outline-children {
+  padding-left: 16px;
+}
+
+.pdf-outline-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.pdf-outline-toggle,
+.pdf-outline-spacer {
+  flex: 0 0 22px;
+  width: 22px;
+}
+
+.pdf-outline-toggle,
+.pdf-outline-target {
+  min-height: 28px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--sr-text);
+}
+
+.pdf-outline-target {
+  flex: 1;
+  min-width: 0;
+  justify-content: space-between;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.pdf-outline-target small {
+  color: var(--sr-text-muted);
+  flex-shrink: 0;
+}
+
+.pdf-outline-target[aria-current="page"],
+.pdf-outline-row button:hover:not(:disabled) {
+  background: var(--sr-surface-muted);
+  color: var(--sr-primary);
+}
+
 .panel-section {
   display: grid;
   gap: 8px;

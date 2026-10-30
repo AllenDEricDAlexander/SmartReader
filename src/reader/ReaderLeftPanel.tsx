@@ -2,9 +2,12 @@ import { BookMarked } from 'lucide-react';
 import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
 import type { DocumentSession } from '../documents/documentModels';
 import { AnnotationPanel } from './annotations/AnnotationPanel';
+import type { ViewerDocumentInfo } from '../viewer/viewerTypes';
+import { PdfOutlinePanel } from './PdfOutlinePanel';
 
 type ReaderLeftPanelProps = {
   activeSession: DocumentSession | null;
+  documentInfo?: ViewerDocumentInfo | null;
   bookmarks: Bookmark[];
   annotations: ReaderAnnotation[];
   selectedAnnotationId: number | null;
@@ -20,6 +23,7 @@ type ReaderLeftPanelProps = {
 
 export function ReaderLeftPanel({
   activeSession,
+  documentInfo,
   bookmarks,
   annotations,
   selectedAnnotationId,
@@ -68,6 +72,14 @@ export function ReaderLeftPanel({
           <p className="muted-copy">未打开文档</p>
         )}
       </section>
+
+      {activeSession && activeSession.status !== 'error' ? <PdfOutlinePanel
+        key={activeSession.id}
+        items={documentInfo?.outline}
+        error={documentInfo?.outlineError}
+        currentPage={activeSession.page}
+        onJumpToPage={onJumpToPage}
+      /> : null}
 
       <AnnotationPanel
         bookmarks={bookmarks}

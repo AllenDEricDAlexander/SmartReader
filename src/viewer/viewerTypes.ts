@@ -78,6 +78,16 @@ export type ViewerDocumentInfo = {
   keywords: string | null;
   creator: string | null;
   producer: string | null;
+  outline?: ViewerOutlineItem[];
+  outlineError?: string;
+};
+
+export type ViewerOutlineItem = {
+  id: string;
+  title: string;
+  /** 1-based target, or null for a group or an unavailable destination. */
+  page: number | null;
+  children: ViewerOutlineItem[];
 };
 
 export type ViewerSearchOptions = {

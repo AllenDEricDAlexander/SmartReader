@@ -125,6 +125,46 @@ vi.mock('@react-pdf-viewer/highlight', async () => {
 });
 
 describe('PdfViewerBridge', () => {
+  it('publishes resolved PDF chapters with document metadata', async () => {
+    const onDocumentInfo = vi.fn();
+    render(<PdfViewerBridge source={{ sessionId: 'outline', url: 'blob:outline' }} onProgressChange={vi.fn()} onDocumentInfo={onDocumentInfo} />);
+    const loaded = pdfViewerCoreMock.lastViewerProps?.onDocumentLoad as (event: { doc: unknown }) => void;
+    await act(async () => { loaded({ doc: {
+      numPages: 10, getMetadata: async () => ({ info: { Title: 'Book' } }),
+      getOutline: async () => [{ title: '第一章', dest: [2] }],
+    } }); });
+    expect(onDocumentInfo).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'outline', title: 'Book', outline: [{ id: '0', title: '第一章', page: 3, children: [] }],
+    }));
+  });
+
+  it('keeps the PDF readable when its embedded outline cannot be loaded', async () => {
+    const onDocumentInfo = vi.fn();
+    const onLoadError = vi.fn();
+    render(<PdfViewerBridge source={{ sessionId: 'outline', url: 'blob:outline' }} onProgressChange={vi.fn()}
+      onDocumentInfo={onDocumentInfo} onLoadError={onLoadError} />);
+    const loaded = pdfViewerCoreMock.lastViewerProps?.onDocumentLoad as (event: { doc: unknown }) => void;
+    await act(async () => { loaded({ doc: {
+      numPages: 10, getMetadata: async () => ({ info: {} }),
+      getOutline: async () => { throw new Error('broken outline'); },
+    } }); });
+    expect(onDocumentInfo).toHaveBeenCalledWith(expect.objectContaining({ outline: [], outlineError: expect.stringContaining('目录读取失败') }));
+    expect(onLoadError).not.toHaveBeenCalled();
+    expect(screen.getByText('Real PDF viewer')).toBeInTheDocument();
+  });
+
+  it('ignores a late outline after the same session is replaced with a different PDF', async () => {
+    let resolve!: (items: unknown[]) => void;
+    const pending = new Promise<unknown[]>((done) => { resolve = done; });
+    const onDocumentInfo = vi.fn();
+    const view = render(<PdfViewerBridge source={{ sessionId: 'same', url: 'blob:first' }} onProgressChange={vi.fn()} onDocumentInfo={onDocumentInfo} />);
+    const loaded = pdfViewerCoreMock.lastViewerProps?.onDocumentLoad as (event: { doc: unknown }) => void;
+    act(() => { loaded({ doc: { numPages: 10, getMetadata: async () => ({ info: {} }), getOutline: () => pending } }); });
+    view.rerender(<PdfViewerBridge source={{ sessionId: 'same', url: 'blob:second' }} onProgressChange={vi.fn()} onDocumentInfo={onDocumentInfo} />);
+    await act(async () => { resolve([{ title: 'Old chapter', dest: [2] }]); });
+    expect(onDocumentInfo).not.toHaveBeenCalled();
+  });
+
   it('maps white PDF pixels to the eye-care paper color while preserving black and opacity', () => {
     const { container } = render(<PdfViewerBridge
       source={{ sessionId: 'eye-care', url: 'blob:eye-care', restore: { page: 1, zoom: 1.1 } }}

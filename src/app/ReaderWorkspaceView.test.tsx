@@ -35,9 +35,10 @@ function createSession(): DocumentSession {
 }
 
 describe('ReaderWorkspaceView', () => {
-  it('renders the active reader workspace shell', () => {
+  it('renders the active reader workspace shell and routes outline jumps through reader navigation', () => {
     const activeSession = createSession();
     const annotations: ReaderAnnotation[] = [];
+    const jumpToActiveDocumentPage = vi.fn();
 
     render(
       <ReaderWorkspaceViewUnderTest
@@ -51,7 +52,11 @@ describe('ReaderWorkspaceView', () => {
         pageInput="2"
         searchState={emptySearchState}
         searchOptions={defaultSearchOptions}
-        documentInfo={null}
+        documentInfo={{
+          sessionId: activeSession.id, pageCount: 10, pdfVersion: null, title: null, author: null,
+          subject: null, keywords: null, creator: null, producer: null,
+          outline: [{ id: '0', title: '第一章', page: 3, children: [] }],
+        }}
         documentRecord={null}
         searchInputRef={{ current: null }}
         searchText=""
@@ -69,7 +74,7 @@ describe('ReaderWorkspaceView', () => {
         handleToggleAnnotationTag={vi.fn()}
         handleViewerWheel={vi.fn()}
         importAnnotationsForDocument={vi.fn()}
-        jumpToActiveDocumentPage={vi.fn()}
+        jumpToActiveDocumentPage={jumpToActiveDocumentPage}
         jumpToPage={vi.fn()}
         jumpToSearchMatch={vi.fn()}
         setSearchOptions={vi.fn()}
@@ -96,6 +101,8 @@ describe('ReaderWorkspaceView', () => {
     expect(screen.getByRole('button', { name: 'More options' })).toBeInTheDocument();
     expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
     expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '第一章，第 3 页' }));
+    expect(jumpToActiveDocumentPage).toHaveBeenCalledExactlyOnceWith(3);
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle sidebar' }));
     fireEvent.click(screen.getByRole('button', { name: 'Toggle right sidebar' }));

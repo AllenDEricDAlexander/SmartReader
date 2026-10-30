@@ -151,6 +151,7 @@ export function ReaderWorkspaceView({
         <ReaderLeftPanel
           activeSession={activeSession}
           bookmarks={activeBookmarks}
+          documentInfo={documentInfo?.sessionId === activeSession.id ? documentInfo : null}
           annotations={activeAnnotations}
           selectedAnnotationId={selectedAnnotation?.id ?? null}
           onJumpToPage={jumpToActiveDocumentPage}

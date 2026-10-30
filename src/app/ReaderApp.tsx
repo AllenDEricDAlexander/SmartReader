@@ -1458,6 +1458,10 @@ export function ReaderApp({
     setDocumentInfo(info);
   });
 
+  useLayoutEffect(() => {
+    setDocumentInfo(null);
+  }, [viewerSource?.sessionId, viewerSource?.url]);
+
   // Memoised so viewer props only change when the document, its annotations or
   // the controller actually change — not on every progress update.
   const viewerContent = useMemo(

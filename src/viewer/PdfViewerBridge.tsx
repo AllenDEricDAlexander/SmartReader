@@ -17,6 +17,7 @@ import '@react-pdf-viewer/toolbar/lib/styles/index.css';
 import '@react-pdf-viewer/zoom/lib/styles/index.css';
 import { PdfPasswordPrompt } from './PdfPasswordPrompt';
 import { createRenderRange } from './renderRange';
+import { loadPdfOutline, type PdfOutlineDocument } from './pdfOutline';
 import { pdfDocumentAssets } from '../platform/pdfAssets';
 import type { ViewerController } from './viewerController';
 import {
@@ -45,8 +46,7 @@ type PdfDocumentMetadataInfo = {
   Producer?: string;
 };
 
-type PdfDocumentProxy = {
-  numPages: number;
+type PdfDocumentProxy = PdfOutlineDocument & {
   getMetadata(): Promise<{ info?: PdfDocumentMetadataInfo } | undefined>;
 };
 
@@ -336,6 +336,9 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
       }
 
       let info: PdfDocumentMetadataInfo = {};
+      const outline = loadPdfOutline(doc).then((items) => ({ outline: items })).catch(() => ({
+        outline: [], outlineError: 'PDF 目录读取失败，请重新打开文档。',
+      }));
 
       try {
         info = (await doc.getMetadata())?.info ?? {};
@@ -353,6 +356,7 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
         keywords: info.Keywords ?? null,
         creator: info.Creator ?? null,
         producer: info.Producer ?? null,
+        ...await outline,
       });
     },
     [onDocumentInfo, sessionId],
