@@ -47,6 +47,45 @@ beforeEach(() => {
 });
 
 describe('desktop library workflows', () => {
+  it('backfills the source path on duplicate import without losing notes or reading progress', async () => {
+    const backend = memoryStorage();
+    const extract = vi.fn(async () => ({ ...extracted(), pageCount: 5 }));
+    const library = new LibraryService(backend.storage, extract);
+    const first = await library.importPdf(pdf(), 'paper.pdf');
+    await library.editMetadata(first.id, { title: 'My research title' });
+    await library.recordReading(first.id, 10, 3, 1.5);
+    await library.saveAnnotation(first.id, {
+      id: null, documentKey: `paper:${first.id}`, page: 1, type: 'note', color: '#fff',
+      text: 'Keep my note', quote: null, areas: [], createdAt: '', updatedAt: '',
+    });
+    const before = structuredClone(library.getPaper(first.id)!);
+    const sourcePath = '/research/研究 notes.pdf';
+    const duplicate = await library.importPdf(pdf(), 'renamed.pdf', { sourcePath });
+    expect(duplicate).toMatchObject({ ...before, updatedAt: expect.any(String), sourcePath });
+    expect(library.getView().papers).toHaveLength(1);
+    expect(extract).toHaveBeenCalledOnce();
+    await library.importPdf(pdf(), 'browser-copy.pdf');
+    const reloaded = new LibraryService(backend.storage, async () => extracted());
+    await reloaded.initialize();
+    expect(reloaded.getPaper(first.id)).toMatchObject({ sourcePath, lastPage: 3, zoom: 1.5 });
+    expect(reloaded.getPaper(first.id)?.annotations[0].text).toBe('Keep my note');
+  });
+
+  it('keeps original source paths inside the encrypted paper metadata', async () => {
+    const backend = memoryStorage();
+    const library = new LibraryService(backend.storage, async () => extracted());
+    const paper = await library.importPdf(pdf(), 'private.pdf', { sourcePath: '/private/original.pdf' });
+    const folder = await library.createFolder('Private');
+    await library.categorize([paper.id], [folder.id], 'move');
+    const vault = await library.encryptFolder(folder.id, 'strong password');
+    await library.importPdf(pdf(), 'private.pdf', { sourcePath: '/private/moved.pdf' });
+    expect(JSON.stringify(backend.snapshot())).not.toContain('/private/');
+    await library.lockVault(vault.id);
+    expect(library.getPaper(paper.id)).toBeUndefined();
+    await library.unlockVault(vault.id, 'strong password');
+    expect(library.getPaper(paper.id)?.sourcePath).toBe('/private/moved.pdf');
+  });
+
   it('deduplicates PDF contents across filenames, indexes and classifies without copying files', async () => {
     const backend = memoryStorage();
     const extract = vi.fn(async () => extracted());

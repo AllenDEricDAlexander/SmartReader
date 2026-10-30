@@ -27,6 +27,8 @@ export type IndexedPage = { page: number; text: string };
 export type Paper = {
   id: string;
   fileName: string;
+  /** Original desktop file, when known; the managed PDF remains in the library. */
+  sourcePath?: string;
   fileSize: number;
   addedAt: string;
   updatedAt: string;

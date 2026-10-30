@@ -54,6 +54,7 @@ export type TauriBridge = {
   resolveDroppedPdfPaths?(paths: string[]): Promise<DroppedPdfPaths>;
   setWindowBackgroundColor?(color: string, theme?: 'light' | 'dark'): Promise<void>;
   showWindow?(): Promise<void>;
+  revealFile?(path: string): Promise<void>;
 };
 
 export function createTauriBridge(
@@ -110,6 +111,12 @@ export function createTauriBridge(
     showWindow() {
       return dependencies.invoke || isTauriRuntimeAvailable()
         ? invoke<void>('show_main_window') : Promise.resolve();
+    },
+    revealFile(path) {
+      if (!dependencies.invoke && !isTauriRuntimeAvailable()) {
+        return Promise.reject(new Error('请在桌面客户端中定位本地文件。'));
+      }
+      return invoke<void>('reveal_desktop_file', { path });
     },
   };
 }

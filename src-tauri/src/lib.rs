@@ -84,6 +84,7 @@ pub fn run() {
             db::attach_annotation_tag,
             db::detach_annotation_tag,
             file_commands::stat_desktop_pdf,
+            file_commands::reveal_desktop_file,
             file_commands::read_desktop_pdf_bytes,
             file_commands::read_cached_pdf,
             file_commands::list_desktop_pdfs,

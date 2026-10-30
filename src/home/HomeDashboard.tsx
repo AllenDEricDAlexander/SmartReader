@@ -76,6 +76,7 @@ type HomeDashboardProps = {
   onDropPaths?(paths: string[]): void | Promise<void>;
   onBrowserFileChange: ChangeEventHandler<HTMLInputElement>;
   onReopenRecentDocument(document: PersistedDocument): void | Promise<void>;
+  onLocateFile?(document: Pick<PersistedDocument, 'documentKey' | 'path'>): void | Promise<void>;
   onOpenFavoriteDocument?(document: FavoriteDocument): boolean | void | Promise<boolean | void>;
   canOpenBookmark?(bookmark: BookmarkManagementRecord): boolean;
   onOpenBookmark?(bookmark: BookmarkManagementRecord): void | Promise<void>;
@@ -144,6 +145,7 @@ export function HomeDashboard({
   onDropPaths,
   onBrowserFileChange,
   onReopenRecentDocument,
+  onLocateFile,
   onOpenFavoriteDocument,
   canOpenBookmark = () => true,
   onOpenBookmark = noop,
@@ -216,6 +218,15 @@ export function HomeDashboard({
   const showNotice = useCallback((title: string, message: string) => {
     setNotice({ title, message });
   }, []);
+
+  const handleLocateFile = useCallback(async (document: Pick<PersistedDocument, 'documentKey' | 'path'>) => {
+    try {
+      if (!onLocateFile) throw new Error('当前环境不支持定位本地文件，请使用桌面客户端。');
+      await onLocateFile(document);
+    } catch (error) {
+      showNotice('定位文件失败', error instanceof Error ? error.message : String(error));
+    }
+  }, [onLocateFile, showNotice]);
 
   const updateHomePreferences = async (updates: Partial<ReaderPreferences>) => {
     if (homePreferencesDisabled) return;
@@ -292,9 +303,7 @@ export function HomeDashboard({
           onClearRecords={showClearRecordNotice}
           onReopenDocument={onReopenRecentDocument}
           onToggleFavorite={onToggleFavorite}
-          onLocateFile={() =>
-            showNotice('定位文件功能待补充', '定位文件将在最近文件管理功能中补充。')
-          }
+          onLocateFile={handleLocateFile}
           onRemoveRecent={async (document) => {
             try {
               await onRemoveRecentDocuments([document]);
@@ -336,9 +345,7 @@ export function HomeDashboard({
         onReopenDocument={onReopenRecentDocument}
         onToggleFavorite={onToggleFavorite}
         onToggleDocumentTag={onToggleDocumentTag}
-        onLocateFile={() =>
-          showNotice('定位文件功能待补充', '定位文件将在最近文件管理功能中补充。')
-        }
+        onLocateFile={handleLocateFile}
         onRemoveRecentDocuments={onRemoveRecentDocuments}
         onClearRecentDocuments={onClearRecentDocuments}
         onOpenTags={onOpenTags}
@@ -356,9 +363,7 @@ export function HomeDashboard({
         onOpenDocument={handleOpenFavoriteDocument}
         onToggleFavorite={onToggleFavorite}
         onBatchUnfavorite={onBatchUnfavorite}
-        onLocateFile={() =>
-          showNotice('定位文件功能待补充', '定位文件将在最近文件管理功能中补充。')
-        }
+        onLocateFile={handleLocateFile}
         onOpenTags={onOpenTags}
       />
     </div>

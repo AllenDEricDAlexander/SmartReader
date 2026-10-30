@@ -575,7 +575,9 @@ export function ReaderApp({
             const source = paths[index];
             const opened = typeof source === 'string' ? await bridge.readDesktopPdf(source)
               : { bytes: new Uint8Array(await source.arrayBuffer()), source: { name: source.name } };
-            const paper = await research.library.importPdf(opened.bytes, opened.source.name, { folderId });
+            const paper = await research.library.importPdf(opened.bytes, opened.source.name, {
+              folderId, ...('path' in opened.source ? { sourcePath: opened.source.path } : {}),
+            });
             importedIds.push(paper.id);
             imported += 1;
           } catch (error) { failures.push(errorMessage(error)); }
@@ -583,7 +585,7 @@ export function ReaderApp({
       } else {
         const opened = await bridge.openNativePdf();
         if (opened) {
-          const paper = await research.library.importPdf(opened.bytes, opened.source.name, { folderId });
+          const paper = await research.library.importPdf(opened.bytes, opened.source.name, { folderId, sourcePath: opened.source.path });
           importedIds.push(paper.id);
           imported = 1;
         }
@@ -1458,6 +1460,20 @@ export function ReaderApp({
     setDocumentInfo(info);
   });
 
+  const handleLocateFile = useCallback(async (document: Pick<PersistedDocument, 'documentKey' | 'path'>) => {
+    const paperId = paperIdFromDocumentKey(document.documentKey);
+    const paper = paperId ? research?.library.getPaper(paperId) : null;
+    if (paperId && !paper) throw new Error('文献已锁定或不存在，请解锁后重试。');
+    const path = paperId ? paper?.sourcePath : document.path;
+    if (typeof path !== 'string' || !path) {
+      throw new Error(paperId
+        ? '此文献未保存原文件路径。请从本地重新导入同一 PDF，以关联原文件；已有笔记和阅读进度会保留。'
+        : '此文件没有可定位的本地路径。浏览器临时文件无法在文件管理器中定位。');
+    }
+    if (!bridge.revealFile) throw new Error('当前环境不支持定位本地文件，请使用桌面客户端。');
+    await bridge.revealFile(path);
+  }, [bridge, research]);
+
   useLayoutEffect(() => {
     setDocumentInfo(null);
   }, [viewerSource?.sessionId, viewerSource?.url]);
@@ -1612,6 +1628,7 @@ export function ReaderApp({
         addBookmarkForActivePage={addBookmarkForActivePage}
         addPageNote={addPageNote}
         canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
+        onLocateFile={handleLocateFile}
         canOpenRecordPage={canOpenRecordPage}
         clearSearch={clearSearch}
         closeToolWorkspace={closeToolWorkspace}

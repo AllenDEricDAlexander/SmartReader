@@ -987,10 +987,12 @@ describe('HomeDashboard', () => {
     expect(screen.queryByText('暂无收藏')).not.toBeInTheDocument();
   });
 
-  it('handles recent files menu actions and local fallback notices', () => {
+  it('handles recent files menu actions including native file location', () => {
     const onReopenRecentDocument = vi.fn();
     const onToggleFavorite = vi.fn();
+    const onLocateFile = vi.fn();
     renderDashboard({
+      onLocateFile,
       recentDocuments: recentTableDocuments,
       favoriteDocuments: [
         {
@@ -1034,8 +1036,23 @@ describe('HomeDashboard', () => {
       within(recentFilesRegion).getByRole('button', { name: '更多操作 Design Notes.pdf' }),
     );
     fireEvent.click(screen.getByRole('menuitem', { name: '定位文件' }));
-    expect(screen.getByRole('dialog', { name: '定位文件功能待补充' })).toBeInTheDocument();
-    expect(screen.getByText('定位文件将在最近文件管理功能中补充。')).toBeInTheDocument();
+    expect(onLocateFile).toHaveBeenCalledExactlyOnceWith(recentTableDocuments[0]);
+  });
+
+  it('reports file location failures instead of leaving an unhandled menu rejection', async () => {
+    renderDashboard({ recentDocuments: recentTableDocuments,
+      onLocateFile: vi.fn().mockRejectedValue(new Error('文件已移动或删除')) });
+    fireEvent.click(within(screen.getByRole('region', { name: '最近阅读' })).getByRole('button', { name: '更多操作 Design Notes.pdf' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '定位文件' }));
+    expect(await screen.findByRole('dialog', { name: '定位文件失败' })).toHaveTextContent('文件已移动或删除');
+  });
+
+  it.each(['recentFiles', 'favoriteFiles'] as const)('routes file location from the %s workspace', (activeSidebarPage) => {
+    const onLocateFile = vi.fn();
+    renderDashboard({ activeSidebarPage, recentDocuments: recentTableDocuments, favoriteDocuments: favoriteCardDocuments, onLocateFile });
+    fireEvent.click(screen.getByRole('button', { name: '更多操作 Design Notes.pdf' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '定位文件' }));
+    expect(onLocateFile).toHaveBeenCalledExactlyOnceWith(activeSidebarPage === 'recentFiles' ? recentTableDocuments[0] : favoriteCardDocuments[0]);
   });
 
   it('removes a recent reading record through its menu', async () => {

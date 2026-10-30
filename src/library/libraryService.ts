@@ -158,7 +158,7 @@ export class LibraryService {
   async importPdf(
     bytes: Uint8Array,
     fileName: string,
-    options: { folderId?: string; password?: string } = {},
+    options: { folderId?: string; password?: string; sourcePath?: string } = {},
   ): Promise<Paper> {
     if (bytes.length === 0 || bytes.length > MAX_PDF_BYTES) {
       throw new Error('请选择不超过 128 MB 的 PDF 文件。');
@@ -172,13 +172,17 @@ export class LibraryService {
     let isNew = false;
     await this.mutate(async (tx) => {
       if (tx.snapshot.papers.some((item) => item.id === id)) {
-        this.requirePaper(id, tx);
+        const paper = this.requirePaper(id, tx);
+        if (options.sourcePath && options.sourcePath !== paper.sourcePath) {
+          await this.putPaper(tx, { ...paper, sourcePath: options.sourcePath });
+        }
         if (options.folderId) await this.applyCategories(tx, [id], [options.folderId], 'add');
         return;
       }
       const now = new Date().toISOString();
       const paper: Paper = {
         id, fileName: fileName.trim() || 'Untitled.pdf', fileSize: copy.length,
+        ...(options.sourcePath ? { sourcePath: options.sourcePath } : {}),
         addedAt: now, updatedAt: now, metadata: emptyMetadata(fileName.replace(/\.pdf$/i, '')),
         manualFields: [], pages: [], pageCount: 0, indexStatus: 'pending', indexError: null,
         aiStatus: 'idle', aiError: null, favorite: false, pinned: false, readingSeconds: 0,

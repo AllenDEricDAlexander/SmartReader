@@ -1,6 +1,7 @@
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
+use std::process::{Command, Stdio};
 use time::OffsetDateTime;
 
 #[derive(Debug, thiserror::Error)]
@@ -15,6 +16,10 @@ pub enum FileCommandError {
     NotADirectory,
     #[error("folder import supports at most 2000 PDFs and 20 directory levels")]
     FolderLimit,
+    #[error("文件路径无效，无法定位文件")]
+    InvalidRevealPath,
+    #[error("无法在文件管理器中定位文件：{0}")]
+    Reveal(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -26,6 +31,101 @@ impl serde::Serialize for FileCommandError {
     {
         serializer.serialize_str(&self.to_string())
     }
+}
+
+#[tauri::command]
+pub async fn reveal_desktop_file(path: String) -> Result<(), FileCommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut command = reveal_file_command(Path::new(&path))?;
+        #[cfg(target_os = "windows")]
+        {
+            // Explorer may keep running after opening its window.
+            command
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|error| FileCommandError::Reveal(error.to_string()))?;
+            Ok(())
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let output = command
+                .output()
+                .map_err(|error| FileCommandError::Reveal(error.to_string()))?;
+            if output.status.success() {
+                Ok(())
+            } else {
+                let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                Err(FileCommandError::Reveal(if detail.is_empty() {
+                    output.status.to_string()
+                } else {
+                    detail
+                }))
+            }
+        }
+    })
+    .await
+    .map_err(|error| FileCommandError::Reveal(error.to_string()))?
+}
+
+fn reveal_file_command(path: &Path) -> Result<Command, FileCommandError> {
+    if !path.is_absolute() {
+        return Err(FileCommandError::InvalidRevealPath);
+    }
+    let metadata = fs::metadata(path).map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => FileCommandError::Missing,
+        _ => FileCommandError::Io(error),
+    })?;
+    if !metadata.is_file() {
+        return Err(FileCommandError::NotAFile);
+    }
+
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("/usr/bin/open");
+        command.arg("-R").arg(path);
+        command
+    };
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("explorer.exe");
+        command.arg("/select,").arg(path);
+        command
+    };
+    #[cfg(target_os = "linux")]
+    let mut command = file_manager_show_items_command(path)?;
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    return Err(FileCommandError::Reveal("当前系统不支持文件定位".into()));
+
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    {
+        command.stdin(Stdio::null());
+        Ok(command)
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn file_manager_show_items_command(path: &Path) -> Result<Command, FileCommandError> {
+    let uri =
+        reqwest::Url::from_file_path(path).map_err(|_| FileCommandError::InvalidRevealPath)?;
+    let items = serde_json::to_string(&[uri.as_str()])
+        .map_err(|error| FileCommandError::Reveal(error.to_string()))?;
+    let mut command = Command::new("gdbus");
+    command.args([
+        "call",
+        "--session",
+        "--timeout",
+        "5",
+        "--dest",
+        "org.freedesktop.FileManager1",
+        "--object-path",
+        "/org/freedesktop/FileManager1",
+        "--method",
+        "org.freedesktop.FileManager1.ShowItems",
+        &items,
+        "''",
+    ]);
+    Ok(command)
 }
 
 /// Everything about a local PDF except its contents.
@@ -218,6 +318,71 @@ pub fn cache_file_name(document_key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reveal_validates_paths_without_launching_a_file_manager() {
+        let directory =
+            std::env::temp_dir().join(format!("smartreader-reveal-{}", std::process::id()));
+        fs::create_dir_all(&directory).expect("create fixture");
+        assert!(matches!(
+            reveal_file_command(Path::new("relative.pdf")),
+            Err(FileCommandError::InvalidRevealPath)
+        ));
+        assert!(matches!(
+            reveal_file_command(&directory),
+            Err(FileCommandError::NotAFile)
+        ));
+        assert!(matches!(
+            reveal_file_command(&directory.join("missing.pdf")),
+            Err(FileCommandError::Missing)
+        ));
+        let path = directory.join("研究 notes, % #1.pdf");
+        fs::write(&path, b"%PDF-1.7").expect("write fixture");
+        let command = reveal_file_command(&path).expect("build command");
+        #[cfg(target_os = "macos")]
+        {
+            assert_eq!(command.get_program(), "/usr/bin/open");
+            assert_eq!(
+                command.get_args().collect::<Vec<_>>(),
+                vec![std::ffi::OsStr::new("-R"), path.as_os_str()]
+            );
+        }
+        #[cfg(target_os = "windows")]
+        {
+            assert_eq!(command.get_program(), "explorer.exe");
+            assert_eq!(
+                command.get_args().collect::<Vec<_>>(),
+                vec![std::ffi::OsStr::new("/select,"), path.as_os_str()]
+            );
+        }
+        #[cfg(target_os = "linux")]
+        assert_eq!(command.get_program(), "gdbus");
+        fs::remove_dir_all(&directory).expect("remove fixture");
+    }
+
+    #[test]
+    fn linux_file_manager_receives_a_single_encoded_uri_with_selection_semantics() {
+        let path = std::env::temp_dir().join("研究 O'Reilly, % #1.pdf");
+        let command = file_manager_show_items_command(&path).expect("build D-Bus command");
+        let args = command
+            .get_args()
+            .map(|value| value.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert!(args.contains(&"org.freedesktop.FileManager1.ShowItems"));
+        let items: Vec<String> = serde_json::from_str(args[10]).expect("URI array");
+        assert_eq!(items.len(), 1);
+        assert!(items[0].contains("%20"));
+        assert!(items[0].contains("%23"));
+        assert!(items[0].contains("%25"));
+        assert_eq!(
+            reqwest::Url::parse(&items[0])
+                .unwrap()
+                .to_file_path()
+                .unwrap(),
+            path
+        );
+        assert_eq!(args.last(), Some(&"''"));
+    }
 
     #[test]
     fn resolves_dropped_folders_and_files_without_duplicates() {

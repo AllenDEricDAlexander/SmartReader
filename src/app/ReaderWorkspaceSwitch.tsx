@@ -98,6 +98,7 @@ type ReaderWorkspaceSwitchProps = {
   addBookmarkForActivePage(): void;
   addPageNote(): void;
   canOpenNativePdf(): boolean;
+  onLocateFile?(document: Pick<PersistedDocument, 'documentKey' | 'path'>): void | Promise<void>;
   canOpenRecordPage(documentKey: string, documentPath: string | null, documentMissing: boolean): boolean;
   clearSearch(): void;
   closeToolWorkspace(): void;
@@ -206,6 +207,7 @@ export function ReaderWorkspaceSwitch({
   addBookmarkForActivePage,
   addPageNote,
   canOpenNativePdf,
+  onLocateFile,
   canOpenRecordPage,
   clearSearch,
   closeToolWorkspace,
@@ -430,6 +432,7 @@ export function ReaderWorkspaceSwitch({
           onDropPaths={handleHomePathDrop}
           onBrowserFileChange={handleBrowserFileChange}
           onReopenRecentDocument={(document) => void reopenRecentDocument(document)}
+          onLocateFile={onLocateFile}
           onOpenFavoriteDocument={(document) => openFavoriteDocument(document)}
           canOpenBookmark={(bookmark) =>
             canOpenRecordPage(bookmark.documentKey, bookmark.documentPath, bookmark.documentMissing)

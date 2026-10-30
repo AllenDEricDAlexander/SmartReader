@@ -2,6 +2,20 @@ import { describe, expect, it, vi } from 'vitest';
 import { createTauriBridge } from './tauriBridge';
 
 describe('tauriBridge', () => {
+  it('passes the exact file path to the native reveal command and reports failures', async () => {
+    const invoke = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce('file does not exist');
+    const bridge = createTauriBridge({ invoke });
+    const path = '/Users/mario/研究/资料, notes #1.pdf';
+    await bridge.revealFile?.(path);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('reveal_desktop_file', { path });
+    await expect(bridge.revealFile?.(path)).rejects.toBe('file does not exist');
+  });
+
+  it('reports that browser-only files cannot be revealed through native IPC', async () => {
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+    await expect(createTauriBridge().revealFile?.('/tmp/book.pdf')).rejects.toThrow('桌面客户端');
+  });
+
   it('reveals the configured main window through the native command', async () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
     await createTauriBridge({ invoke }).showWindow?.();

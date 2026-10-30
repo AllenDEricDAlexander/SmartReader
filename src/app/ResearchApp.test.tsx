@@ -195,6 +195,35 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('desktop research App integration', () => {
+  it('reveals the original desktop file for a managed recent document', async () => {
+    const app = fixture();
+    const revealFile = vi.fn().mockResolvedValue(undefined);
+    app.bridge.revealFile = revealFile;
+    render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);
+    await openNative();
+    expect(app.library.getView().papers[0].sourcePath).toBe('/research/cognition.pdf');
+    fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));
+    const recent = screen.getByRole('region', { name: '最近阅读' });
+    fireEvent.click(within(recent).getByRole('button', { name: '更多操作 cognition.pdf' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '定位文件' }));
+    await waitFor(() => expect(revealFile).toHaveBeenCalledExactlyOnceWith('/research/cognition.pdf'));
+    expect(app.bridge.readDesktopPdf).not.toHaveBeenCalled();
+  });
+
+  it('reports managed papers without a recorded source instead of revealing a fabricated path', async () => {
+    const app = fixture();
+    const paper = await app.library.importPdf(primaryPdf(), 'cognition.pdf');
+    await app.library.recordReading(paper.id, 0, 1, 1);
+    const revealFile = vi.fn();
+    app.bridge.revealFile = revealFile;
+    render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);
+    const menu = await screen.findByRole('button', { name: '更多操作 cognition.pdf' });
+    fireEvent.click(menu);
+    fireEvent.click(screen.getByRole('menuitem', { name: '定位文件' }));
+    expect(await screen.findByRole('dialog', { name: '定位文件失败' })).toHaveTextContent('未保存原文件路径');
+    expect(revealFile).not.toHaveBeenCalled();
+  });
+
   it.each([1, 3])('batch imports a dropped folder containing %i PDFs without opening reader tabs', async (count) => {
     const app = fixture();
     render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);

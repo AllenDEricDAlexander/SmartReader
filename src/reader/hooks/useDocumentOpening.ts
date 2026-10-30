@@ -160,7 +160,8 @@ export function useDocumentOpening({
           return;
         }
       }
-      const paper = await library.importPdf(bytes, getFileSourceName(source));
+      const paper = await library.importPdf(bytes, getFileSourceName(source),
+        source.kind === 'desktop-path' ? { sourcePath: source.path } : undefined);
       await openLibraryPaper(paper.id);
     } else {
       activateBytes(source, bytes, metadata);
