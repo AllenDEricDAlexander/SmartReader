@@ -624,7 +624,7 @@ describe('PdfViewerBridge', () => {
     expect(pdfViewerZoomMock.zoomTo.mock.calls.at(-1)?.[0]).toBeCloseTo(0.7);
   });
 
-  it('passes the ten-page dynamic render window to the real viewer', () => {
+  it('passes the twenty-page dynamic render window to the real viewer', () => {
     render(
       <PdfViewerBridge
         source={{ sessionId: 'session-a', url: 'blob:book' }}
@@ -641,8 +641,8 @@ describe('PdfViewerBridge', () => {
 
     expect(setRenderRange).toBeTypeOf('function');
     expect(setRenderRange?.({ startPage: 20, endPage: 20, numPages: 100 })).toEqual({
-      startPage: 10,
-      endPage: 30,
+      startPage: 0,
+      endPage: 40,
     });
   });
 

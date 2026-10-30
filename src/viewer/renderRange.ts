@@ -13,12 +13,12 @@ export type RenderRangeOptions = {
 
 /**
  * Default render overscan. The window follows the latest visible range and
- * keeps ten pages on each side for smooth continuous reading in either
+ * keeps twenty pages on each side for smooth continuous reading in either
  * direction. This controls the viewer's rendered page window, not the PDF byte
  * cache, Blob URL cache, or every internal PDF.js decoded resource.
  */
-const defaultPagesBehind = 10;
-const defaultPagesAhead = 10;
+const defaultPagesBehind = 20;
+const defaultPagesAhead = 20;
 
 /**
  * Builds the `setRenderRange` callback for the viewer. Returned bounds may fall

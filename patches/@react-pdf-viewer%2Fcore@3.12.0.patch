@@ -1,0 +1,396 @@
+diff --git a/lib/cjs/core.js b/lib/cjs/core.js
+index 4c477a22f98afe893bc2c3ebb098e00a59dcbc12..d346305727911b5affc30bb57a0e30a6bc186da5 100644
+--- a/lib/cjs/core.js
++++ b/lib/cjs/core.js
+@@ -582,6 +582,7 @@ var PageRenderStatus;
+     PageRenderStatus["Rendered"] = "Rendered";
+ })(PageRenderStatus || (PageRenderStatus = {}));
+ var OUT_OF_RANGE_VISIBILITY = -9999;
++var MAX_RENDERING_PAGES = 3;
+ var useRenderQueue = function (_a) {
+     var doc = _a.doc;
+     var numPages = doc.numPages;
+@@ -596,9 +597,11 @@ var useRenderQueue = function (_a) {
+         }); });
+     }, [docId]);
+     var latestRef = React__namespace.useRef({
+-        currentRenderingPage: -1,
+         startRange: 0,
+         endRange: numPages - 1,
++        visibleStart: 0,
++        visibleEnd: 0,
++        direction: 1,
+         visibilities: initialPageVisibilities,
+     });
+     var markNotRendered = function () {
+@@ -607,22 +610,45 @@ var useRenderQueue = function (_a) {
+         }
+     };
+     var markRendered = function (pageIndex) {
++        if (latestRef.current.visibilities[pageIndex].renderStatus !== PageRenderStatus.Rendering) {
++            return;
++        }
+         latestRef.current.visibilities[pageIndex].renderStatus = PageRenderStatus.Rendered;
+     };
++    var comparePriority = function (a, b) {
++        var state = latestRef.current;
++        var distanceA = Math.max(state.visibleStart - a.pageIndex, 0, a.pageIndex - state.visibleEnd);
++        var distanceB = Math.max(state.visibleStart - b.pageIndex, 0, b.pageIndex - state.visibleEnd);
++        if (distanceA === 0 && distanceB === 0) {
++            return b.visibility - a.visibility || a.pageIndex - b.pageIndex;
++        }
++        var aheadA = state.direction > 0 ? a.pageIndex > state.visibleEnd : a.pageIndex < state.visibleStart;
++        var aheadB = state.direction > 0 ? b.pageIndex > state.visibleEnd : b.pageIndex < state.visibleStart;
++        var priorityA = distanceA * (aheadA ? 1 : 2);
++        var priorityB = distanceB * (aheadB ? 1 : 2);
++        return priorityA - priorityB || state.direction * (b.pageIndex - a.pageIndex);
++    };
+     var markRendering = function (pageIndex) {
+-        if (latestRef.current.currentRenderingPage !== -1 &&
+-            latestRef.current.currentRenderingPage !== pageIndex &&
+-            latestRef.current.visibilities[latestRef.current.currentRenderingPage].renderStatus ===
+-                PageRenderStatus.Rendering) {
+-            latestRef.current.visibilities[latestRef.current.currentRenderingPage].renderStatus =
+-                PageRenderStatus.NotRenderedYet;
+-        }
+-        latestRef.current.visibilities[pageIndex].renderStatus = PageRenderStatus.Rendering;
+-        latestRef.current.currentRenderingPage = pageIndex;
++        var state = latestRef.current;
++        if (state.visibilities[pageIndex].renderStatus === PageRenderStatus.Rendering) {
++            return;
++        }
++        var rendering = state.visibilities.slice(state.startRange, state.endRange + 1)
++            .filter(function (item) { return item.renderStatus === PageRenderStatus.Rendering; });
++        if (rendering.length >= MAX_RENDERING_PAGES) {
++            rendering.sort(comparePriority);
++            rendering[rendering.length - 1].renderStatus = PageRenderStatus.NotRenderedYet;
++        }
++        state.visibilities[pageIndex].renderStatus = PageRenderStatus.Rendering;
+     };
+-    var setRange = function (startIndex, endIndex) {
++    var setRange = function (startIndex, endIndex, visibleStart, visibleEnd) {
++        if (visibleStart !== latestRef.current.visibleStart) {
++            latestRef.current.direction = visibleStart > latestRef.current.visibleStart ? 1 : -1;
++        }
+         latestRef.current.startRange = startIndex;
+         latestRef.current.endRange = endIndex;
++        latestRef.current.visibleStart = visibleStart;
++        latestRef.current.visibleEnd = visibleEnd;
+         for (var i = 0; i < numPages; i++) {
+             if (i < startIndex || i > endIndex) {
+                 latestRef.current.visibilities[i].visibility = OUT_OF_RANGE_VISIBILITY;
+@@ -637,38 +663,41 @@ var useRenderQueue = function (_a) {
+         latestRef.current.visibilities[pageIndex].visibility = visibility;
+     };
+     var getHighestPriorityPage = function () {
+-        var visiblePages = latestRef.current.visibilities
+-            .slice(latestRef.current.startRange, latestRef.current.endRange + 1)
+-            .filter(function (item) { return item.visibility > OUT_OF_RANGE_VISIBILITY; });
+-        if (!visiblePages.length) {
++        var state = latestRef.current;
++        var pages = state.visibilities.slice(state.startRange, state.endRange + 1);
++        var rendering = pages.filter(function (item) { return item.renderStatus === PageRenderStatus.Rendering; });
++        var pending = pages.filter(function (item) { return item.renderStatus === PageRenderStatus.NotRenderedYet; });
++        // Render visible pages first, then warm both sides with more work going
++        // toward the scroll direction, where pages will be needed sooner.
++        pending.sort(comparePriority);
++        if (!pending.length) {
+             return -1;
+         }
+-        var firstVisiblePage = visiblePages[0].pageIndex;
+-        var lastVisiblePage = visiblePages[visiblePages.length - 1].pageIndex;
+-        var numVisiblePages = visiblePages.length;
+-        for (var i = 0; i < numVisiblePages; i++) {
+-            if (visiblePages[i].renderStatus === PageRenderStatus.Rendering) {
++        if (rendering.length >= MAX_RENDERING_PAGES) {
++            var hasOffscreenWork = rendering.some(function (item) {
++                return item.pageIndex < state.visibleStart || item.pageIndex > state.visibleEnd;
++            });
++            var nextVisible = state.visibleStart <= pending[0].pageIndex && pending[0].pageIndex <= state.visibleEnd;
++            // An unfinished offscreen page must not block a newly visible page.
++            // PageLayer cancels the preempted work when shouldRender changes.
++            if (!hasOffscreenWork || !nextVisible) {
+                 return -1;
+             }
+-            if (visiblePages[i].renderStatus === PageRenderStatus.NotRenderedYet) {
+-                return visiblePages[i].pageIndex;
+-            }
+-        }
+-        if (lastVisiblePage + 1 < numPages &&
+-            latestRef.current.visibilities[lastVisiblePage + 1].renderStatus !== PageRenderStatus.Rendered) {
+-            return lastVisiblePage + 1;
+         }
+-        else if (firstVisiblePage - 1 >= 0 &&
+-            latestRef.current.visibilities[firstVisiblePage - 1].renderStatus !== PageRenderStatus.Rendered) {
+-            return firstVisiblePage - 1;
+-        }
+-        return -1;
++        return pending[0].pageIndex;
+     };
+     var isInRange = function (pageIndex) {
+         return pageIndex >= latestRef.current.startRange && pageIndex <= latestRef.current.endRange;
+     };
++    var getRenderingPages = function () {
++        var state = latestRef.current;
++        return state.visibilities.slice(state.startRange, state.endRange + 1)
++            .filter(function (item) { return item.renderStatus === PageRenderStatus.Rendering; })
++            .map(function (item) { return item.pageIndex; });
++    };
+     return {
+         getHighestPriorityPage: getHighestPriorityPage,
++        getRenderingPages: getRenderingPages,
+         isInRange: isInRange,
+         markNotRendered: markNotRendered,
+         markRendered: markRendered,
+@@ -2018,6 +2047,7 @@ var CanvasLayer = function (_a) {
+     var canvasLayerRef = _a.canvasLayerRef, height = _a.height, page = _a.page, pageIndex = _a.pageIndex, plugins = _a.plugins, rotation = _a.rotation, scale = _a.scale, width = _a.width, onRenderCanvasCompleted = _a.onRenderCanvasCompleted;
+     var renderTask = React__namespace.useRef();
+     useIsomorphicLayoutEffect(function () {
++        var disposed = false;
+         var task = renderTask.current;
+         if (task) {
+             task.cancel();
+@@ -2054,6 +2084,9 @@ var CanvasLayer = function (_a) {
+         var transform = shouldScaleByCSS || outputScale !== 1 ? [possibleScale, 0, 0, possibleScale, 0, 0] : null;
+         renderTask.current = page.render({ canvasContext: canvasContext, transform: transform, viewport: viewport });
+         renderTask.current.promise.then(function () {
++            if (disposed) {
++                return;
++            }
+             canvasEle.hidden = false;
+             canvasEle.setAttribute('data-testid', "core__canvas-layer-".concat(pageIndex));
+             plugins.forEach(function (plugin) {
+@@ -2069,9 +2102,13 @@ var CanvasLayer = function (_a) {
+             });
+             onRenderCanvasCompleted();
+         }, function () {
+-            onRenderCanvasCompleted();
++            if (!disposed) {
++                onRenderCanvasCompleted();
++            }
+         });
+         return function () {
++            disposed = true;
++            renderTask.current.cancel();
+             if (canvasEle) {
+                 canvasEle.width = 0;
+                 canvasEle.height = 0;
+@@ -2125,6 +2162,7 @@ var TextLayer = function (_a) {
+         breaks.forEach(function (br) { return containerEle.removeChild(br); });
+     };
+     useIsomorphicLayoutEffect(function () {
++        var disposed = false;
+         var task = renderTask.current;
+         if (task) {
+             task.cancel();
+@@ -2146,6 +2184,9 @@ var TextLayer = function (_a) {
+             }
+         });
+         page.getTextContent().then(function (textContent) {
++            if (disposed) {
++                return;
++            }
+             empty();
+             renderTask.current = PdfJsApi__namespace.renderTextLayer({
+                 container: containerEle,
+@@ -2154,6 +2195,9 @@ var TextLayer = function (_a) {
+                 viewport: viewport,
+             });
+             renderTask.current.promise.then(function () {
++                if (disposed) {
++                    return;
++                }
+                 containerEle.setAttribute('data-testid', "core__text-layer-".concat(pageIndex));
+                 var spans = [].slice.call(containerEle.children);
+                 spans.forEach(function (span) {
+@@ -2173,12 +2217,15 @@ var TextLayer = function (_a) {
+                 });
+                 onRenderTextCompleted();
+             }, function () {
+-                containerEle.removeAttribute('data-testid');
+-                onRenderTextCompleted();
++                if (!disposed) {
++                    containerEle.removeAttribute('data-testid');
++                    onRenderTextCompleted();
++                }
+             });
+         });
+         return function () {
+             var _a;
++            disposed = true;
+             empty();
+             (_a = renderTask.current) === null || _a === void 0 ? void 0 : _a.cancel();
+         };
+@@ -2201,14 +2248,6 @@ var PageLayer = function (_a) {
+     var h = isVertical ? scaledHeight : scaledWidth;
+     var rotationValue = (pageSize.rotation + rotation + pageRotation) % 360;
+     var renderQueueKeyRef = React__namespace.useRef(0);
+-    var determinePageInstance = function () {
+-        getPage(doc, pageIndex).then(function (pdfPage) {
+-            if (isMounted.current) {
+-                renderQueueKeyRef.current = renderQueueKey;
+-                setPage(pdfPage);
+-            }
+-        });
+-    };
+     var defaultPageRenderer = function (props) { return (React__namespace.createElement(React__namespace.Fragment, null,
+         props.canvasLayer.children,
+         props.textLayer.children,
+@@ -2230,12 +2269,24 @@ var PageLayer = function (_a) {
+         setTextLayerRendered(false);
+     }, [pageRotation, rotation, scale]);
+     React__namespace.useEffect(function () {
++        var disposed = false;
+         if (shouldRender && isMounted.current && !page) {
+-            determinePageInstance();
++            getPage(doc, pageIndex).then(function (pdfPage) {
++                if (!disposed && isMounted.current) {
++                    renderQueueKeyRef.current = renderQueueKey;
++                    setPage(pdfPage);
++                }
++            });
+         }
+-    }, [shouldRender, page]);
++        else if (!shouldRender && page && !(canvasLayerRendered && textLayerRendered)) {
++            setPage(null);
++            setCanvasLayerRendered(false);
++            setTextLayerRendered(false);
++        }
++        return function () { disposed = true; };
++    }, [shouldRender, page, canvasLayerRendered, textLayerRendered, renderQueueKey]);
+     React__namespace.useEffect(function () {
+-        if (canvasLayerRendered && textLayerRendered) {
++        if (shouldRender && canvasLayerRendered && textLayerRendered) {
+             if (renderQueueKey !== renderQueueKeyRef.current) {
+                 setPage(null);
+                 setCanvasLayerRendered(false);
+@@ -2245,7 +2296,7 @@ var PageLayer = function (_a) {
+                 onRenderCompleted(pageIndex);
+             }
+         }
+-    }, [canvasLayerRendered, textLayerRendered]);
++    }, [shouldRender, canvasLayerRendered, textLayerRendered, renderQueueKey]);
+     return (React__namespace.createElement("div", { className: classNames({
+             'rpv-core__page-layer': true,
+             'rpv-core__page-layer--dual': viewMode === exports.ViewMode.DualPage,
+@@ -3086,7 +3137,7 @@ var useVirtual = function (_a) {
+         maxVisbilityItem = clamp(0, numberOfItems - 1, maxVisbilityItem);
+         var maxVisbilityIndex = maxVisbilityItem;
+         var _b = setRenderRange({
+-            endPage: end,
++            endPage: Math.max(start, end - 1),
+             numPages: numberOfItems,
+             startPage: start,
+         }), startPage = _b.startPage, endPage = _b.endPage;
+@@ -3116,9 +3167,11 @@ var useVirtual = function (_a) {
+         return {
+             startPage: startPage,
+             endPage: endPage,
++            visibleStartPage: start,
++            visibleEndPage: Math.max(start, end - 1),
+             maxVisbilityIndex: maxVisbilityIndex,
+         };
+-    }, [measurements, parentRect, scrollOffset, viewMode, visibilities]), startPage = _e.startPage, endPage = _e.endPage, maxVisbilityIndex = _e.maxVisbilityIndex;
++    }, [measurements, parentRect, scrollOffset, viewMode, visibilities]), startPage = _e.startPage, endPage = _e.endPage, visibleStartPage = _e.visibleStartPage, visibleEndPage = _e.visibleEndPage, maxVisbilityIndex = _e.maxVisbilityIndex;
+     var virtualItems = React__namespace.useMemo(function () {
+         var virtualItems = [];
+         var _loop_1 = function (i) {
+@@ -3252,6 +3305,8 @@ var useVirtual = function (_a) {
+         isSmoothScrolling: isSmoothScrolling,
+         startPage: startPage,
+         endPage: endPage,
++        visibleStartPage: visibleStartPage,
++        visibleEndPage: visibleEndPage,
+         maxVisbilityIndex: maxVisbilityIndex,
+         virtualItems: virtualItems,
+         getContainerStyles: getContainerStyles,
+@@ -3637,7 +3692,7 @@ var Inner = function (_a) {
+         jumpToPage: function (pageIndex) { return jumpToPage(pageIndex); },
+         targetRef: pagesRef,
+     });
+-    var _j = React__namespace.useState(-1), renderPageIndex = _j[0], setRenderPageIndex = _j[1];
++    var _j = React__namespace.useState([]), renderPageIndexes = _j[0], setRenderPageIndexes = _j[1];
+     var _k = React__namespace.useState(0), renderQueueKey = _k[0], setRenderQueueKey = _k[1];
+     var renderQueue = useRenderQueue({ doc: doc });
+     React__namespace.useEffect(function () {
+@@ -3806,7 +3861,7 @@ var Inner = function (_a) {
+         setViewerState(__assign(__assign({}, stateRef.current), { pagesRotation: updateRotations, rotatedPage: pageIndex }));
+         onRotatePage({ direction: direction, doc: doc, pageIndex: pageIndex, rotation: finalRotation });
+         renderQueue.markRendering(pageIndex);
+-        setRenderPageIndex(pageIndex);
++        setRenderPageIndexes(renderQueue.getRenderingPages());
+     }, []);
+     var switchScrollMode = React__namespace.useCallback(function (scrollMode) {
+         setViewerState(__assign(__assign({}, stateRef.current), { scrollMode: scrollMode }));
+@@ -3927,7 +3982,7 @@ var Inner = function (_a) {
+         }
+         var startPage = virtualizer.startPage, endPage = virtualizer.endPage, virtualItems = virtualizer.virtualItems;
+         renderQueue.markNotRendered();
+-        renderQueue.setRange(startPage, endPage);
++        renderQueue.setRange(startPage, endPage, virtualizer.visibleStartPage, virtualizer.visibleEndPage);
+         var _loop_1 = function (i) {
+             var item = virtualItems.find(function (item) { return item.index === i; });
+             if (item) {
+@@ -3997,7 +4052,7 @@ var Inner = function (_a) {
+         }
+         setCurrentPage(currentPage);
+         setViewerState(__assign(__assign({}, stateRef.current), { pageIndex: currentPage }));
+-        renderQueue.setRange(startPage, endPage);
++        renderQueue.setRange(startPage, endPage, virtualizer.visibleStartPage, virtualizer.visibleEndPage);
+         var _loop_2 = function (i) {
+             var item = virtualItems.find(function (item) { return item.index === i; });
+             if (item) {
+@@ -4011,6 +4066,8 @@ var Inner = function (_a) {
+     }, [
+         virtualizer.startPage,
+         virtualizer.endPage,
++        virtualizer.visibleStartPage,
++        virtualizer.visibleEndPage,
+         virtualizer.isSmoothScrolling,
+         virtualizer.maxVisbilityIndex,
+         fullScreen.fullScreenMode,
+@@ -4023,11 +4080,20 @@ var Inner = function (_a) {
+         renderNextPage();
+     }, [renderQueueKey]);
+     var renderNextPage = function () {
+-        var nextPage = renderQueue.getHighestPriorityPage();
+-        if (nextPage > -1 && renderQueue.isInRange(nextPage)) {
++        // Fill a bounded group so nearby offscreen pages render even when the
++        // visible page has a slow canvas or text layer.
++        for (var i = 0; i < MAX_RENDERING_PAGES; i++) {
++            var nextPage = renderQueue.getHighestPriorityPage();
++            if (nextPage < 0 || !renderQueue.isInRange(nextPage)) {
++                break;
++            }
+             renderQueue.markRendering(nextPage);
+-            setRenderPageIndex(nextPage);
+         }
++        var nextPages = renderQueue.getRenderingPages();
++        setRenderPageIndexes(function (current) {
++            return current.length === nextPages.length && current.every(function (page, index) { return page === nextPages[index]; })
++                ? current : nextPages;
++        });
+     };
+     var executeNamedAction = function (action) {
+         var previousPage = currentPage - 1;
+@@ -4122,7 +4188,7 @@ var Inner = function (_a) {
+                             scrollMode: currentScrollMode,
+                             viewMode: currentViewMode,
+                         })) },
+-                        React__namespace.createElement(PageLayer, { doc: doc, measureRef: item.measureRef, outlines: outlines, pageIndex: item.index, pageRotation: pagesRotation.has(item.index) ? pagesRotation.get(item.index) : 0, pageSize: pageSizes[item.index], plugins: plugins, renderPage: renderPage, renderQueueKey: renderQueueKey, rotation: rotation, scale: scale, shouldRender: renderPageIndex === item.index, viewMode: currentViewMode, onExecuteNamedAction: executeNamedAction, onJumpFromLinkAnnotation: handleJumpFromLinkAnnotation, onJumpToDest: jumpToDestination, onRenderCompleted: handlePageRenderCompleted, onRotatePage: rotatePage })));
++                        React__namespace.createElement(PageLayer, { doc: doc, measureRef: item.measureRef, outlines: outlines, pageIndex: item.index, pageRotation: pagesRotation.has(item.index) ? pagesRotation.get(item.index) : 0, pageSize: pageSizes[item.index], plugins: plugins, renderPage: renderPage, renderQueueKey: renderQueueKey, rotation: rotation, scale: scale, shouldRender: renderPageIndexes.indexOf(item.index) !== -1, viewMode: currentViewMode, onExecuteNamedAction: executeNamedAction, onJumpFromLinkAnnotation: handleJumpFromLinkAnnotation, onJumpToDest: jumpToDestination, onRenderCompleted: handlePageRenderCompleted, onRotatePage: rotatePage })));
+                 }))); }))),
+             },
+         };
+diff --git a/lib/index.js b/lib/index.js
+index fd31b71e282ff3e7d2371062f29896c459922713..539adb457fd588eef2c5f31314f9ebbad76a86b0 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -11,5 +11,2 @@
+-if (process.env.NODE_ENV === 'production') {
+-    module.exports = require('./cjs/core.min.js');
+-} else {
+-    module.exports = require('./cjs/core.js');
+-}
++// Share the patched scheduler in both modes; Vite minifies production output.
++module.exports = require('./cjs/core.js');

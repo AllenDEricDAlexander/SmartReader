@@ -2,25 +2,42 @@ import { describe, expect, it } from 'vitest';
 import { createRenderRange } from './renderRange';
 
 describe('createRenderRange', () => {
-  it('keeps ten pages behind and ahead of one visible page', () => {
+  it('keeps twenty pages behind and ahead of one visible page', () => {
     const renderRange = createRenderRange();
 
     expect(renderRange({ startPage: 20, endPage: 20, numPages: 100 })).toEqual({
-      startPage: 10,
-      endPage: 30,
+      startPage: 0,
+      endPage: 40,
     });
   });
 
-  it('slides forward by the eighth page without a separate batch state', () => {
+  it('slides forward and backward with the latest visible page', () => {
     const renderRange = createRenderRange();
 
     expect(renderRange({ startPage: 20, endPage: 20, numPages: 100 })).toEqual({
-      startPage: 10,
-      endPage: 30,
+      startPage: 0,
+      endPage: 40,
     });
     expect(renderRange({ startPage: 28, endPage: 28, numPages: 100 })).toEqual({
-      startPage: 18,
-      endPage: 38,
+      startPage: 8,
+      endPage: 48,
+    });
+    expect(renderRange({ startPage: 27, endPage: 27, numPages: 100 })).toEqual({
+      startPage: 7,
+      endPage: 47,
+    });
+  });
+
+  it('moves the window directly to a distant jump target', () => {
+    const renderRange = createRenderRange();
+
+    expect(renderRange({ startPage: 20, endPage: 20, numPages: 200 })).toEqual({
+      startPage: 0,
+      endPage: 40,
+    });
+    expect(renderRange({ startPage: 150, endPage: 150, numPages: 200 })).toEqual({
+      startPage: 130,
+      endPage: 170,
     });
   });
 
@@ -28,8 +45,8 @@ describe('createRenderRange', () => {
     const renderRange = createRenderRange();
 
     expect(renderRange({ startPage: 20, endPage: 21, numPages: 100 })).toEqual({
-      startPage: 10,
-      endPage: 31,
+      startPage: 0,
+      endPage: 41,
     });
   });
 
@@ -46,12 +63,12 @@ describe('createRenderRange', () => {
     const renderRange = createRenderRange();
 
     expect(renderRange({ startPage: 0, endPage: 0, numPages: 100 })).toEqual({
-      startPage: -10,
-      endPage: 10,
+      startPage: -20,
+      endPage: 20,
     });
     expect(renderRange({ startPage: 99, endPage: 99, numPages: 100 })).toEqual({
-      startPage: 89,
-      endPage: 109,
+      startPage: 79,
+      endPage: 119,
     });
   });
 });
