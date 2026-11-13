@@ -90,7 +90,8 @@ describe('local AI conversation persistence', () => {
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
     await act(async () => { await app.ai.flushAssistantSession(); });
     const input = screen.getByLabelText('科研问题');
-    const viewport = input.closest<HTMLElement>('section.ai-assistant')!;
+    const workspace = input.closest('section.ai-assistant')!;
+    const viewport = screen.getByRole('region', { name: '对话正文' });
     const reasoning = screen.getByText('模型思考过程').closest('details')!;
     reasoning.open = true;
     Object.defineProperties(viewport, { scrollHeight: { configurable: true, value: 1800 }, clientHeight: { configurable: true, value: 400 } });
@@ -122,7 +123,7 @@ describe('local AI conversation persistence', () => {
       expect(input).toBeDisabled();
       expect(screen.getByLabelText('AI 厂商')).toBeDisabled();
       expect(screen.getByRole('button', { name: '发送问题' })).toBeDisabled();
-      expect(screen.getByLabelText('科研问题').closest('section.ai-assistant')).toBe(viewport);
+      expect(screen.getByLabelText('科研问题').closest('section.ai-assistant')).toBe(workspace);
       expect(viewport.scrollTop).toBe(140);
       expect(reasoning).toBeInTheDocument();
       expect(reasoning.open).toBe(true);
@@ -208,6 +209,7 @@ describe('local AI conversation persistence', () => {
     expect(screen.getByLabelText('搜索知识库文件')).toHaveValue('恢复');
     expect(screen.getByLabelText('聊天模型')).toHaveValue('fast-model');
     expect(screen.getByRole('checkbox', { name: '选择知识库文件 恢复测试论文' })).toBeChecked();
+    fireEvent.click(screen.getByText('1 条来源'));
     fireEvent.click(screen.getByRole('button', { name: /S1.*恢复测试论文.*第 1 页/ }));
     expect(open).toHaveBeenCalledWith(app.paper.id, 1);
     fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));

@@ -192,6 +192,7 @@ describe('AI research assistant', () => {
     ask();
     await screen.findByText('注意力可以改善记忆。[S1]');
     expect(askSpy).toHaveBeenCalledWith('注意力的结论是什么？', expect.objectContaining({ paperIds: [paper.id], grounding: 'library' }));
+    fireEvent.click(screen.getByText('1 条来源'));
     fireEvent.click(screen.getByRole('button', { name: /S1.*认知神经论文.*第 1 页/ }));
     expect(onOpenPaper).toHaveBeenCalledWith(paper.id, 1);
     ai.dispose();
@@ -663,7 +664,7 @@ describe('AI research assistant', () => {
     ai.dispose();
   });
 
-  it('returns to the existing question input below the sticky header without losing the draft', async () => {
+  it('focuses the persistent input without moving the transcript or replacing the draft', async () => {
     const { library, ai } = await setup();
     render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
     expect(screen.queryByRole('button', { name: '继续提问' })).not.toBeInTheDocument();
@@ -671,23 +672,26 @@ describe('AI research assistant', () => {
     await screen.findByText('注意力可以改善记忆。[S1]');
     const input = screen.getByLabelText('科研问题');
     fireEvent.change(input, { target: { value: '保留的追问草稿' } });
-    const button = screen.getByRole('button', { name: '继续提问' });
-    const header = button.closest('header')!;
-    const viewport = screen.getByRole('region', { name: 'AI 研究助手' });
-    viewport.scrollTop = 1400;
-    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ top: 60 } as DOMRect);
-    vi.spyOn(input, 'getBoundingClientRect').mockReturnValue({ top: -740 } as DOMRect);
-    Object.defineProperty(header, 'offsetHeight', { configurable: true, value: 180 });
-    let frame!: FrameRequestCallback;
-    const animationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementationOnce((callback) => { frame = callback; return 1; });
-    fireEvent.click(button);
-    expect(screen.getByRole('button', { name: '回到最新回答' })).toBeInTheDocument();
-    act(() => { frame(0); });
-    expect(viewport.scrollTop).toBe(388);
+    const viewport = screen.getByRole('region', { name: '对话正文' });
+    expect(viewport).not.toContainElement(input);
+    viewport.scrollTop = 140;
+    fireEvent.click(screen.getByRole('button', { name: '继续提问' }));
+    expect(viewport.scrollTop).toBe(140);
     expect(input).toHaveFocus();
     expect(input).toHaveValue('保留的追问草稿');
-    expect(screen.getByText('注意力可以改善记忆。[S1]')).toBeInTheDocument();
-    animationFrame.mockRestore();
+    ai.dispose();
+  });
+
+  it('fills an empty draft from a suggested question without submitting it', async () => {
+    const { library, ai, completion } = await setup();
+    render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
+    const prompt = '总结所选文献的主要结论';
+    fireEvent.click(screen.getByText(prompt));
+    const input = screen.getByLabelText('科研问题');
+    expect(input).toHaveValue(prompt);
+    expect(input).toHaveFocus();
+    expect(fireEvent.keyDown(input, { key: 'Enter' })).toBe(true);
+    expect(completion).not.toHaveBeenCalled();
     ai.dispose();
   });
 
@@ -700,7 +704,7 @@ describe('AI research assistant', () => {
       return new Promise((resolve) => { finish = resolve; });
     });
     render(<AiAssistant library={library} ai={ai} onOpenPaper={vi.fn()} />);
-    const viewport = screen.getByRole('region', { name: 'AI 研究助手' });
+    const viewport = screen.getByRole('region', { name: '对话正文' });
     let scrollHeight = 1600;
     let scrollTop = 0;
     Object.defineProperties(viewport, {
@@ -710,7 +714,7 @@ describe('AI research assistant', () => {
     });
     ask('长回答');
     expect(scrollTop).toBe(1000);
-    expect(screen.getByRole('button', { name: '取消回答' }).closest('header')).not.toBeNull();
+    expect(viewport).not.toContainElement(screen.getByRole('button', { name: '取消回答' }));
     fireEvent.scroll(viewport, { target: { scrollTop: 300 } });
     expect(screen.getByRole('button', { name: '回到最新回答' })).toBeInTheDocument();
     scrollHeight = 1800;

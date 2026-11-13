@@ -1,6 +1,7 @@
 import { webcrypto } from 'node:crypto';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import '../ai/AiAssistant';
 import { AiService } from '../ai/aiService';
 import { emptyMetadata, type LibrarySnapshot } from '../library/libraryModels';
 import { LibraryService } from '../library/libraryService';
@@ -320,6 +321,7 @@ describe('desktop research App integration', () => {
     app.completion.mockResolvedValue('Selected knowledge evidence [S1]');
     render(<App research={app.research} bridge={app.bridge} persistence={app.persistence} viewerRenderer={renderer} />);
     fireEvent.click(screen.getByRole('button', { name: 'AI 科研助手' }));
+    fireEvent.click(await screen.findByText('知识库与检索范围'));
     await screen.findByText(/知识库还没有文件/);
     fireEvent.click(screen.getByRole('button', { name: '添加本地 PDF' }));
     const checkbox = await screen.findByRole('checkbox', { name: `选择知识库文件 ${title}` });
@@ -329,6 +331,7 @@ describe('desktop research App integration', () => {
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: contentToken } });
     fireEvent.click(screen.getByRole('button', { name: '检索并提问' }));
     await screen.findByText('Selected knowledge evidence [S1]');
+    fireEvent.click(screen.getByText('1 条来源'));
     expect(screen.getByRole('button', { name: new RegExp(`S1 ${title} 第 4 页`) })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: 'A follow-up after reading the citation' } });
     fireEvent.click(screen.getByRole('button', { name: new RegExp(`S1 ${title} 第 4 页`) }));

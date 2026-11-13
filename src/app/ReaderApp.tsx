@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -52,7 +54,6 @@ import { useReaderPersistence } from '../reader/hooks/useReaderPersistence';
 import { useSessionRestore } from '../reader/hooks/useSessionRestore';
 import { ReaderTabs } from '../reader/ReaderTabs';
 import { GlobalSearchPanel } from '../search/GlobalSearchPanel';
-import { AiAssistant } from '../ai/AiAssistant';
 import { LibraryWorkspace } from '../library/LibraryWorkspace';
 import { exportDocumentNotesPdf, type NotesExportSource } from '../library/exportPaperNotes';
 import { paperToPersistedDocument } from '../library/libraryPersistence';
@@ -82,6 +83,8 @@ import {
   mergeRecentDocuments,
   upsertRecentDocument,
 } from './readerAppMappers';
+
+const AiAssistant = lazy(() => import('../ai/AiAssistant').then(({ AiAssistant }) => ({ default: AiAssistant })));
 
 const emptyBookmarks: Bookmark[] = [];
 const emptyAnnotations: ReaderAnnotation[] = [];
@@ -1501,8 +1504,12 @@ export function ReaderApp({
     onOpenPaper={openResearchPaper} onImport={async (folderId) => { await importPdfs(folderId); }} onOpenAiSettings={() => openSettingsWorkspace('ai')}
     importing={importing} importProgress={importProgress} initialFolderView={homeSidebarPage === 'folders'} /> : null;
   const workspaceContent = research && (homeSidebarPage === 'myDocuments' || homeSidebarPage === 'folders') ? libraryWorkspace
-    : research && homeSidebarPage === 'ai' ? <AiAssistant library={research.library} ai={research.ai}
-      onOpenPaper={openResearchPaper} onAddPdfs={() => importPdfs()} onOpenSettings={() => openSettingsWorkspace('ai')} />
+    : research && homeSidebarPage === 'ai' ? (
+      <Suspense fallback={<p role="status">正在加载 AI 研究助手…</p>}>
+        <AiAssistant library={research.library} ai={research.ai} theme={readerPreferences.theme}
+          onOpenPaper={openResearchPaper} onAddPdfs={() => importPdfs()} onOpenSettings={() => openSettingsWorkspace('ai')} />
+      </Suspense>
+    )
     : research && homeSidebarPage === 'notes' ? <AnnotationManagerWorkspace title="笔记管理"
       annotations={displayAnnotations.filter((annotation) => annotation.type === 'note')}
       exportSources={noteExportSources} onExportNotes={(sources) => exportDocumentNotesPdf(research.library, persistence, sources).catch((failure: unknown) => {
