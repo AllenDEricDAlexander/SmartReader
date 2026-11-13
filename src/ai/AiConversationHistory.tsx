@@ -1,11 +1,17 @@
-import { GripVertical, History, LockKeyhole, MessageSquarePlus, PencilLine, Pin, PinOff, Search, Trash2, X } from 'lucide-react';
+import { GripVertical, History, LockKeyhole, MessageSquarePlus, Ellipsis, PencilLine, Pin, PinOff, Search, Trash2, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { MAX_PINNED_AI_CONVERSATIONS, type AiConversationSummary } from '../library/libraryModels';
 import { errorMessage } from '../library/libraryService';
 import type { AiService } from './aiService';
 import { AiConversationGroups } from './AiConversationGroups';
 
-export function AiConversationHistory({ ai, disabled }: { ai: AiService; disabled: boolean }) {
+export function AiConversationHistory({ ai, disabled, open, onClose, panelId }: {
+  ai: AiService;
+  disabled: boolean;
+  open: boolean;
+  onClose(): void;
+  panelId: string;
+}) {
   const activity = useSyncExternalStore(ai.subscribe, ai.getView);
   const conversations = activity.conversations;
   const historyListId = useId();
@@ -18,6 +24,7 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
     source: AiConversationSummary[]; query: string; entries: AiConversationSummary[]; error?: string;
   } | null>(null);
   const [searchRetry, setSearchRetry] = useState(0);
+  const [openActions, setOpenActions] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [pendingRename, setPendingRename] = useState<{ id: string; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -27,11 +34,12 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
   } | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const handles = useRef(new Map<string, HTMLButtonElement>());
-  const deleteButtons = useRef(new Map<string, HTMLButtonElement>());
+  const actionButtons = useRef(new Map<string, HTMLButtonElement>());
   const deleteConfirmation = useRef<HTMLDivElement>(null);
   const deleteCancel = useRef<HTMLButtonElement>(null);
   const deleteOrigin = useRef<{ id: string; scrollTop: number } | null>(null);
   const historyPanel = useRef<HTMLElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
   const historyList = useRef<HTMLUListElement>(null);
   const pointer = useRef({ x: 0, y: 0 });
   const currentSearch = searchResult?.source === conversations && searchResult?.query === query ? searchResult : null;
@@ -43,6 +51,11 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
   const visiblePinnedOrder = entries.filter((entry) => entry.pinned).map((entry) => entry.id);
   const target = entries.find((entry) => entry.id === pendingDelete) ?? conversations?.find((entry) => entry.id === pendingDelete);
   const renameTarget = conversations?.find((entry) => entry.id === pendingRename?.id);
+
+  useEffect(() => {
+    if (open && closeButton.current?.getClientRects().length) closeButton.current.focus({ preventScroll: true });
+    if (!open) setOpenActions(null);
+  }, [open]);
 
   useEffect(() => {
     setSearchResult(null);
@@ -65,7 +78,7 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
   }, [disabled, groupFilter]);
 
   useEffect(() => {
-    setPendingDelete(null); setPendingRename(null);
+    setPendingDelete(null); setPendingRename(null); setOpenActions(null);
   }, [groupFilter]);
 
   useEffect(() => {
@@ -88,7 +101,7 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
     requestAnimationFrame(() => {
       if (!origin) return;
       if (historyPanel.current) historyPanel.current.scrollTop = origin.scrollTop;
-      deleteButtons.current.get(origin.id)?.focus({ preventScroll: true });
+      actionButtons.current.get(origin.id)?.focus({ preventScroll: true });
       deleteOrigin.current = null;
     });
   }
@@ -145,13 +158,15 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
     setFocusId(id);
   }
 
-  return <aside className="ai-history-panel" aria-label="历史会话" ref={historyPanel}>
+  return <aside id={panelId} className="ai-history-panel" data-open={open} aria-label="历史会话" ref={historyPanel}>
+    <button className="ai-history-close" type="button" aria-label="关闭历史会话" ref={closeButton} onClick={onClose}><X size={16} aria-hidden="true" /></button>
     <div className="ai-history-heading">
       <span className="ai-history-title"><History size={17} /><h2>历史会话</h2>
         <small>{pinnedCount}/{MAX_PINNED_AI_CONVERSATIONS}</small>
       </span>
       <button type="button" className="ai-new-conversation" disabled={disabled}
-        onClick={() => void perform(async () => { await ai.createConversation(groupFilter ?? null); setQuery(''); })}>
+        onClick={() => void perform(async () => { await ai.createConversation(groupFilter ?? null); setQuery(''); })
+          .then((saved) => { if (saved && open) onClose(); })}>
         <MessageSquarePlus size={15} />新建对话
       </button>
     </div>
@@ -244,7 +259,9 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
         <div className="ai-history-content">
           <button type="button" className="ai-history-select" disabled={disabled}
             title={entry.title} aria-label={`打开会话 ${entry.title}`} aria-current={entry.id === activity.activeConversationId ? 'true' : undefined}
-            onClick={() => void perform(() => ai.selectConversation(entry.id))}>
+            onClick={() => void perform(() => ai.selectConversation(entry.id)).then((saved) => {
+              if (saved && open) onClose();
+            })}>
             <strong>{entry.title}</strong>
             <span>{entry.pinned ? <span className="ai-history-pinned"><Pin size={12} aria-hidden="true" />置顶</span> : null}
               {entry.locked ? <span className="ai-history-locked"><LockKeyhole size={12} aria-hidden="true" />待解锁</span>
@@ -252,7 +269,23 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
               <time dateTime={entry.updatedAt}>{new Date(entry.updatedAt).toLocaleString()}</time>
             </span>
           </button>
-          <div className="ai-history-row-tools">
+        </div>
+        <button type="button" className="ai-history-action-trigger" aria-label={`会话操作 ${entry.title}`}
+            aria-expanded={openActions === entry.id}
+            ref={(node) => { if (node) actionButtons.current.set(entry.id, node); else actionButtons.current.delete(entry.id); }}
+            onClick={() => setOpenActions(openActions === entry.id ? null : entry.id)}>
+          <Ellipsis size={17} aria-hidden="true" />
+        </button>
+        {openActions === entry.id ? (
+          <div className="ai-history-row-tools" role="group" aria-label={`操作 ${entry.title}`}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                setOpenActions(null);
+                actionButtons.current.get(entry.id)?.focus({ preventScroll: true });
+              }
+            }}>
             <select className="ai-history-membership" aria-label={`移动会话 ${entry.title} 到分组`} title="选择所属分组"
               value={entry.groupId ?? ''} disabled={disabled} onChange={(event) => {
                 const groupId = event.target.value || null;
@@ -267,20 +300,19 @@ export function AiConversationHistory({ ai, disabled }: { ai: AiService; disable
                 aria-label={`${entry.pinned ? '取消置顶' : '置顶'}会话 ${entry.title}`} aria-pressed={Boolean(entry.pinned)}
                 title={!entry.pinned && pinLimitReached ? `最多置顶 ${MAX_PINNED_AI_CONVERSATIONS} 个会话，请先取消其他会话的置顶。` : entry.pinned ? '取消置顶' : '置顶到历史列表顶部'}
                 onClick={() => void perform(() => ai.setConversationPinned(entry.id, !entry.pinned))}>
-                {entry.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+                {entry.pinned ? <PinOff size={14} aria-hidden="true" /> : <Pin size={14} aria-hidden="true" />}{entry.pinned ? '取消置顶' : '置顶'}
               </button>
               <button type="button" disabled={disabled || entry.locked} aria-label={`重命名会话 ${entry.title}`}
-                onClick={() => { setError(null); setPendingDelete(null); setPendingRename({ id: entry.id, name: entry.title }); }}><PencilLine size={14} /></button>
+                onClick={() => { setOpenActions(null); setError(null); setPendingDelete(null); setPendingRename({ id: entry.id, name: entry.title }); }}><PencilLine size={14} aria-hidden="true" />重命名</button>
               <button type="button" className="ai-history-delete" disabled={disabled} aria-label={`删除会话 ${entry.title}`}
-                ref={(node) => { if (node) deleteButtons.current.set(entry.id, node); else deleteButtons.current.delete(entry.id); }}
                 onClick={() => {
-                  setError(null); setPendingRename(null);
+                  setOpenActions(null); setError(null); setPendingRename(null);
                   deleteOrigin.current = { id: entry.id, scrollTop: historyPanel.current?.scrollTop ?? 0 };
                   setPendingDelete(entry.id);
-                }}><Trash2 size={14} /></button>
+                }}><Trash2 size={14} aria-hidden="true" />删除</button>
             </div>
           </div>
-        </div>
+        ) : null}
       </li>)}
     </ul>
   </aside>;

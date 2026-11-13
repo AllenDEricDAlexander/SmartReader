@@ -3,9 +3,9 @@
 | Field | Value |
 | --- | --- |
 | Document | `2026-11-13-14-31-agent-ant-design-x-implementation.md` |
-| Status | `In Progress` |
+| Status | `Completed` |
 | Created | 2026-11-13 14:31 Asia/Shanghai |
-| Updated | 2026-11-13 14:31 Asia/Shanghai |
+| Updated | 2026-11-13 14:55 Asia/Shanghai |
 | Owner | SmartReader 项目维护者 |
 | Repository | SmartReader |
 | Scope | AI 研究助手 UI 与桌面验证 |
@@ -317,6 +317,10 @@ Ant Design X 的构建体积和实际 WebView 布局需实测。当前没有待�
 
 ## 12. Review and Acceptance
 
-执行完毕时将测试与原生运行结果对照设计验收条目。
+- 步骤 1 提交 `5291fec`。类型检查及 92 项助手、持久化、知识库和应用入口测试通过。
+- 步骤 2 完成前，91 个测试文件共 1,137 项通过。最终窗口修正后复跑 5 个相关测试文件共 141 项，类型检查、生产构建和 diff 检查均通过。
+- macOS 26.4 的隔离 Tauri 应用在 860 × 560、125% 缩放下通过亮色、暗色和护眼色复测。输入、发送、PDF 入口和检索范围可见。历史可展开、按 Escape 关闭并还原焦点，宽窗口恢复常驻栏。知识库面板可滚动，关闭按钮可见且恢复焦点。
+- 本机模拟模型实际流式返回，输入区呈现取消按钮。快捷问题填入草稿，引用展开后打开 PDF 第 6 页，从原文返回可恢复聊天。文件选择器曾误选本地 PDF，副本保留在隔离 QA 库内。检索摘录仅发到本机模拟服务。
+- 生产构建将 AI 工作区放在独立按需加载的 chunk 中，约 509 kB，gzip 约 166 kB。
 
 **PASS — Ready for user review**

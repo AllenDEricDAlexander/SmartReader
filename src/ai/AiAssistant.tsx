@@ -1,7 +1,7 @@
 import { Bubble, Prompts, Sender, Welcome, XProvider } from '@ant-design/x';
 import { Input, theme as antTheme, type GetProps, type GetRef, type ThemeConfig } from 'antd';
-import { ArrowDown, BookOpen, Plus, Send, Settings, ShieldCheck, Sparkles, Square, Trash2, X } from 'lucide-react';
-import { forwardRef, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { ArrowDown, BookOpen, PanelLeft, Plus, Send, Settings, ShieldCheck, Sparkles, Square, Trash2, X } from 'lucide-react';
+import { forwardRef, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { errorMessage, type LibraryService } from '../library/libraryService';
 import { providerModels, type Paper } from '../library/libraryModels';
 import { BookList } from '../components/book-list/BookList';
@@ -66,12 +66,26 @@ export function AiAssistant(props: AiAssistantProps) {
   const theme = useAssistantTheme(props.theme);
   const activity = useSyncExternalStore(ai.subscribe, ai.getView);
   const [contentBusy, setContentBusy] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const historyId = useId();
+  const historyToggle = useRef<HTMLButtonElement>(null);
+
+  function closeHistory() {
+    setHistoryOpen(false);
+    historyToggle.current?.focus({ preventScroll: true });
+  }
+
+  const historyControl = <button className="ai-history-toggle" type="button" ref={historyToggle}
+    aria-controls={historyId} aria-expanded={historyOpen} onClick={() => setHistoryOpen(!historyOpen)}>
+    <PanelLeft size={15} aria-hidden="true" />历史会话
+  </button>;
   const paperRequest = useRef<{ paperId?: string; conversationId?: string } | null>(null);
   useEffect(() => { void ai.loadAssistantSession().catch(() => undefined); }, [ai]);
   const disabled = contentBusy || Boolean(activity.asking || activity.conversationBusy || !activity.sessionLoaded);
   let content;
   if (!activity.sessionLoaded || activity.sessionLocked || activity.conversationSwitching) {
     content = <section className="ai-assistant" aria-label="恢复 AI 对话">
+      <header className="ai-assistant-header">{historyControl}<h1>AI 研究助手</h1></header>
       <div className="ai-assistant-body">
         {activity.sessionError ? <>
           <p className="settings-error" role="alert">{activity.sessionError}</p>
@@ -86,18 +100,25 @@ export function AiAssistant(props: AiAssistantProps) {
     if (!paperRequest.current || paperRequest.current.paperId !== props.initialPaperId) {
       paperRequest.current = { paperId: props.initialPaperId, conversationId: activity.activeConversationId };
     }
-    content = <AiAssistantContent {...props} key={activity.activeConversationId} onBusyChange={setContentBusy}
+    content = <AiAssistantContent {...props} key={activity.activeConversationId} onBusyChange={setContentBusy} historyControl={historyControl}
       initialPaperId={paperRequest.current.conversationId === activity.activeConversationId ? props.initialPaperId : undefined} />;
   }
   return <XProvider theme={theme}>
-    <div className="ai-conversation-workspace">
-      <AiConversationHistory ai={ai} disabled={disabled} />
+    <div className="ai-conversation-workspace" onKeyDown={(event) => {
+      if (event.key === 'Escape' && historyOpen && !event.defaultPrevented) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeHistory();
+      }
+    }}>
+      {historyOpen ? <div className="ai-history-backdrop" aria-hidden="true" onClick={closeHistory} /> : null}
+      <AiConversationHistory ai={ai} disabled={disabled} open={historyOpen} onClose={closeHistory} panelId={historyId} />
       {content}
     </div>
   </XProvider>;
 }
 
-function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdfs, initialPaperId, onBusyChange }: AiAssistantProps & { onBusyChange(busy: boolean): void }) {
+function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdfs, initialPaperId, onBusyChange, historyControl }: AiAssistantProps & { onBusyChange(busy: boolean): void; historyControl: React.ReactNode }) {
   const libraryView = useSyncExternalStore(library.subscribe, library.getView);
   const activity = useSyncExternalStore(ai.subscribe, ai.getView);
   const session = ai.getAssistantSession();
@@ -214,6 +235,16 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
     // Keep the reader's position when they scroll up during a streaming answer.
     if (messages.length && followingTranscript.current) scrollToLatest();
   }, [messages]);
+
+  useEffect(() => {
+    const viewport = transcriptViewport.current;
+    if (!viewport) return;
+    const observer = new ResizeObserver(() => {
+      if (followingTranscript.current) viewport.scrollTop = viewport.scrollHeight;
+    });
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
 
   function scrollToLatest() {
     followingTranscript.current = true;
@@ -415,6 +446,7 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
   return (
     <section className="ai-assistant" aria-labelledby="ai-assistant-title">
       <header className="ai-assistant-header">
+        {historyControl}
         <h1 id="ai-assistant-title"><Sparkles size={17} aria-hidden="true" />AI 研究助手</h1>
         <div className="ai-compact-config" role="group" aria-label="AI 厂商与模型选择">
           <label>
@@ -477,11 +509,6 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
           <p className="settings-error" role="alert">{activity.knowledgeCleanupError}</p>
         ) : null}
         {notice ? <p className="ai-muted" role="status">{notice}</p> : null}
-        {configured && grounding === 'direct' ? (
-          <p className="ai-mode-note">{usablePapers.length
-            ? '当前模式不检索文献或附带来源。'
-            : '知识库还没有可检索的文件，当前为纯模型对话。导入 PDF 后可切换为文献检索。'}</p>
-        ) : null}
       </div>
       <section className="ai-transcript-viewport" aria-label="对话正文" ref={transcriptViewport}
         onScroll={(event) => {
@@ -547,12 +574,29 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
                 }} /> : null}
             </div>
           ) : null}
+          {configured && grounding === 'direct' ? (
+            <p className="ai-mode-note">{usablePapers.length
+              ? '当前模式不检索文献或附带来源。'
+              : '知识库还没有可检索的文件，当前为纯模型对话。导入 PDF 后可切换为文献检索。'}</p>
+          ) : null}
         </div>
       </section>
       <footer className="ai-composer">
         <div className="ai-composer-inner">
           {showLatest && messages.length ? <button className="ai-jump-latest" type="button" onClick={scrollToLatest}><ArrowDown size={15} aria-hidden="true" />回到最新回答</button> : null}
-          <div className="ai-composer-tools">
+          <form onSubmit={(event) => void submit(event)}>
+            <Sender ref={questionInput} components={senderComponents} className="ai-sender" value={visibleDraft}
+              disabled={busy} autoSize={false} onKeyDown={() => false}
+              placeholder="输入你的研究问题…"
+              onChange={(text) => setDraft({ text: text.slice(0, 4000), epoch: ai.getView().answerEpoch })}
+              suffix={pending || activity.asking
+                ? <button type="button" className="ai-stop-answer" onClick={cancel}><Square size={14} aria-hidden="true" />取消回答</button>
+                : <button type="submit" className="primary-action" disabled={!questionReady || busy || !visibleDraft.trim()}>
+                    <Send size={15} aria-hidden="true" />{grounding === 'direct' ? '发送问题' : '检索并提问'}
+                  </button>}
+              classNames={{ content: 'ai-sender-content' }} />
+          </form>
+          <div className="ai-composer-context">
             <div className="ai-answer-mode" role="group" aria-label="回答方式">
               <label>
                 <input type="radio" name="ai-grounding" aria-label="检索本地文献并附来源" checked={grounding === 'library'}
@@ -568,24 +612,11 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
             {!busy && messages.some((message) => message.role === 'assistant' && !message.streaming) ? (
               <button className="ai-follow-up" type="button" onClick={continueQuestion}>继续提问</button>
             ) : null}
-          </div>
-          <form onSubmit={(event) => void submit(event)}>
-            <Sender ref={questionInput} components={senderComponents} className="ai-sender" value={visibleDraft}
-              disabled={busy} autoSize={false} onKeyDown={() => false}
-              placeholder="输入你的研究问题…"
-              onChange={(text) => setDraft({ text: text.slice(0, 4000), epoch: ai.getView().answerEpoch })}
-              suffix={pending || activity.asking
-                ? <button type="button" className="ai-stop-answer" onClick={cancel}><Square size={14} aria-hidden="true" />取消回答</button>
-                : <button type="submit" className="primary-action" disabled={!questionReady || busy || !visibleDraft.trim()}>
-                    <Send size={15} aria-hidden="true" />{grounding === 'direct' ? '发送问题' : '检索并提问'}
-                  </button>}
-              footer={<small className="ai-draft-count">{visibleDraft.length} / 4000</small>} />
-          </form>
-          <div className="ai-composer-context">
             <details className="ai-knowledge-disclosure" open={knowledgeOpen}
               onToggle={(event) => setKnowledgeOpen(event.currentTarget.open)}
               onKeyDown={(event) => {
                 if (event.key === 'Escape' && knowledgeOpen) {
+                  event.preventDefault();
                   event.stopPropagation();
                   closeKnowledge();
                 }
@@ -660,9 +691,10 @@ function AiAssistantContent({ library, ai, onOpenPaper, onOpenSettings, onAddPdf
               setKnowledgeOpen(true);
               void addPdfs();
             }}><Plus size={14} aria-hidden="true" />添加本地 PDF</button> : null}
+            <small className="ai-draft-count">{visibleDraft.length} / 4000</small>
           </div>
           <p className="ai-assistant-privacy">
-            <ShieldCheck size={15} />相关摘录、对话历史和问题会发送给所选厂商。锁定的文献不参与检索。
+            <ShieldCheck size={14} aria-hidden="true" />相关摘录、对话历史和问题会发送给所选厂商。锁定的文献不参与检索。
           </p>
         </div>
       </footer>

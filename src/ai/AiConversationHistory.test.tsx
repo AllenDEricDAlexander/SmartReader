@@ -82,6 +82,24 @@ async function createGroup(ai: AiService, name: string) {
   return group;
 }
 
+type ConversationActionOptions = { name: string; pressed?: boolean };
+
+function actionTrigger({ name }: ConversationActionOptions) {
+  const title = name.replace(/^(?:取消置顶|置顶|重命名|删除|移动)会话 /, '').replace(/ 到分组$/, '');
+  return screen.getByLabelText(`会话操作 ${title}`);
+}
+
+function conversationAction(role: 'button' | 'combobox', options: ConversationActionOptions) {
+  const trigger = actionTrigger(options);
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger);
+  return screen.getByRole(role, options);
+}
+
+async function findConversationAction(role: 'button' | 'combobox', options: ConversationActionOptions) {
+  await waitFor(() => expect(actionTrigger(options)).toBeInTheDocument());
+  return conversationAction(role, options);
+}
+
 let hitTest: ReturnType<typeof vi.fn<(x: number, y: number) => Element | null>>;
 let scrollIntoView: ReturnType<typeof vi.fn>;
 
@@ -267,7 +285,7 @@ describe('AI conversation history UI', () => {
     expect(screen.getByRole('combobox', { name: '筛选会话分组' })).toHaveValue(group.id);
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: '历史会话' } });
     await screen.findByText('找到 1 个会话');
-    expect(screen.getByRole('combobox', { name: '移动会话 历史会话 到分组' })).toHaveValue(group.id);
+    expect(conversationAction('combobox', { name: '移动会话 历史会话 到分组' })).toHaveValue(group.id);
     fireEvent.click(screen.getByText('调整分组顺序'));
     const handle = startGroupDrag('研究');
     aimGroupDrag(handle, '参考');
@@ -280,7 +298,7 @@ describe('AI conversation history UI', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存分组' }));
     await screen.findByRole('button', { name: '展开分组 重点研究' });
     await screen.findByText('找到 1 个会话');
-    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 历史会话 到分组' }), { target: { value: app.groups[1].id } });
+    fireEvent.change(conversationAction('combobox', { name: '移动会话 历史会话 到分组' }), { target: { value: app.groups[1].id } });
     await screen.findByText('没有匹配的会话。');
     fireEvent.click(screen.getByRole('button', { name: '清空会话搜索' }));
     expect(screen.getByRole('button', { name: '展开分组 重点研究' })).toHaveAttribute('aria-expanded', 'false');
@@ -306,9 +324,9 @@ describe('AI conversation history UI', () => {
     await waitForConversationReady(app.ai);
     expect(app.snapshot().aiConversations).toEqual({ ...before, groups: [three, one, two] });
     expect(screen.getByRole('combobox', { name: '筛选会话分组' })).toHaveValue(two.id);
-    expect(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' })).toHaveValue(two.id);
+    expect(conversationAction('combobox', { name: '移动会话 当前会话 到分组' })).toHaveValue(two.id);
     expect(within(screen.getByRole('combobox', { name: '筛选会话分组' })).getAllByRole('option').map((option) => (option as HTMLOptionElement).value)).toEqual(['all', '', three.id, one.id, two.id]);
-    expect(within(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' })).getAllByRole('option').map((option) => (option as HTMLOptionElement).value)).toEqual(['', three.id, one.id, two.id]);
+    expect(within(conversationAction('combobox', { name: '移动会话 当前会话 到分组' })).getAllByRole('option').map((option) => (option as HTMLOptionElement).value)).toEqual(['', three.id, one.id, two.id]);
     fireEvent.keyDown(screen.getByRole('button', { name: '拖动排序分组 参考' }), { key: 'ArrowDown' });
     await waitFor(() => expect(app.ai.getView().conversationGroups).toEqual([one, three, two]));
     await waitForConversationReady(app.ai);
@@ -325,7 +343,7 @@ describe('AI conversation history UI', () => {
     openGroupManager();
     await waitFor(() => expect(screen.getByLabelText('科研问题')).toHaveValue('保留的草稿'));
     expect(restarted.ai.getView().conversationGroups).toEqual([three, one, two]);
-    expect(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' })).toHaveValue(two.id);
+    expect(conversationAction('combobox', { name: '移动会话 当前会话 到分组' })).toHaveValue(two.id);
     fireEvent.click(screen.getByText('调整分组顺序'));
     expect(screen.getAllByRole('button', { name: /^查看分组 / }).map((button) => button.getAttribute('aria-label'))).toEqual(['查看分组 参考', '查看分组 研究', '查看分组 归档']);
     await act(async () => { await restarted.ai.flushAssistantSession(); });
@@ -449,7 +467,7 @@ describe('AI conversation history UI', () => {
     const research = await createGroup(app.ai, '研究讨论');
     expect(screen.getByLabelText('科研问题')).toHaveValue('甲的追问');
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 课题甲 到分组' }), { target: { value: research.id } });
+    fireEvent.change(conversationAction('combobox', { name: '移动会话 课题甲 到分组' }), { target: { value: research.id } });
     await screen.findByText('会话分组已更新。');
     await waitForConversationReady(app.ai);
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: research.id } });
@@ -463,7 +481,7 @@ describe('AI conversation history UI', () => {
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '乙的草稿' } });
     const archive = await createGroup(app.ai, '归档');
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 课题乙 到分组' }), { target: { value: archive.id } });
+    fireEvent.change(conversationAction('combobox', { name: '移动会话 课题乙 到分组' }), { target: { value: archive.id } });
     await screen.findByText('会话分组已更新。');
     await waitForConversationReady(app.ai);
     const first = app.ai.getView().conversations!.find((entry) => entry.title === '课题甲')!.id;
@@ -495,8 +513,8 @@ describe('AI conversation history UI', () => {
     expect(screen.getByRole('group', { name: '确认删除会话分组' })).toHaveTextContent('聊天记录和上下文继续保留');
     fireEvent.click(screen.getByRole('button', { name: '确认删除分组' }));
     await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选会话分组' })).toHaveValue('all'));
-    expect(screen.getByRole('combobox', { name: '移动会话 课题甲 到分组' })).toHaveValue('');
-    expect(screen.getByRole('combobox', { name: '移动会话 课题乙 到分组' })).toHaveValue(archive.id);
+    expect(conversationAction('combobox', { name: '移动会话 课题甲 到分组' })).toHaveValue('');
+    expect(conversationAction('combobox', { name: '移动会话 课题乙 到分组' })).toHaveValue(archive.id);
     expect(screen.getByText('课题乙回答[S1]')).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('乙的草稿');
     for (const entry of app.snapshot().aiConversations!.entries) {
@@ -544,10 +562,10 @@ describe('AI conversation history UI', () => {
     fireEvent.click(screen.getByRole('button', { name: '清空会话搜索' }));
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: two.id } });
     await createConversation();
-    expect(screen.getByRole('combobox', { name: '移动会话 新对话 到分组' })).toHaveValue(two.id);
+    expect(conversationAction('combobox', { name: '移动会话 新对话 到分组' })).toHaveValue(two.id);
     expect(screen.getByRole('option', { name: '归档（2）' })).toBeInTheDocument();
     expect(screen.getByText('2/10')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '置顶会话 新对话' })).toHaveAttribute('aria-pressed', 'false');
+    expect(conversationAction('button', { name: '置顶会话 新对话' })).toHaveAttribute('aria-pressed', 'false');
     await act(async () => { await app.ai.flushAssistantSession(); });
     app.ai.dispose();
   });
@@ -560,12 +578,12 @@ describe('AI conversation history UI', () => {
     openGroupManager();
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保留草稿' } });
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
-    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 历史会话 到分组' }), { target: { value: '' } });
+    fireEvent.change(conversationAction('combobox', { name: '移动会话 历史会话 到分组' }), { target: { value: '' } });
     await screen.findByText('该分组暂无会话。');
     await waitForConversationReady(app.ai);
     expect(screen.getByLabelText('科研问题')).toHaveValue('保留草稿');
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: '' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' }), { target: { value: group.id } });
+    fireEvent.change(conversationAction('combobox', { name: '移动会话 当前会话 到分组' }), { target: { value: group.id } });
     await waitFor(() => expect(screen.queryByRole('button', { name: '打开会话 当前会话' })).not.toBeInTheDocument());
     await waitForConversationReady(app.ai);
     expect(app.ai.getView().activeConversationId).toBe(app.ids[1]);
@@ -574,12 +592,12 @@ describe('AI conversation history UI', () => {
     await act(async () => { await app.ai.flushAssistantSession(); });
     const before = app.snapshot().aiConversations;
     vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('归属保存失败'));
-    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' }), { target: { value: '' } });
+    fireEvent.change(conversationAction('combobox', { name: '移动会话 当前会话 到分组' }), { target: { value: '' } });
     expect(await screen.findByRole('alert')).toHaveTextContent('归属保存失败');
     await waitForConversationReady(app.ai);
-    expect(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' })).toHaveValue(group.id);
+    expect(conversationAction('combobox', { name: '移动会话 当前会话 到分组' })).toHaveValue(group.id);
     expect(app.snapshot().aiConversations).toEqual(before);
-    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 当前会话 到分组' }), { target: { value: '' } });
+    fireEvent.change(conversationAction('combobox', { name: '移动会话 当前会话 到分组' }), { target: { value: '' } });
     await screen.findByText('该分组暂无会话。');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('保留草稿');
@@ -676,7 +694,7 @@ describe('AI conversation history UI', () => {
     expect(screen.getByText('3/10')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '打开会话 隐藏置顶' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
-    expect(screen.getByRole('combobox', { name: '移动会话 隐藏置顶 到分组' })).toHaveValue(other.id);
+    expect(conversationAction('combobox', { name: '移动会话 隐藏置顶 到分组' })).toHaveValue(other.id);
     await act(async () => { await app.ai.flushAssistantSession(); });
     app.ai.dispose();
   });
@@ -691,8 +709,8 @@ describe('AI conversation history UI', () => {
     ask('排序甲');
     await screen.findByText('排序甲回答[S1]');
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '甲的追问' } });
-    fireEvent.click(screen.getByRole('button', { name: '置顶会话 排序甲' }));
-    await screen.findByRole('button', { name: '取消置顶会话 排序甲' });
+    fireEvent.click(conversationAction('button', { name: '置顶会话 排序甲' }));
+    await findConversationAction('button', { name: '取消置顶会话 排序甲' });
     await createConversation();
     fireEvent.change(screen.getByLabelText('聊天模型'), { target: { value: 'chat-model' } });
     await screen.findByText('AI 厂商与模型已切换，可继续当前对话。');
@@ -701,8 +719,8 @@ describe('AI conversation history UI', () => {
     ask('排序乙');
     await screen.findByText('排序乙回答[S1]');
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '乙的草稿' } });
-    fireEvent.click(screen.getByRole('button', { name: '置顶会话 排序乙' }));
-    await screen.findByRole('button', { name: '取消置顶会话 排序乙' });
+    fireEvent.click(conversationAction('button', { name: '置顶会话 排序乙' }));
+    await findConversationAction('button', { name: '取消置顶会话 排序乙' });
     await act(async () => { await app.ai.flushAssistantSession(); });
     const before = app.snapshot().aiConversations!;
     const handle = startDrag('排序乙');
@@ -884,7 +902,7 @@ describe('AI conversation history UI', () => {
     expect(screen.getByRole('button', { name: '拖动排序分组 研究' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '折叠分组 研究' })).toBeDisabled();
     for (const name of ['新建分组', '重命名分组', '删除分组']) expect(screen.getByRole('button', { name })).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: '移动会话 甲 到分组' })).toBeDisabled();
+    expect(conversationAction('combobox', { name: '移动会话 甲 到分组' })).toBeDisabled();
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
     pointerEvent(handle, 'pointerdown', { clientY: 20 });
     aimDrag(handle, '乙');
@@ -910,8 +928,8 @@ describe('AI conversation history UI', () => {
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '当前草稿' } });
     const recentOrder = screen.getAllByRole('button', { name: /^打开会话 / }).map((button) => button.getAttribute('aria-label'));
     expect(recentOrder).toEqual(['打开会话 当前课题', '打开会话 常用课题']);
-    fireEvent.click(screen.getByRole('button', { name: '置顶会话 常用课题', pressed: false }));
-    await screen.findByRole('button', { name: '取消置顶会话 常用课题', pressed: true });
+    fireEvent.click(conversationAction('button', { name: '置顶会话 常用课题', pressed: false }));
+    await findConversationAction('button', { name: '取消置顶会话 常用课题', pressed: true });
     expect(screen.getByText('1/10')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 常用课题');
     expect(screen.getByText('当前课题回答[S1]')).toBeInTheDocument();
@@ -919,11 +937,11 @@ describe('AI conversation history UI', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: '课题' } });
     await screen.findByText('找到 2 个会话');
     expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 常用课题');
-    fireEvent.click(screen.getByRole('button', { name: '取消置顶会话 常用课题' }));
+    fireEvent.click(conversationAction('button', { name: '取消置顶会话 常用课题' }));
     await screen.findByText('0/10');
     await screen.findByText('找到 2 个会话');
     expect(screen.getAllByRole('button', { name: /^打开会话 / }).map((button) => button.getAttribute('aria-label'))).toEqual(recentOrder);
-    fireEvent.click(screen.getByRole('button', { name: '置顶会话 常用课题' }));
+    fireEvent.click(conversationAction('button', { name: '置顶会话 常用课题' }));
     await screen.findByText('1/10');
     await act(async () => { await app.ai.flushAssistantSession(); });
     panel.unmount();
@@ -931,7 +949,7 @@ describe('AI conversation history UI', () => {
     const restarted = services(app.storage);
     render(<AiAssistant library={restarted.library} ai={restarted.ai} onOpenPaper={vi.fn()} />);
     await screen.findByText('当前课题回答[S1]');
-    expect(screen.getByRole('button', { name: '取消置顶会话 常用课题', pressed: true })).toBeInTheDocument();
+    expect(conversationAction('button', { name: '取消置顶会话 常用课题', pressed: true })).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 常用课题');
     expect(screen.getByLabelText('科研问题')).toHaveValue('当前草稿');
     fireEvent.click(screen.getByRole('button', { name: '打开会话 常用课题' }));
@@ -943,7 +961,7 @@ describe('AI conversation history UI', () => {
     expect(sent.map((message) => message.content)).toContain('常用课题');
     expect(JSON.stringify(sent)).not.toContain('当前课题');
     await createConversation();
-    expect(screen.getByRole('button', { name: '置顶会话 新对话', pressed: false })).toBeInTheDocument();
+    expect(conversationAction('button', { name: '置顶会话 新对话', pressed: false })).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 常用课题');
     await act(async () => { await restarted.ai.flushAssistantSession(); });
     restarted.ai.dispose();
@@ -966,29 +984,29 @@ describe('AI conversation history UI', () => {
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
     expect(screen.getByText('10/10')).toBeInTheDocument();
     expect(screen.getByText('置顶已达上限，请先取消其他会话的置顶。')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '置顶会话 课题11' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '取消置顶会话 课题1' })).toBeEnabled();
+    expect(conversationAction('button', { name: '置顶会话 课题11' })).toBeDisabled();
+    expect(conversationAction('button', { name: '取消置顶会话 课题1' })).toBeEnabled();
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: '课题11' } });
     await screen.findByText('找到 1 个会话');
-    expect(screen.getByRole('button', { name: '置顶会话 课题11' })).toBeDisabled();
+    expect(conversationAction('button', { name: '置顶会话 课题11' })).toBeDisabled();
     expect(screen.getByText('10/10')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '清空会话搜索' }));
-    fireEvent.click(await screen.findByRole('button', { name: '取消置顶会话 课题1' }));
+    fireEvent.click(await findConversationAction('button', { name: '取消置顶会话 课题1' }));
     await screen.findByText('9/10');
-    expect(screen.getByRole('button', { name: '置顶会话 课题11' })).toBeEnabled();
+    expect(conversationAction('button', { name: '置顶会话 课题11' })).toBeEnabled();
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: '课题11' } });
     await screen.findByText('找到 1 个会话');
-    fireEvent.click(screen.getByRole('button', { name: '置顶会话 课题11' }));
+    fireEvent.click(conversationAction('button', { name: '置顶会话 课题11' }));
     await screen.findByText('10/10');
     await screen.findByText('找到 1 个会话');
-    expect(screen.getByRole('button', { name: '取消置顶会话 课题11' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: '删除会话 课题11' }));
+    expect(conversationAction('button', { name: '取消置顶会话 课题11' })).toBeEnabled();
+    fireEvent.click(conversationAction('button', { name: '删除会话 课题11' }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除会话' }));
     await screen.findByText('9/10');
     await screen.findByText('没有匹配的会话。');
     fireEvent.click(screen.getByRole('button', { name: '清空会话搜索' }));
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
-    expect(await screen.findByRole('button', { name: '置顶会话 课题12' })).toBeEnabled();
+    expect(await findConversationAction('button', { name: '置顶会话 课题12' })).toBeEnabled();
     expect(app.ai.getView().activeConversationId).toBe(ids[11]);
     expect(app.ai.getView().conversations?.filter((entry) => entry.pinned)).toHaveLength(9);
     await act(async () => { await app.ai.flushAssistantSession(); });
@@ -1007,15 +1025,15 @@ describe('AI conversation history UI', () => {
     const before = app.snapshot().aiConversations;
     const action = `${pinned ? '置顶' : '取消置顶'}会话 保留的聊天`;
     vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('置顶状态保存失败'));
-    fireEvent.click(screen.getByRole('button', { name: action }));
+    fireEvent.click(conversationAction('button', { name: action }));
     expect(await screen.findByRole('alert')).toHaveTextContent('置顶状态保存失败');
     await waitForConversationReady(app.ai);
-    expect(screen.getByRole('button', { name: action, pressed: !pinned })).toBeEnabled();
+    expect(conversationAction('button', { name: action, pressed: !pinned })).toBeEnabled();
     expect(screen.getByText('保留的聊天回答[S1]')).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('保留的草稿');
     expect(app.snapshot().aiConversations).toEqual(before);
-    fireEvent.click(screen.getByRole('button', { name: action }));
-    await screen.findByRole('button', { name: `${pinned ? '取消置顶' : '置顶'}会话 保留的聊天`, pressed: pinned });
+    fireEvent.click(conversationAction('button', { name: action }));
+    await findConversationAction('button', { name: `${pinned ? '取消置顶' : '置顶'}会话 保留的聊天`, pressed: pinned });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('保留的草稿');
     await act(async () => { await app.ai.flushAssistantSession(); });
@@ -1033,7 +1051,7 @@ describe('AI conversation history UI', () => {
     await screen.findByText('命名前的问题回答[S1]');
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保留的追问草稿' } });
     fireEvent.change(screen.getByLabelText('搜索知识库文件'), { target: { value: '甲' } });
-    fireEvent.click(screen.getByRole('button', { name: '重命名会话 命名前的问题' }));
+    fireEvent.click(conversationAction('button', { name: '重命名会话 命名前的问题' }));
     expect(screen.getByLabelText('会话名称')).toHaveValue('命名前的问题');
     fireEvent.change(screen.getByLabelText('会话名称'), { target: { value: '研究课题 第一阶段' } });
     fireEvent.click(screen.getByRole('button', { name: '保存名称' }));
@@ -1067,14 +1085,14 @@ describe('AI conversation history UI', () => {
     render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
     await act(async () => { await app.ai.flushAssistantSession(); });
     const before = app.snapshot().aiConversations;
-    fireEvent.click(screen.getByRole('button', { name: '重命名会话 新对话' }));
+    fireEvent.click(conversationAction('button', { name: '重命名会话 新对话' }));
     expect(screen.getByLabelText('会话名称')).toHaveFocus();
     expect(screen.getByLabelText('会话名称')).toHaveAttribute('maxlength', '100');
     fireEvent.change(screen.getByLabelText('会话名称'), { target: { value: '   ' } });
     expect(screen.getByRole('button', { name: '保存名称' })).toBeDisabled();
     fireEvent.keyDown(screen.getByLabelText('会话名称'), { key: 'Escape' });
     expect(screen.queryByLabelText('会话名称')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '重命名会话 新对话' }));
+    fireEvent.click(conversationAction('button', { name: '重命名会话 新对话' }));
     fireEvent.change(screen.getByLabelText('会话名称'), { target: { value: '尚未保存的名称' } });
     fireEvent.click(within(screen.getByRole('form', { name: '重命名历史会话' })).getByRole('button', { name: '取消' }));
     expect(screen.getByRole('button', { name: '打开会话 新对话' })).toBeInTheDocument();
@@ -1094,7 +1112,7 @@ describe('AI conversation history UI', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: '历史目标' } });
     await screen.findByText('找到 1 个会话');
     expect(screen.queryByRole('button', { name: '打开会话 正在使用' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '重命名会话 历史目标' }));
+    fireEvent.click(conversationAction('button', { name: '重命名会话 历史目标' }));
     fireEvent.change(screen.getByLabelText('会话名称'), { target: { value: '项目 Alpha' } });
     fireEvent.click(screen.getByRole('button', { name: '保存名称' }));
     await screen.findByRole('button', { name: '打开会话 项目 Alpha' });
@@ -1102,7 +1120,7 @@ describe('AI conversation history UI', () => {
     expect(screen.getByLabelText('科研问题')).toHaveValue('当前草稿');
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: '  aLPHa  ' } });
     await screen.findByText('找到 1 个会话');
-    fireEvent.click(screen.getByRole('button', { name: '删除会话 项目 Alpha' }));
+    fireEvent.click(conversationAction('button', { name: '删除会话 项目 Alpha' }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除会话' }));
     await screen.findByText('没有匹配的会话。');
     expect(screen.getByText('正在使用回答[S1]')).toBeInTheDocument();
@@ -1158,7 +1176,7 @@ describe('AI conversation history UI', () => {
     await act(async () => { await app.ai.flushAssistantSession(); });
     const before = app.snapshot().aiConversations;
     vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('名称保存失败'));
-    fireEvent.click(screen.getByRole('button', { name: '重命名会话 原来的标题' }));
+    fireEvent.click(conversationAction('button', { name: '重命名会话 原来的标题' }));
     fireEvent.change(screen.getByLabelText('会话名称'), { target: { value: '新的标题' } });
     fireEvent.click(screen.getByRole('button', { name: '保存名称' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('名称保存失败');
@@ -1246,7 +1264,7 @@ describe('AI conversation history UI', () => {
     await screen.findByRole('button', { name: '打开会话 SECRET-NAME' });
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: 'PRIVATE' } });
     await screen.findByText('找到 1 个会话');
-    fireEvent.click(screen.getByRole('button', { name: '重命名会话 SECRET-NAME' }));
+    fireEvent.click(conversationAction('button', { name: '重命名会话 SECRET-NAME' }));
     expect(screen.getByLabelText('会话名称')).toHaveValue('SECRET-NAME');
     await act(async () => { await app.library.lockVault(vault.id); });
     await screen.findByText('没有匹配的会话。');
@@ -1254,7 +1272,7 @@ describe('AI conversation history UI', () => {
     expect(screen.queryByLabelText('会话名称')).not.toBeInTheDocument();
     expect(screen.getByText('公开问题回答')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '清空会话搜索' }));
-    expect(await screen.findByRole('button', { name: '重命名会话 加密会话' })).toBeDisabled();
+    expect(await findConversationAction('button', { name: '重命名会话 加密会话' })).toBeDisabled();
     await act(async () => { await app.library.unlockVault(vault.id, 'private password'); });
     await screen.findByRole('button', { name: '打开会话 SECRET-NAME' });
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索历史会话' }), { target: { value: 'secret-name' } });
@@ -1458,6 +1476,21 @@ describe('AI conversation history UI', () => {
     restarted.ai.dispose();
   });
 
+  it('opens compact conversation actions and returns focus to the trigger on Escape', async () => {
+    const app = await setup();
+    render(<AiAssistant library={app.library} ai={app.ai} onOpenPaper={vi.fn()} />);
+    const trigger = await screen.findByLabelText('会话操作 新对话');
+    const rename = { name: '重命名会话 新对话' };
+    expect(screen.queryByRole('button', rename)).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    const renameButton = screen.getByRole('button', rename);
+    renameButton.focus();
+    fireEvent.keyDown(renameButton, { key: 'Escape' });
+    expect(screen.queryByRole('button', rename)).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    app.ai.dispose();
+  });
+
   it('supports cancellation and confirmation of deleting a history without clearing another conversation', async () => {
     const app = await setup();
     const remove = vi.spyOn(app.ai, 'deleteConversation');
@@ -1470,7 +1503,8 @@ describe('AI conversation history UI', () => {
     fireEvent.change(screen.getByLabelText('科研问题'), { target: { value: '保留草稿' } });
     const panel = screen.getByRole('complementary', { name: '历史会话' });
     panel.scrollTop = 480;
-    const deleteButton = screen.getByRole('button', { name: '删除会话 删除目标' });
+    const deleteButton = conversationAction('button', { name: '删除会话 删除目标' });
+    const menuButton = screen.getByLabelText('会话操作 删除目标');
     fireEvent.click(deleteButton);
     const confirmation = screen.getByRole('group', { name: '确认删除历史会话' });
     const cancel = within(confirmation).getByRole('button', { name: '取消' });
@@ -1478,16 +1512,16 @@ describe('AI conversation history UI', () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
     expect(within(confirmation).getByRole('button', { name: '确认删除会话' })).not.toHaveFocus();
     fireEvent.click(cancel);
-    await waitFor(() => expect(deleteButton).toHaveFocus());
+    await waitFor(() => expect(menuButton).toHaveFocus());
     expect(panel.scrollTop).toBe(480);
     expect(remove).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '打开会话 删除目标' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '删除会话 删除目标' }));
+    fireEvent.click(conversationAction('button', { name: '删除会话 删除目标' }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除会话' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: '打开会话 删除目标' })).not.toBeInTheDocument());
     expect(screen.getByText('当前会话回答[S1]')).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('保留草稿');
-    fireEvent.click(screen.getByRole('button', { name: '删除会话 当前会话' }));
+    fireEvent.click(conversationAction('button', { name: '删除会话 当前会话' }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除会话' }));
     await screen.findByRole('button', { name: '打开会话 新对话' });
     await waitFor(() => expect(screen.getByLabelText('科研问题')).toHaveValue(''));
@@ -1503,7 +1537,7 @@ describe('AI conversation history UI', () => {
     await screen.findByText('不能丢失回答[S1]');
     await act(async () => { await app.ai.flushAssistantSession(); });
     vi.mocked(app.storage.commit).mockRejectedValueOnce(new Error('删除保存失败'));
-    fireEvent.click(screen.getByRole('button', { name: '删除会话 不能丢失' }));
+    fireEvent.click(conversationAction('button', { name: '删除会话 不能丢失' }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除会话' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('删除保存失败');
     expect(screen.getByText('不能丢失回答[S1]')).toBeInTheDocument();
@@ -1533,13 +1567,13 @@ describe('AI conversation history UI', () => {
     expect(screen.getByText('公开会话回答')).toBeInTheDocument();
     expect(screen.getByLabelText('科研问题')).toHaveValue('公开草稿');
     expect(screen.queryByText('PRIVATE-QUESTION')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '置顶会话 加密会话' }));
-    await screen.findByRole('button', { name: '取消置顶会话 加密会话' });
+    fireEvent.click(conversationAction('button', { name: '置顶会话 加密会话' }));
+    await findConversationAction('button', { name: '取消置顶会话 加密会话' });
     await waitForConversationReady(app.ai);
     expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 加密会话');
     expect(screen.getByLabelText('科研问题')).toHaveValue('公开草稿');
-    fireEvent.click(screen.getByRole('button', { name: '置顶会话 公开会话' }));
-    await screen.findByRole('button', { name: '取消置顶会话 公开会话' });
+    fireEvent.click(conversationAction('button', { name: '置顶会话 公开会话' }));
+    await findConversationAction('button', { name: '取消置顶会话 公开会话' });
     await waitForConversationReady(app.ai);
     const handle = startDrag('公开会话');
     aimDrag(handle, '加密会话');
@@ -1548,12 +1582,12 @@ describe('AI conversation history UI', () => {
     expect(screen.getAllByRole('button', { name: /^打开会话 / })[0]).toHaveAccessibleName('打开会话 公开会话');
     expect(screen.getByLabelText('科研问题')).toHaveValue('公开草稿');
     expect(JSON.stringify(app.snapshot())).not.toContain('PRIVATE-');
-    fireEvent.click(screen.getByRole('button', { name: '取消置顶会话 公开会话' }));
-    await screen.findByRole('button', { name: '置顶会话 公开会话' });
+    fireEvent.click(conversationAction('button', { name: '取消置顶会话 公开会话' }));
+    await findConversationAction('button', { name: '置顶会话 公开会话' });
     const ciphertext = app.snapshot().aiConversations!.entries.find((entry) => entry.session?.kind === 'encrypted')!.session;
     const group = await createGroup(app.ai, '私密归档');
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: 'all' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '移动会话 加密会话 到分组' }), { target: { value: group.id } });
+    fireEvent.change(conversationAction('combobox', { name: '移动会话 加密会话 到分组' }), { target: { value: group.id } });
     await screen.findByText('会话分组已更新。');
     fireEvent.change(screen.getByRole('combobox', { name: '筛选会话分组' }), { target: { value: group.id } });
     fireEvent.click(screen.getByRole('button', { name: '折叠分组 私密归档' }));
@@ -1568,14 +1602,14 @@ describe('AI conversation history UI', () => {
     fireEvent.click(screen.getByRole('button', { name: '删除分组' }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除分组' }));
     await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选会话分组' })).toHaveValue('all'));
-    expect(screen.getByRole('combobox', { name: '移动会话 加密会话 到分组' })).toHaveValue('');
+    expect(conversationAction('combobox', { name: '移动会话 加密会话 到分组' })).toHaveValue('');
     expect(app.snapshot().aiConversations!.entries.find((entry) => entry.session?.kind === 'encrypted')?.session).toEqual(ciphertext);
     expect(screen.getByLabelText('科研问题')).toHaveValue('公开草稿');
     fireEvent.click(screen.getByRole('button', { name: '打开会话 加密会话' }));
     await screen.findByText(/已保存的对话涉及加密文献/);
     expect(screen.getByRole('button', { name: '新建对话' })).toBeEnabled();
     await createConversation();
-    fireEvent.click(screen.getByRole('button', { name: '删除会话 加密会话' }));
+    fireEvent.click(conversationAction('button', { name: '删除会话 加密会话' }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除会话' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: '打开会话 加密会话' })).not.toBeInTheDocument());
     expect(screen.getByText('0/10')).toBeInTheDocument();
@@ -1595,9 +1629,9 @@ describe('AI conversation history UI', () => {
     await waitFor(() => expect(app.completion).toHaveBeenCalledTimes(2));
     expect(screen.getByRole('button', { name: '新建对话' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '打开会话 已完成的问题' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '删除会话 已完成的问题' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '重命名会话 已完成的问题' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '置顶会话 已完成的问题' })).toBeDisabled();
+    expect(conversationAction('button', { name: '删除会话 已完成的问题' })).toBeDisabled();
+    expect(conversationAction('button', { name: '重命名会话 已完成的问题' })).toBeDisabled();
+    expect(conversationAction('button', { name: '置顶会话 已完成的问题' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '取消回答' }));
     await act(async () => { finish('迟到的回答'); });
     await waitFor(() => expect(screen.getByRole('button', { name: '新建对话' })).toBeEnabled());
