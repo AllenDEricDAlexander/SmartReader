@@ -39,6 +39,7 @@ describe('ReaderWorkspaceView', () => {
     const activeSession = createSession();
     const annotations: ReaderAnnotation[] = [];
     const jumpToActiveDocumentPage = vi.fn();
+    const toggleFavorite = vi.fn();
 
     render(
       <ReaderWorkspaceViewUnderTest
@@ -70,7 +71,7 @@ describe('ReaderWorkspaceView', () => {
         deleteBookmark={vi.fn()}
         deleteAnnotationForDocument={vi.fn()}
         handleSaveAnnotationNote={vi.fn()}
-        handleToggleActiveFavorite={vi.fn()}
+        handleToggleActiveFavorite={toggleFavorite}
         handleToggleAnnotationTag={vi.fn()}
         handleViewerWheel={vi.fn()}
         importAnnotationsForDocument={vi.fn()}
@@ -102,33 +103,55 @@ describe('ReaderWorkspaceView', () => {
     expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
     expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
     expect(within(screen.getByLabelText('阅读侧栏')).queryByLabelText('目录内容')).not.toBeInTheDocument();
-    expect(screen.queryByRole('dialog', { name: 'PDF 目录' })).not.toBeInTheDocument();
-    const outlineButton = screen.getByRole('button', { name: '打开 PDF 目录' });
+    expect(screen.queryByRole('complementary', { name: 'PDF 目录' })).not.toBeInTheDocument();
+    const outlineButton = screen.getByRole('button', { name: '目录' });
     outlineButton.focus();
     fireEvent.click(outlineButton);
-    const drawer = screen.getByRole('dialog', { name: 'PDF 目录' });
-    expect(drawer).toHaveClass('library-drawer');
+    const drawer = screen.getByRole('complementary', { name: 'PDF 目录' });
+    expect(drawer).toHaveClass('reader-drawer');
+    const reading = screen.getByLabelText('阅读侧栏');
+    const inspector = screen.getByLabelText('阅读检查器');
+    expect(drawer.nextElementSibling).toBe(reading);
     expect(outlineButton).toHaveAttribute('aria-expanded', 'true');
     expect(within(drawer).queryByText('书签与批注')).not.toBeInTheDocument();
+    const infoButton = screen.getByRole('button', { name: '文献信息' });
+    expect(infoButton).toHaveAttribute('aria-expanded', 'false');
+    expect(within(inspector).queryByText('文件大小')).not.toBeInTheDocument();
+    fireEvent.click(infoButton);
+    const infoDrawer = screen.getByRole('complementary', { name: '文献信息' });
+    expect(inspector.nextElementSibling).toBe(infoDrawer);
+    expect(within(infoDrawer).getByText('/tmp/book.pdf')).toBeInTheDocument();
+    fireEvent.click(within(infoDrawer).getByRole('button', { name: '收藏文档' }));
+    expect(toggleFavorite).toHaveBeenCalledOnce();
+    fireEvent.click(within(infoDrawer).getByRole('button', { name: '关闭文献信息' }));
+    expect(infoButton).toHaveFocus();
+    expect(infoButton).toHaveAttribute('aria-expanded', 'false');
+    expect(drawer).toBeInTheDocument();
+    fireEvent.click(infoButton);
+    fireEvent.click(infoButton);
+    expect(infoButton).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(screen.getByRole('button', { name: '第一章，第 3 页' }));
     expect(jumpToActiveDocumentPage).toHaveBeenCalledExactlyOnceWith(3);
     fireEvent.keyDown(drawer, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: 'PDF 目录' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'PDF 目录' })).not.toBeInTheDocument();
     expect(outlineButton).toHaveFocus();
     fireEvent.click(outlineButton);
     fireEvent.click(screen.getByRole('button', { name: '关闭PDF 目录' }));
     expect(outlineButton).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(outlineButton);
+    fireEvent.click(outlineButton);
+    expect(outlineButton).toHaveAttribute('aria-expanded', 'false');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle sidebar' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle right sidebar' }));
+    fireEvent.click(screen.getByRole('button', { name: '当前阅读' }));
+    fireEvent.click(screen.getByRole('button', { name: '搜索与批注' }));
 
-    expect(screen.getByRole('button', { name: 'Toggle sidebar' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: '当前阅读' })).toHaveAttribute(
       'title',
-      '收起侧栏',
+      '收起当前阅读',
     );
-    expect(screen.getByRole('button', { name: 'Toggle right sidebar' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: '搜索与批注' })).toHaveAttribute(
       'title',
-      '收起右侧栏',
+      '收起搜索与批注',
     );
   });
 });

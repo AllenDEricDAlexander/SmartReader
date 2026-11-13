@@ -359,6 +359,7 @@ describe('desktop research App integration', () => {
     expect(paper.indexStatus).toBe('ready');
     expect(app.extract).toHaveBeenCalledOnce();
     expect(app.bridge.openNativePdf).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '文献信息' }));
     expect(screen.getByLabelText('文献预览')).toHaveTextContent(title);
 
     fireEvent.click(screen.getByRole('button', { name: 'Add bookmark' }));
@@ -527,6 +528,7 @@ describe('desktop research App integration', () => {
     fireEvent.click(within(screen.getByRole('navigation', { name: '主导航' })).getByRole('button', { name: '我的文献' }));
     fireEvent.click(await screen.findByRole('button', { name: `阅读 ${title}` }));
     await screen.findByLabelText('测试 PDF 视图');
+    fireEvent.click(screen.getByRole('button', { name: '文献信息' }));
     expect(screen.getByLabelText('文献预览')).toHaveTextContent(title);
     await waitFor(() => expect(screen.getAllByText(secretNote).length).toBeGreaterThan(0));
     const search = await openGlobalSearch();

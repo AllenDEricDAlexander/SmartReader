@@ -2,7 +2,8 @@ import {
   BookmarkPlus,
   ChevronLeft,
   ChevronRight,
-  ListTree,
+  FileText,
+  ListOrdered,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -25,7 +26,11 @@ type ReaderToolbarProps = {
   sidebarOpen: boolean;
   rightPanelOpen: boolean;
   outlineOpen?: boolean;
-  onOpenOutline?(): void;
+  outlineButtonRef?: RefObject<HTMLButtonElement>;
+  onToggleOutline?(): void;
+  documentInfoOpen?: boolean;
+  documentInfoButtonRef?: RefObject<HTMLButtonElement>;
+  onToggleDocumentInfo?(): void;
   onSearchTextChange(value: string): void;
   onPageInputChange(value: string): void;
   onSearch(): void;
@@ -55,7 +60,11 @@ export function ReaderToolbar({
   sidebarOpen,
   rightPanelOpen,
   outlineOpen = false,
-  onOpenOutline,
+  outlineButtonRef,
+  onToggleOutline,
+  documentInfoOpen = false,
+  documentInfoButtonRef,
+  onToggleDocumentInfo,
   onSearchTextChange,
   onPageInputChange,
   onSearch,
@@ -87,28 +96,37 @@ export function ReaderToolbar({
   return (
     <section className="reader-toolbar" aria-label="阅读工具栏">
       <div className="toolbar-group">
-        <button type="button" className="toolbar-icon-button" onClick={onOpenOutline}
-          aria-label="打开 PDF 目录" title="目录" aria-haspopup="dialog" aria-expanded={outlineOpen}
-          disabled={!activeSession || activeSession.status === 'error' || !onOpenOutline}>
-          <ListTree size={16} />
+        <button type="button" className="toolbar-text-button toolbar-panel-toggle" ref={outlineButtonRef} onClick={onToggleOutline}
+          title={outlineOpen ? '收起 PDF 目录' : '展开 PDF 目录'} aria-expanded={outlineOpen}
+          aria-controls={outlineOpen ? 'reader-outline' : undefined}
+          disabled={!activeSession || activeSession.status === 'error' || !onToggleOutline}>
+          <ListOrdered size={16} aria-hidden="true" />目录
         </button>
         <button
           type="button"
-          className="toolbar-icon-button"
+          className="toolbar-text-button toolbar-panel-toggle"
           onClick={onToggleSidebar}
-          aria-label="Toggle sidebar"
-          title={sidebarOpen ? '收起侧栏' : '展开侧栏'}
+          title={sidebarOpen ? '收起当前阅读' : '展开当前阅读'}
+          aria-expanded={sidebarOpen}
+          aria-controls={sidebarOpen ? 'reader-current-reading' : undefined}
         >
-          {sidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+          {sidebarOpen ? <PanelLeftClose size={16} aria-hidden="true" /> : <PanelLeftOpen size={16} aria-hidden="true" />}当前阅读
         </button>
         <button
           type="button"
-          className="toolbar-icon-button"
+          className="toolbar-text-button toolbar-panel-toggle"
           onClick={onToggleRightPanel}
-          aria-label="Toggle right sidebar"
-          title={rightPanelOpen ? '收起右侧栏' : '展开右侧栏'}
+          title={rightPanelOpen ? '收起搜索与批注' : '展开搜索与批注'}
+          aria-expanded={rightPanelOpen}
+          aria-controls={rightPanelOpen ? 'reader-inspector' : undefined}
         >
-          {rightPanelOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+          {rightPanelOpen ? <PanelRightClose size={16} aria-hidden="true" /> : <PanelRightOpen size={16} aria-hidden="true" />}搜索与批注
+        </button>
+        <button type="button" className="toolbar-text-button toolbar-panel-toggle" ref={documentInfoButtonRef} onClick={onToggleDocumentInfo}
+          title={documentInfoOpen ? '收起文献信息' : '展开文献信息'} aria-expanded={documentInfoOpen}
+          aria-controls={documentInfoOpen ? 'reader-document-info' : undefined}
+          disabled={!activeSession || !onToggleDocumentInfo}>
+          <FileText size={16} aria-hidden="true" />文献信息
         </button>
       </div>
 

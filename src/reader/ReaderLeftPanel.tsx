@@ -35,7 +35,7 @@ export function ReaderLeftPanel({
   const progressPercent = Math.round((activeSession?.progress ?? 0) * 100);
 
   return (
-    <aside className="reader-left-panel" aria-label="阅读侧栏">
+    <aside id="reader-current-reading" className="reader-left-panel" aria-label="阅读侧栏">
       <section className="panel-section reader-progress-card">
         <div className="panel-title">
           <BookMarked size={16} />

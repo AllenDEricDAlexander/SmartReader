@@ -1,9 +1,10 @@
-import { useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction, type WheelEvent } from 'react';
+import { useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction, type WheelEvent } from 'react';
 import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
 import type { DocumentSession } from '../documents/documentModels';
 import type { PersistedBookmark, PersistedDocument } from '../persistence/persistenceApi';
 import type { Tag } from '../tags/tagModels';
 import { ReaderLeftPanel } from '../reader/ReaderLeftPanel';
+import { ReaderDocumentInfoDrawer } from '../reader/ReaderDocumentInfoDrawer';
 import { ReaderRightPanel } from '../reader/ReaderRightPanel';
 import { ReaderStatusBar } from '../reader/ReaderStatusBar';
 import { ReaderToolbar } from '../reader/ReaderToolbar';
@@ -109,6 +110,9 @@ export function ReaderWorkspaceView({
   stepHistoryForward,
 }: ReaderWorkspaceViewProps) {
   const [outlineOpen, setOutlineOpen] = useState(false);
+  const [documentInfoOpen, setDocumentInfoOpen] = useState(false);
+  const outlineButton = useRef<HTMLButtonElement>(null);
+  const documentInfoButton = useRef<HTMLButtonElement>(null);
   const outlineVisible = outlineOpen && activeSession.status !== 'error';
   const activeDocumentInfo = documentInfo?.sessionId === activeSession.id ? documentInfo : null;
   const goToAdjacentPage = (delta: number) => {
@@ -118,10 +122,8 @@ export function ReaderWorkspaceView({
     jumpToPage(capped);
   };
 
-  return <>
+  return (
     <ReaderWorkspace
-      sidebarOpen={sidebarOpen}
-      rightPanelOpen={rightPanelOpen}
       toolbar={
         <ReaderToolbar
           themeSwitcher={themeSwitcher}
@@ -133,7 +135,11 @@ export function ReaderWorkspaceView({
           sidebarOpen={sidebarOpen}
           rightPanelOpen={rightPanelOpen}
           outlineOpen={outlineVisible}
-          onOpenOutline={() => setOutlineOpen(true)}
+          outlineButtonRef={outlineButton}
+          onToggleOutline={() => setOutlineOpen((open) => !open)}
+          documentInfoOpen={documentInfoOpen}
+          documentInfoButtonRef={documentInfoButton}
+          onToggleDocumentInfo={() => setDocumentInfoOpen((open) => !open)}
           onSearchTextChange={setSearchText}
           onPageInputChange={setPageInput}
           onSearch={() => runSearch(searchText)}
@@ -153,7 +159,19 @@ export function ReaderWorkspaceView({
           onOpenPreferences={() => openSettingsWorkspace()}
         />
       }
-      leftPanel={
+      outlineDrawer={
+        <PdfOutlineDrawer
+          key={`outline:${activeSession.id}`}
+          open={outlineVisible}
+          documentTitle={activeSession.title}
+          items={activeDocumentInfo?.outline}
+          error={activeDocumentInfo?.outlineError}
+          currentPage={activeSession.page}
+          onJumpToPage={jumpToActiveDocumentPage}
+          onClose={() => { setOutlineOpen(false); outlineButton.current?.focus(); }}
+        />
+      }
+      leftPanel={sidebarOpen ? (
         <ReaderLeftPanel
           activeSession={activeSession}
           bookmarks={activeBookmarks}
@@ -170,13 +188,13 @@ export function ReaderWorkspaceView({
           }
           onImportAnnotations={(json) => importAnnotationsForDocument(activeSession.documentKey, json)}
         />
-      }
+      ) : null}
       viewer={
         <section className="viewer-surface" aria-label="PDF viewer surface" onWheel={handleViewerWheel}>
           {viewerContent}
         </section>
       }
-      rightPanel={
+      rightPanel={rightPanelOpen ? (
         <ReaderRightPanel
           activeSession={activeSession}
           selectedAnnotation={selectedAnnotation}
@@ -184,10 +202,7 @@ export function ReaderWorkspaceView({
           searchText={searchText}
           searchState={searchState}
           searchOptions={searchOptions}
-          documentInfo={documentInfo}
-          documentRecord={documentRecord}
           lastSearchCommand={lastSearchCommand}
-          isFavorite={activeSessionIsFavorite}
           onSearchTextChange={setSearchText}
           onSearch={() => runSearch(searchText)}
           onClearSearch={clearSearch}
@@ -198,25 +213,26 @@ export function ReaderWorkspaceView({
           onJumpToPage={jumpToActiveDocumentPage}
           onFitWidth={() => activeViewerController.fitWidth()}
           onFitPage={() => activeViewerController.fitPage()}
-          onToggleFavorite={handleToggleActiveFavorite}
           onDeleteAnnotation={(annotationId) =>
             deleteAnnotationForDocument(activeSession.documentKey, annotationId)
           }
           onSaveAnnotationNote={handleSaveAnnotationNote}
           onToggleAnnotationTag={handleToggleAnnotationTag}
         />
-      }
+      ) : null}
+      documentInfoDrawer={documentInfoOpen ? (
+        <ReaderDocumentInfoDrawer
+          key={`info:${activeSession.id}`}
+          activeSession={activeSession}
+          documentInfo={activeDocumentInfo}
+          documentRecord={documentRecord}
+          isFavorite={activeSessionIsFavorite}
+          onJumpToPage={jumpToActiveDocumentPage}
+          onToggleFavorite={handleToggleActiveFavorite}
+          onClose={() => { setDocumentInfoOpen(false); documentInfoButton.current?.focus(); }}
+        />
+      ) : null}
       statusBar={<ReaderStatusBar activeSession={activeSession} controller={activeViewerController} />}
     />
-    <PdfOutlineDrawer
-      key={activeSession.id}
-      open={outlineVisible}
-      documentTitle={activeSession.title}
-      items={activeDocumentInfo?.outline}
-      error={activeDocumentInfo?.outlineError}
-      currentPage={activeSession.page}
-      onJumpToPage={jumpToActiveDocumentPage}
-      onClose={() => setOutlineOpen(false)}
-    />
-  </>;
+  );
 }

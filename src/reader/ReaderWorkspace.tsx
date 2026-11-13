@@ -1,40 +1,33 @@
 import type { ReactNode } from 'react';
 
 type ReaderWorkspaceProps = {
-  sidebarOpen: boolean;
-  rightPanelOpen: boolean;
   toolbar: ReactNode;
+  outlineDrawer: ReactNode;
   leftPanel: ReactNode;
   viewer: ReactNode;
   rightPanel: ReactNode;
+  documentInfoDrawer: ReactNode;
   statusBar: ReactNode;
 };
 
 export function ReaderWorkspace({
-  sidebarOpen,
-  rightPanelOpen,
   toolbar,
+  outlineDrawer,
   leftPanel,
   viewer,
   rightPanel,
+  documentInfoDrawer,
   statusBar,
 }: ReaderWorkspaceProps) {
   return (
-    <section
-      className={[
-        'reader-workspace',
-        sidebarOpen ? '' : 'sidebar-collapsed',
-        rightPanelOpen ? '' : 'inspector-collapsed',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-      aria-label="阅读工作区"
-    >
+    <section className="reader-workspace" aria-label="阅读工作区">
       {toolbar}
       <div className="reader-body">
-        {sidebarOpen ? leftPanel : null}
+        {outlineDrawer}
+        {leftPanel}
         <section className="viewer-pane">{viewer}</section>
-        {rightPanelOpen ? rightPanel : null}
+        {rightPanel}
+        {documentInfoDrawer}
       </div>
       {statusBar}
     </section>

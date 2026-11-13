@@ -465,8 +465,8 @@ describe('App', () => {
     expect(await screen.findByLabelText('阅读工作区')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
 
-    const leftPanelToggle = screen.getByRole('button', { name: 'Toggle sidebar' });
-    const rightPanelToggle = screen.getByRole('button', { name: 'Toggle right sidebar' });
+    const leftPanelToggle = screen.getByRole('button', { name: '当前阅读' });
+    const rightPanelToggle = screen.getByRole('button', { name: '搜索与批注' });
     expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
     expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
 
@@ -2800,8 +2800,8 @@ describe('App', () => {
       target: { files: [new File(['%PDF-1.7'], 'view-one.pdf', { type: 'application/pdf' })] },
     });
     await screen.findByText('View test PDF');
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle sidebar' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle right sidebar' }));
+    fireEvent.click(screen.getByRole('button', { name: '当前阅读' }));
+    fireEvent.click(screen.getByRole('button', { name: '搜索与批注' }));
     const firstStatus = within(screen.getByLabelText('阅读状态'));
     fireEvent.click(firstStatus.getByRole('button', { name: '打开阅读视图控制' }));
     fireEvent.click(firstStatus.getByRole('button', { name: 'Zoom in' }));

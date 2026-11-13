@@ -1,7 +1,7 @@
-import { ChevronDown, ChevronRight, ChevronsDown, ChevronsUp } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, ListTree } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { LibraryDialog } from '../library/LibraryDialog';
 import type { ViewerOutlineItem } from '../viewer/viewerTypes';
+import { ReaderDrawer } from './ReaderDrawer';
 
 type PdfOutlineDrawerProps = {
   open: boolean;
@@ -40,8 +40,8 @@ export function PdfOutlineDrawer({ open, documentTitle, items, error, currentPag
   });
   if (!open) return null;
   const hasBranches = Boolean(items?.some((item) => item.children.length > 0)) && !error;
-  return <LibraryDialog title="PDF 目录" drawer onClose={onClose}>
-    <p className="library-dialog-description">{documentTitle}</p>
+  return <ReaderDrawer id="reader-outline" title="PDF 目录" icon={<ListTree size={16} aria-hidden="true" />} onClose={onClose}>
+    <p className="reader-drawer-description">{documentTitle}</p>
     <section className="pdf-outline-panel" aria-label="目录内容">
       <div className="pdf-outline-actions" role="group" aria-label="目录展开控制">
         <button type="button" disabled={!hasBranches} onClick={() => setBranches(items ?? [], true)}><ChevronsDown size={14} />全部展开</button>
@@ -55,7 +55,7 @@ export function PdfOutlineDrawer({ open, documentTitle, items, error, currentPag
             expanded={expanded} onToggle={toggleBranch} onSetBranches={setBranches} />)}
         </ul></nav>}
     </section>
-  </LibraryDialog>;
+  </ReaderDrawer>;
 }
 
 function OutlineItem({ item, currentPage, onJumpToPage, expanded, onToggle, onSetBranches }: {

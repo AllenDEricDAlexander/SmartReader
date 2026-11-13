@@ -9,6 +9,7 @@ export type PaperPreviewProps = {
   paper: Paper;
   fieldUsage?: Partial<Record<MetadataField, number>>;
   mode?: 'hover' | 'pinned';
+  showHeader?: boolean;
   onModeChange?(mode: 'hover' | 'pinned' | 'off'): void | Promise<void>;
   onEdit?(): void;
   onOpenPage?(page: number): void | Promise<void>;
@@ -21,7 +22,7 @@ export function PaperPreview(props: PaperPreviewProps) {
   return <PreviewContent key={props.paper.id} {...props} />;
 }
 
-function PreviewContent({ paper, fieldUsage = {}, mode = 'hover', onModeChange, onEdit, onOpenPage, onToggleFavorite, onFieldView, busy = false }: PaperPreviewProps) {
+function PreviewContent({ paper, fieldUsage = {}, mode = 'hover', showHeader = true, onModeChange, onEdit, onOpenPage, onToggleFavorite, onFieldView, busy = false }: PaperPreviewProps) {
   const [expanded, setExpanded] = useState<Set<MetadataField>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -67,7 +68,7 @@ function PreviewContent({ paper, fieldUsage = {}, mode = 'hover', onModeChange, 
 
   return (
     <aside className="paper-preview" aria-label="文献预览">
-      <header className="paper-preview-header">
+      {showHeader ? <header className="paper-preview-header">
         <span><FileText size={16} aria-hidden="true" />文献信息</span>
         <div>
           {onModeChange ? <>
@@ -75,7 +76,7 @@ function PreviewContent({ paper, fieldUsage = {}, mode = 'hover', onModeChange, 
             <button type="button" aria-label="关闭预览" title="关闭预览" disabled={pending || busy} onClick={() => void perform(() => onModeChange('off'))}><X size={15} /></button>
           </> : null}
         </div>
-      </header>
+      </header> : null}
       <div className="paper-preview-body">
         <h2>{paper.metadata.title || paper.fileName}</h2>
         <p className="paper-preview-file" title={paper.fileName}>{paper.fileName}</p>

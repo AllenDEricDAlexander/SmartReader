@@ -72,8 +72,8 @@ describe('ReaderToolbar search state', () => {
     expect(screen.queryByLabelText('选择 PDF 文件')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Close active tab' })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('在文档中查找…')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Toggle sidebar' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Toggle right sidebar' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '当前阅读' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '搜索与批注' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Previous page' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Next page' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Zoom in' })).not.toBeInTheDocument();
