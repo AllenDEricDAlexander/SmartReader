@@ -1182,6 +1182,7 @@ describe('App', () => {
       jumpToMatch: vi.fn(),
       zoomIn: vi.fn().mockReturnValue(true),
       zoomOut: vi.fn().mockReturnValue(true),
+      zoomTo: vi.fn(),
       fitWidth: vi.fn(),
       fitPage: vi.fn(),
     };
@@ -1967,6 +1968,7 @@ describe('App', () => {
       jumpToMatch: vi.fn().mockReturnValue(true),
       zoomIn: vi.fn().mockReturnValue(true),
       zoomOut: vi.fn().mockReturnValue(true),
+      zoomTo: vi.fn(),
       fitWidth: vi.fn().mockReturnValue(true),
       fitPage: vi.fn().mockReturnValue(true),
     };
@@ -2007,6 +2009,7 @@ describe('App', () => {
       jumpToMatch: vi.fn().mockReturnValue(true),
       zoomIn: vi.fn().mockReturnValue(true),
       zoomOut: vi.fn().mockReturnValue(true),
+      zoomTo: vi.fn(),
       fitWidth: vi.fn().mockReturnValue(true),
       fitPage: vi.fn().mockReturnValue(true),
     };
@@ -2046,6 +2049,7 @@ describe('App', () => {
       jumpToMatch: vi.fn().mockReturnValue(true),
       zoomIn: vi.fn().mockReturnValue(true),
       zoomOut: vi.fn().mockReturnValue(true),
+      zoomTo: vi.fn(),
       fitWidth: vi.fn().mockReturnValue(true),
       fitPage: vi.fn().mockReturnValue(true),
     };
@@ -2087,6 +2091,7 @@ describe('App', () => {
       jumpToMatch: vi.fn().mockReturnValue(true),
       zoomIn: vi.fn().mockReturnValue(true),
       zoomOut: vi.fn().mockReturnValue(true),
+      zoomTo: vi.fn(),
       fitWidth: vi.fn().mockReturnValue(true),
       fitPage: vi.fn().mockReturnValue(true),
     };
@@ -2703,8 +2708,8 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByRole('heading', { name: '快速上手' })).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '关闭桌面集成' }));
     await waitFor(() => expect(screen.queryByRole('heading', { name: '桌面集成' })).not.toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '打开首页视图控制' }));
     fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    expect(screen.queryByRole('dialog', { name: '首页视图控制' })).not.toBeInTheDocument();
     await waitFor(() => expect(savedPreferences.homeZoom).toBe(1.35));
     expect(document.querySelector('.home-main')).toHaveStyle({ zoom: '1.35' });
     expect(savedPreferences).toEqual({ ...initialPreferences, homeRecentViewMode: 'cards', homeWelcomeEnabled: false,
@@ -2785,6 +2790,7 @@ describe('App', () => {
       jumpToPage: vi.fn(), openSearch: vi.fn(), search: vi.fn(), searchNext: vi.fn(),
       searchPrevious: vi.fn(), jumpToMatch: vi.fn(),
       zoomIn: vi.fn(() => applyZoom(1.8)), zoomOut: vi.fn(() => applyZoom(0.8)),
+      zoomTo: vi.fn((scale: number) => applyZoom(scale)),
       fitWidth: vi.fn(() => applyZoom(1.2)), fitPage: vi.fn(() => applyZoom(0.7)),
     };
     const persistence = createEmptyPersistence();
@@ -2803,16 +2809,16 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '当前阅读' }));
     fireEvent.click(screen.getByRole('button', { name: '搜索与批注' }));
     const firstStatus = within(screen.getByLabelText('阅读状态'));
-    fireEvent.click(firstStatus.getByRole('button', { name: '打开阅读视图控制' }));
     fireEvent.click(firstStatus.getByRole('button', { name: 'Zoom in' }));
+    expect(firstStatus.queryByRole('dialog')).not.toBeInTheDocument();
     expect(firstStatus.getByRole('button', { name: '打开阅读视图控制，当前缩放 180%' })).toBeInTheDocument();
     expect(within(screen.getByLabelText('阅读工具栏')).queryByRole('button', { name: 'Zoom in' })).not.toBeInTheDocument();
 
     fireEvent.click(within(screen.getByLabelText('文档导航栏')).getByRole('button', { name: '首页' }));
     expect(screen.getByRole('button', { name: '打开首页视图控制，当前缩放 125%' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: '阅读视图控制' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '打开首页视图控制' }));
-    fireEvent.click(screen.getByRole('button', { name: '重置为 100%' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开首页视图控制，当前缩放 125%' }));
+    fireEvent.click(screen.getByRole('button', { name: '100%' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '打开首页视图控制，当前缩放 100%' })).toBeInTheDocument());
     expect(controller.zoomIn).toHaveBeenCalledOnce();
     expect(controller.zoomOut).not.toHaveBeenCalled();
@@ -2825,7 +2831,7 @@ describe('App', () => {
     expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 100%' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: '首页视图控制' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '打开阅读视图控制' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 100%' }));
     fireEvent.click(within(screen.getByRole('dialog', { name: '阅读视图控制' })).getByRole('button', { name: 'Fit width' }));
     expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 120%' })).toBeInTheDocument();
     fireEvent.click(within(screen.getByRole('dialog', { name: '阅读视图控制' })).getByRole('button', { name: 'Fit page' }));
@@ -2836,7 +2842,6 @@ describe('App', () => {
     expect(screen.queryByLabelText('阅读侧栏')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('阅读检查器')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: '阅读视图控制' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '打开阅读视图控制' }));
     fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
     expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 80%' })).toBeInTheDocument();
 
@@ -2844,6 +2849,11 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '打开首页视图控制，当前缩放 100%' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'view-two.pdf' }));
     expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 70%' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 70%' }));
+    fireEvent.click(screen.getByRole('button', { name: '300%' }));
+    expect(controller.zoomTo).toHaveBeenCalledWith(3);
+    expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 300%' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '阅读视图控制' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
     expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
   });
@@ -3805,6 +3815,7 @@ describe('App', () => {
       jumpToMatch: vi.fn().mockReturnValue(true),
       zoomIn: vi.fn().mockReturnValue(true),
       zoomOut: vi.fn().mockReturnValue(true),
+      zoomTo: vi.fn(),
       fitWidth: vi.fn().mockReturnValue(true),
       fitPage: vi.fn().mockReturnValue(true),
     };

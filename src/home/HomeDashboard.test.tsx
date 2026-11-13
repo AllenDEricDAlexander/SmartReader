@@ -490,7 +490,6 @@ describe('HomeDashboard', () => {
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '关闭' }));
-    fireEvent.click(screen.getByRole('button', { name: '打开首页视图控制' }));
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
     expect(screen.getByRole('status')).toHaveTextContent('当前版本暂未接入自动检查更新。');
   });

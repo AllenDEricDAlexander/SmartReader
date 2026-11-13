@@ -1,6 +1,7 @@
 import { CheckCircle2, Info } from 'lucide-react';
 import { CheckUpdatesButton } from '../settings/CheckUpdatesButton';
 import { ViewControls } from '../viewer/ViewControls';
+import { maxZoom, minZoom } from '../viewer/zoomLevels';
 import type { HomeTaskStatus } from './homeTypes';
 
 type HomeStatusBarProps = {
@@ -44,14 +45,13 @@ export function HomeStatusBar({
           label="首页"
           scale={scale}
           disabled={disabled}
-          canZoomIn={scale < 2}
-          canZoomOut={scale > 0.5}
-          onZoomIn={() => onScaleChange(Math.min(2, Math.round((scale + 0.1) * 100) / 100))}
-          onZoomOut={() => onScaleChange(Math.max(0.5, Math.round((scale - 0.1) * 100) / 100))}
-          onReset={() => onScaleChange(1)}
-        >
-          <CheckUpdatesButton onCheckUpdates={onCheckUpdates} />
-        </ViewControls>
+          canZoomIn={scale < maxZoom}
+          canZoomOut={scale > minZoom}
+          onZoomIn={() => onScaleChange(Math.min(maxZoom, Math.round((scale + 0.1) * 100) / 100))}
+          onZoomOut={() => onScaleChange(Math.max(minZoom, Math.round((scale - 0.1) * 100) / 100))}
+          onSelectScale={onScaleChange}
+        />
+        <CheckUpdatesButton placement="status-bar" onCheckUpdates={onCheckUpdates} />
       </div>
     </footer>
   );

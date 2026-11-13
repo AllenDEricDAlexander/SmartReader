@@ -646,6 +646,10 @@ describe('PdfViewerBridge', () => {
     act(() => { zoomed({ scale: 1.2 }); controller.zoomOut(); });
     expect(onProgressChange).toHaveBeenLastCalledWith(expect.objectContaining({ zoom: 1.2 }));
     expect(pdfViewerZoomMock.zoomTo.mock.calls.at(-1)?.[0]).toBeCloseTo(1.1);
+    act(() => { controller.zoomTo(0.25); });
+    expect(pdfViewerZoomMock.zoomTo).toHaveBeenLastCalledWith(0.25);
+    act(() => { controller.zoomTo(3); });
+    expect(pdfViewerZoomMock.zoomTo).toHaveBeenLastCalledWith(3);
   });
 
   it('initializes zoom from the replacement source rather than the previous document scale', async () => {

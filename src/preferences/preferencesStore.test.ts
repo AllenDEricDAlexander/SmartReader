@@ -43,7 +43,10 @@ describe('preferencesStore', () => {
     expect(mergeReaderPreferences({
       homeQuickTipsEnabled: false, homeDesktopIntegrationEnabled: false, homeZoom: 1.5,
     })).toMatchObject({ homeQuickTipsEnabled: false, homeDesktopIntegrationEnabled: false, homeZoom: 1.5 });
-    for (const homeZoom of [null, '150%', 0, 3]) {
+    for (const homeZoom of [0.25, 3]) {
+      expect(mergeReaderPreferences({ homeZoom }).homeZoom).toBe(homeZoom);
+    }
+    for (const homeZoom of [null, '150%', 0, 3.1]) {
       expect(mergeReaderPreferences(JSON.parse(JSON.stringify({
         homeQuickTipsEnabled: null, homeDesktopIntegrationEnabled: 'false', homeZoom,
       })))).toMatchObject({ homeQuickTipsEnabled: true, homeDesktopIntegrationEnabled: true, homeZoom: 1.25 });

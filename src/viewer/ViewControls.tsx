@@ -1,5 +1,6 @@
 import { ChevronDown, Maximize2, X, ZoomIn, ZoomOut } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { zoomLevels } from './zoomLevels';
 
 type ViewControlsProps = {
   label: string;
@@ -7,12 +8,11 @@ type ViewControlsProps = {
   disabled?: boolean;
   canZoomIn?: boolean;
   canZoomOut?: boolean;
-  children?: ReactNode;
   onZoomIn(): void;
   onZoomOut(): void;
+  onSelectScale(scale: number): void;
   onFitWidth?(): void;
   onFitPage?(): void;
-  onReset?(): void;
 };
 
 export function ViewControls({
@@ -21,12 +21,11 @@ export function ViewControls({
   disabled,
   canZoomIn = true,
   canZoomOut = true,
-  children,
   onZoomIn,
   onZoomOut,
+  onSelectScale,
   onFitWidth,
   onFitPage,
-  onReset,
 }: ViewControlsProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -34,6 +33,10 @@ export function ViewControls({
   const panelRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
   const scaleLabel = `${Math.round(scale * 100)}%`;
+  const closePanel = () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -61,6 +64,10 @@ export function ViewControls({
 
   return (
     <div className="view-controls" ref={containerRef}>
+      <button type="button" className="home-status-icon-button" aria-label="Zoom out" title="缩小"
+        disabled={disabled || !canZoomOut} onClick={onZoomOut}>
+        <ZoomOut size={15} aria-hidden="true" />
+      </button>
       <button
         ref={triggerRef}
         type="button"
@@ -77,13 +84,12 @@ export function ViewControls({
       <button
         type="button"
         className="home-status-icon-button"
-        aria-label={`打开${label}视图控制`}
-        aria-expanded={open}
-        aria-controls={panelId}
-        aria-haspopup="dialog"
-        onClick={() => setOpen((value) => !value)}
+        aria-label="Zoom in"
+        title="放大"
+        disabled={disabled || !canZoomIn}
+        onClick={onZoomIn}
       >
-        <ZoomIn size={15} />
+        <ZoomIn size={15} aria-hidden="true" />
       </button>
       {open ? (
         <div
@@ -100,28 +106,25 @@ export function ViewControls({
               type="button"
               className="icon-button"
               aria-label="关闭视图控制"
-              onClick={() => { setOpen(false); triggerRef.current?.focus(); }}
+              onClick={closePanel}
             >
               <X size={14} />
             </button>
           </div>
-          <div className="view-controls-zoom">
-            <button type="button" aria-label="Zoom out" title="缩小" disabled={disabled || !canZoomOut} onClick={onZoomOut}>
-              <ZoomOut size={16} />
-            </button>
-            <span aria-live="polite">{scaleLabel}</span>
-            <button type="button" aria-label="Zoom in" title="放大" disabled={disabled || !canZoomIn} onClick={onZoomIn}>
-              <ZoomIn size={16} />
-            </button>
+          <div className="view-controls-presets" role="group" aria-label="常用缩放比例">
+            {zoomLevels.map((level) => (
+              <button key={level} type="button" disabled={disabled} aria-pressed={scale === level}
+                onClick={() => { onSelectScale(level); closePanel(); }}>
+                {Math.round(level * 100)}%
+              </button>
+            ))}
           </div>
-          {onFitWidth || onFitPage || onReset ? (
+          {onFitWidth || onFitPage ? (
             <div className="view-controls-actions">
               {onFitWidth ? <button type="button" aria-label="Fit width" disabled={disabled} onClick={onFitWidth}>适合宽度</button> : null}
               {onFitPage ? <button type="button" aria-label="Fit page" disabled={disabled} onClick={onFitPage}><Maximize2 size={14} />适合整页</button> : null}
-              {onReset ? <button type="button" disabled={disabled} onClick={onReset}>重置为 100%</button> : null}
             </div>
           ) : null}
-          {children}
         </div>
       ) : null}
     </div>

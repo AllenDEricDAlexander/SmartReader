@@ -1,4 +1,5 @@
 import { defaultShortcuts, type CommandId } from '../commands/commandRegistry';
+import { maxZoom, minZoom } from '../viewer/zoomLevels';
 import type { PartialReaderPreferences, ReaderPreferences } from './preferencesModels';
 
 export const defaultReaderPreferences: ReaderPreferences = {
@@ -55,7 +56,7 @@ export function mergeReaderPreferences(
       ? stored.homeDesktopIntegrationEnabled
       : defaultReaderPreferences.homeDesktopIntegrationEnabled,
     homeZoom: typeof stored?.homeZoom === 'number' && Number.isFinite(stored.homeZoom)
-      && stored.homeZoom >= 0.5 && stored.homeZoom <= 2
+      && stored.homeZoom >= minZoom && stored.homeZoom <= maxZoom
       ? stored.homeZoom
       : defaultReaderPreferences.homeZoom,
     homeRecentViewMode: stored?.homeRecentViewMode === 'list' || stored?.homeRecentViewMode === 'cards'

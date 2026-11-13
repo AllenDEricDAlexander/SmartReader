@@ -1,6 +1,7 @@
 import type { DocumentSession } from '../documents/documentModels';
 import type { ViewerActions } from '../viewer/viewerController';
 import { ViewControls } from '../viewer/ViewControls';
+import { maxZoom, minZoom } from '../viewer/zoomLevels';
 
 type ReaderStatusBarProps = {
   activeSession: DocumentSession | null;
@@ -33,10 +34,11 @@ export function ReaderStatusBar({ activeSession, controller }: ReaderStatusBarPr
         label="阅读"
         scale={activeSession?.zoom ?? 1}
         disabled={!activeSession || activeSession.status !== 'ready'}
-        canZoomIn={(activeSession?.zoom ?? 1) < 3}
-        canZoomOut={(activeSession?.zoom ?? 1) > 0.3}
+        canZoomIn={(activeSession?.zoom ?? 1) < maxZoom}
+        canZoomOut={(activeSession?.zoom ?? 1) > minZoom}
         onZoomIn={() => controller.zoomIn()}
         onZoomOut={() => controller.zoomOut()}
+        onSelectScale={(scale) => controller.zoomTo(scale)}
         onFitWidth={() => controller.fitWidth()}
         onFitPage={() => controller.fitPage()}
       />

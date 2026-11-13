@@ -20,6 +20,7 @@ describe('ViewerController', () => {
       jumpToMatch: vi.fn(),
       zoomIn: vi.fn(),
       zoomOut: vi.fn(),
+      zoomTo: vi.fn(),
       fitWidth: vi.fn(),
       fitPage: vi.fn(),
     };
@@ -34,6 +35,8 @@ describe('ViewerController', () => {
     expect(controller.searchPrevious()).toBe(true);
     expect(controller.zoomIn()).toBe(true);
     expect(controller.zoomOut()).toBe(true);
+    expect(controller.zoomTo(0.25)).toBe(true);
+    expect(actions.zoomTo).toHaveBeenCalledWith(0.25);
     expect(controller.fitWidth()).toBe(true);
     expect(controller.fitPage()).toBe(true);
     expect(actions.jumpToPage).toHaveBeenCalledWith(5);
@@ -52,6 +55,7 @@ describe('ViewerController', () => {
       jumpToMatch: vi.fn(),
       zoomIn: vi.fn(),
       zoomOut: vi.fn(),
+      zoomTo: vi.fn(),
       fitWidth: vi.fn(),
       fitPage: vi.fn(),
     });

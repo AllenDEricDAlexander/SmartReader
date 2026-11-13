@@ -9,6 +9,7 @@ export type ViewerActions = {
   jumpToMatch(index: number): void;
   zoomIn(): void;
   zoomOut(): void;
+  zoomTo(scale: number): void;
   fitWidth(): void;
   fitPage(): void;
 };
@@ -54,6 +55,10 @@ export class ViewerController {
 
   zoomOut(): boolean {
     return this.run((actions) => actions.zoomOut());
+  }
+
+  zoomTo(scale: number): boolean {
+    return this.run((actions) => actions.zoomTo(scale));
   }
 
   fitWidth(): boolean {

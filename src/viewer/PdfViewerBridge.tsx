@@ -20,6 +20,7 @@ import { createRenderRange } from './renderRange';
 import { loadPdfOutline, type PdfOutlineDocument } from './pdfOutline';
 import { pdfDocumentAssets } from '../platform/pdfAssets';
 import type { ViewerController } from './viewerController';
+import { maxZoom, minZoom } from './zoomLevels';
 import {
   defaultSearchOptions,
   emptySearchState,
@@ -248,12 +249,13 @@ function ActivePdfViewerBridge({
       jumpToMatch: () => undefined,
       zoomIn: () => undefined,
       zoomOut: () => undefined,
+      zoomTo: reportZoom,
       fitWidth: () => undefined,
       fitPage: () => undefined,
     });
 
     return () => controller.clear();
-  }, [controller, renderer]);
+  }, [controller, renderer, reportZoom]);
 
   if (loadError) {
     const isTimeout = loadError.status === 'timeout';
@@ -502,10 +504,13 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
       searchPrevious: () => focusMatch(searchStateRef.current.currentIndex - 1),
       jumpToMatch: (index) => focusMatch(index),
       zoomIn: () => {
-        zoomPluginInstance.zoomTo(Math.min(3, scaleRef.current + 0.1));
+        if (scaleRef.current < maxZoom) zoomPluginInstance.zoomTo(Math.min(maxZoom, scaleRef.current + 0.1));
       },
       zoomOut: () => {
-        zoomPluginInstance.zoomTo(Math.max(0.3, scaleRef.current - 0.1));
+        if (scaleRef.current > minZoom) zoomPluginInstance.zoomTo(Math.max(minZoom, scaleRef.current - 0.1));
+      },
+      zoomTo: (scale) => {
+        if (Number.isFinite(scale)) zoomPluginInstance.zoomTo(Math.max(minZoom, Math.min(maxZoom, scale)));
       },
       fitWidth: () => zoomPluginInstance.zoomTo(SpecialZoomLevel.PageWidth),
       fitPage: () => zoomPluginInstance.zoomTo(SpecialZoomLevel.PageFit),
