@@ -7,7 +7,7 @@ import { defaultReaderPreferences } from '../preferences/preferencesStore';
 import { CommandRegistry } from '../commands/commandRegistry';
 import { ViewerController } from '../viewer/viewerController';
 import { ReaderWorkspaceSwitch } from './ReaderWorkspaceSwitch';
-import { defaultSearchOptions, emptySearchState } from '../viewer/viewerTypes';
+import { emptySearchState } from '../viewer/viewerTypes';
 
 type ReaderWorkspaceSwitchTestProps = Omit<
   Parameters<typeof ReaderWorkspaceSwitch>[0],
@@ -60,13 +60,11 @@ function renderSwitch(overrides: Partial<ReaderWorkspaceSwitchTestProps> = {}) {
     bookmarkDashboard: emptyBookmarkDashboard,
     bookmarkDashboardError: null,
     bookmarkDashboardLoading: false,
-    lastSearchCommand: '',
     pageInput: '',
     persistence: createTagPersistence(),
     readerPreferences: preferences,
     recentDocuments: [],
     searchState: emptySearchState,
-    searchOptions: defaultSearchOptions,
     documentInfo: null,
     searchInputRef: { current: null },
     searchText: '',
@@ -75,15 +73,11 @@ function renderSwitch(overrides: Partial<ReaderWorkspaceSwitchTestProps> = {}) {
     settingsInitialSection: 'shortcuts',
     settingsSaving: false,
     sidebarOpen: true,
-    rightPanelOpen: true,
     viewerContent: <div>Viewer content</div>,
     addBookmarkForActivePage: vi.fn(),
     addPageNote: vi.fn(),
     canOpenNativePdf: () => true,
     canOpenRecordPage: () => true,
-    clearSearch: vi.fn(),
-    jumpToSearchMatch: vi.fn(),
-    setSearchOptions: vi.fn(),
     closeToolWorkspace: vi.fn(),
     deleteBookmark: vi.fn(),
     deleteManagedBookmarks: vi.fn().mockResolvedValue({
@@ -119,14 +113,11 @@ function renderSwitch(overrides: Partial<ReaderWorkspaceSwitchTestProps> = {}) {
     renameBookmark: vi.fn(),
     refreshBookmarkDashboard: vi.fn(),
     reopenRecentDocument: vi.fn(),
-    runSearch: vi.fn(),
     setPageInput: vi.fn(),
     setSearchText: vi.fn(),
+    setSearchComposing: vi.fn(),
     setSelectedAnnotationId: vi.fn(),
     setSidebarOpen: vi.fn(),
-    setRightPanelOpen: vi.fn(),
-    stepHistoryBack: vi.fn(),
-    stepHistoryForward: vi.fn(),
     updateManagedBookmark: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };

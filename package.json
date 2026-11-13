@@ -46,6 +46,7 @@
     "vitest": "4.1.9"
   },
   "patchedDependencies": {
-    "@react-pdf-viewer/core@3.12.0": "patches/@react-pdf-viewer%2Fcore@3.12.0.patch"
+    "@react-pdf-viewer/core@3.12.0": "patches/@react-pdf-viewer%2Fcore@3.12.0.patch",
+    "@react-pdf-viewer/search@3.12.0": "patches/@react-pdf-viewer%2Fsearch@3.12.0.patch"
   }
 }

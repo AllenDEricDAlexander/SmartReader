@@ -62,13 +62,11 @@ import { SessionRestoreWorkspace } from '../workspaces/SessionRestoreWorkspace';
 import type { GlobalSearchResult } from '../search/globalSearch';
 import { ViewerController } from '../viewer/viewerController';
 import {
-  defaultSearchOptions,
   emptySearchState,
   type ViewerHighlightSelection,
   type ViewerLoadError,
   type ViewerProgress,
   type ViewerDocumentInfo,
-  type ViewerSearchOptions,
   type ViewerSearchState,
   type ViewerSource,
 } from '../viewer/viewerTypes';
@@ -123,12 +121,10 @@ export function ReaderApp({
   const [viewerReadyIdentity, setViewerReadyIdentity] = useState<string | null>(null);
   const [defaultSidebarOpen, setDefaultSidebarOpen] = useState(true);
   const [sidebarOpenByDocument, setSidebarOpenByDocument] = useState<Record<string, boolean>>({});
-  const [rightPanelOpenByDocument, setRightPanelOpenByDocument] = useState<Record<string, boolean>>({});
   const [searchText, setSearchText] = useState('');
-  const [lastSearchCommand, setLastSearchCommand] = useState('');
+  const [searchComposing, setSearchComposing] = useState(false);
+  const searchDispatched = useRef(false);
   const [searchState, setSearchState] = useState<ViewerSearchState>(emptySearchState);
-  const [searchOptions, setSearchOptionsState] =
-    useState<ViewerSearchOptions>(defaultSearchOptions);
   const [documentInfo, setDocumentInfo] = useState<ViewerDocumentInfo | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const focusSearchInput = useCallback(() => {
@@ -239,7 +235,6 @@ export function ReaderApp({
   const activeSession = displayDocuments.sessions.find((session) => session.id === displayDocuments.activeSessionId) ?? null;
   const activeDocumentKey = activeSession?.documentKey;
   const sidebarOpen = activeDocumentKey ? sidebarOpenByDocument[activeDocumentKey] ?? defaultSidebarOpen : defaultSidebarOpen;
-  const rightPanelOpen = activeDocumentKey ? rightPanelOpenByDocument[activeDocumentKey] ?? true : true;
   const setSidebarOpen = useCallback((update: SetStateAction<boolean>) => {
     if (!activeDocumentKey) {
       setDefaultSidebarOpen(update);
@@ -251,14 +246,6 @@ export function ReaderApp({
         ? update(current[activeDocumentKey] ?? defaultSidebarOpen) : update,
     }));
   }, [activeDocumentKey, defaultSidebarOpen]);
-  const setRightPanelOpen = useCallback((update: SetStateAction<boolean>) => {
-    if (!activeDocumentKey) return;
-    setRightPanelOpenByDocument((current) => ({
-      ...current,
-      [activeDocumentKey]: typeof update === 'function'
-        ? update(current[activeDocumentKey] ?? true) : update,
-    }));
-  }, [activeDocumentKey]);
   const activeWorkspace: AppWorkspace =
     workspaceOverride ?? (activeSession ? 'reader' : 'home');
   useReadingTime({ library: research?.library, session: activeSession, active: activeWorkspace === 'reader',
@@ -353,6 +340,7 @@ export function ReaderApp({
       } : null);
       setSearchState(emptySearchState);
       setSearchText('');
+      setSearchComposing(false);
       setGlobalSearchQuery('');
       setGlobalSearchOpen(false);
       setSelectedAnnotationId(null);
@@ -1115,40 +1103,22 @@ export function ReaderApp({
     },
     [activeSession, updateAnnotationForDocument],
   );
-  const runSearch = useCallback(
-    (keyword: string, options: ViewerSearchOptions = searchOptions) => {
-      activeViewerController.search(keyword, options);
-      setLastSearchCommand(keyword.trim() ? `已搜索“${keyword.trim()}”` : '已清除搜索');
+  const searchKeyword = searchText.trim();
+  useEffect(() => {
+    if (activeWorkspace !== 'reader' || activeSession?.status !== 'ready' || searchComposing) return;
+    if (searchDispatched.current) {
+      searchDispatched.current = false;
+      activeViewerController.search('');
+      setSearchState(emptySearchState);
+    }
+    if (!searchKeyword) return;
 
-      if (!keyword.trim()) {
-        setSearchState(emptySearchState);
-      }
-    },
-    [activeViewerController, searchOptions],
-  );
-  // Changing an option re-runs the current query so results never disagree with
-  // the checkboxes that produced them.
-  const setSearchOptions = useCallback(
-    (options: ViewerSearchOptions) => {
-      setSearchOptionsState(options);
-
-      if (searchText.trim()) {
-        runSearch(searchText, options);
-      }
-    },
-    [runSearch, searchText],
-  );
-  const jumpToSearchMatch = useCallback(
-    (index: number) => {
-      activeViewerController.jumpToMatch(index);
-      setSearchState((current) => ({ ...current, currentIndex: index }));
-    },
-    [activeViewerController],
-  );
-  const clearSearch = useCallback(() => {
-    setSearchText('');
-    runSearch('');
-  }, [runSearch]);
+    const timer = window.setTimeout(() => {
+      searchDispatched.current = true;
+      activeViewerController.search(searchKeyword);
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [activeSession?.id, activeSession?.status, activeViewerController, activeWorkspace, searchComposing, searchKeyword, viewerSource?.url]);
 
   const handleGlobalSearchResult = useCallback(
     async (result: GlobalSearchResult) => {
@@ -1163,7 +1133,7 @@ export function ReaderApp({
       if (result.source === 'fullText' && result.query) {
         setWorkspaceOverride(null);
         setSearchText(result.query);
-        runSearch(result.query);
+        setSearchComposing(false);
         activeViewerController.openSearch();
         return;
       }
@@ -1208,7 +1178,6 @@ export function ReaderApp({
       jumpToActiveDocumentPage,
       recentDocuments,
       reopenRecentDocument,
-      runSearch,
       research,
       openResearchPaper,
     ],
@@ -1476,6 +1445,10 @@ export function ReaderApp({
 
   useLayoutEffect(() => {
     setDocumentInfo(null);
+    setSearchText('');
+    setSearchState(emptySearchState);
+    setSearchComposing(false);
+    searchDispatched.current = false;
   }, [viewerSource?.sessionId, viewerSource?.url]);
 
   // Memoised so viewer props only change when the document, its annotations or
@@ -1604,17 +1577,16 @@ export function ReaderApp({
         bookmarkDashboard={displayBookmarkDashboard}
         bookmarkDashboardError={bookmarkDashboardError}
         bookmarkDashboardLoading={bookmarkDashboardLoading}
-        lastSearchCommand={lastSearchCommand}
         pageInput={pageInput}
         persistence={persistence}
         readerPreferences={readerPreferences}
         preferencesReady={preferencesLoadSucceeded}
         recentDocuments={displayRecentDocuments}
         searchState={searchState}
-        searchOptions={searchOptions}
         documentInfo={documentInfo}
         searchInputRef={searchInputRef}
         searchText={searchText}
+        setSearchComposing={setSearchComposing}
         selectedAnnotation={selectedAnnotation}
         sessionRestoreCount={sessionRestoreCount}
         settingsInitialSection={settingsInitialSection}
@@ -1623,14 +1595,12 @@ export function ReaderApp({
         closeSettingsWorkspace={closeSettingsWorkspace}
         settingsSaving={settingsSaving}
         sidebarOpen={sidebarOpen}
-        rightPanelOpen={rightPanelOpen}
         viewerContent={viewerContent}
         addBookmarkForActivePage={addBookmarkForActivePage}
         addPageNote={addPageNote}
         canOpenNativePdf={() => bridge.canOpenNativePdf?.() ?? true}
         onLocateFile={handleLocateFile}
         canOpenRecordPage={canOpenRecordPage}
-        clearSearch={clearSearch}
         closeToolWorkspace={closeToolWorkspace}
         deleteBookmark={handleDeleteBookmark}
         deleteManagedBookmarks={deleteManagedBookmarks}
@@ -1652,8 +1622,6 @@ export function ReaderApp({
         importAnnotationsForDocument={(key, json) => importAnnotationsForDocument(key, json).catch((error) => setAppError(errorMessage(error)))}
         jumpToActiveDocumentPage={jumpToActiveDocumentPage}
         jumpToPage={jumpToPage}
-        jumpToSearchMatch={jumpToSearchMatch}
-        setSearchOptions={setSearchOptions}
         onTagsChange={(update) => {
           tagsMutatedRef.current = true;
           setAvailableTags(update);
@@ -1670,14 +1638,10 @@ export function ReaderApp({
         renameBookmark={handleRenameBookmark}
         refreshBookmarkDashboard={refreshBookmarkDashboard}
         reopenRecentDocument={reopenRecentDocument}
-        runSearch={runSearch}
         setPageInput={setPageInput}
         setSearchText={setSearchText}
         setSelectedAnnotationId={setSelectedAnnotationId}
         setSidebarOpen={setSidebarOpen}
-        setRightPanelOpen={setRightPanelOpen}
-        stepHistoryBack={stepHistoryBack}
-        stepHistoryForward={stepHistoryForward}
         updateManagedBookmark={updateManagedBookmark}
       />
       <GlobalSearchPanel

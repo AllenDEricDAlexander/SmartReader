@@ -1,0 +1,138 @@
+diff --git a/node_modules/@react-pdf-viewer/search/.bun-tag-f9f548239f8a307a b/.bun-tag-f9f548239f8a307a
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/lib/cjs/search.js b/lib/cjs/search.js
+index 4090c89d1636f2b2ef42150831dddb5abcd22dd0..00e494790ef454a90ceb54bd8ec8d5cd2a791d26 100644
+--- a/lib/cjs/search.js
++++ b/lib/cjs/search.js
+@@ -428,7 +428,13 @@ var useSearch = function (store) {
+     var _b = React__namespace.useState([]), found = _b[0], setFound = _b[1];
+     var _c = React__namespace.useState(0), currentMatch = _c[0], setCurrentMatch = _c[1];
+     var _d = React__namespace.useState(normalizedKeywordFlags.matchCase), matchCase = _d[0], setMatchCase = _d[1];
+-    var textContents = React__namespace.useRef([]);
++    var textContents = React__namespace.useRef(null);
++    var searchGeneration = React__namespace.useRef(0);
++    React__namespace.useEffect(function () {
++        return function () {
++            ++searchGeneration.current;
++        };
++    }, []);
+     var _e = React__namespace.useState(normalizedKeywordFlags.wholeWords), wholeWords = _e[0], setWholeWords = _e[1];
+     var defaultTargetPageFilter = function () { return true; };
+     var targetPageFilter = React__namespace.useCallback(function () { return store.get('targetPageFilter') || defaultTargetPageFilter; }, [store.get('targetPageFilter')]);
+@@ -456,6 +462,7 @@ var useSearch = function (store) {
+     var jumpToPreviousMatch = function () { return jumpToMatch(currentMatch - 1); };
+     var jumpToNextMatch = function () { return jumpToMatch(currentMatch + 1); };
+     var clearKeyword = function () {
++        ++searchGeneration.current;
+         store.update('keyword', [EMPTY_KEYWORD_REGEXP]);
+         setKeyword('');
+         setCurrentMatch(0);
+@@ -476,7 +483,7 @@ var useSearch = function (store) {
+         var promises = Array(currentDoc.numPages)
+             .fill(0)
+             .map(function (_, pageIndex) {
+-            return core.getPage(currentDoc, pageIndex)
++            return currentDoc.getPage(pageIndex + 1)
+                 .then(function (page) {
+                 return page.getTextContent();
+             })
+@@ -523,46 +530,50 @@ var useSearch = function (store) {
+         store.update('keyword', keywords);
+         setCurrentMatch(0);
+         setFound([]);
+-        return new Promise(function (resolve, _) {
+-            var getTextPromise = textContents.current.length === 0
+-                ? getTextContents().then(function (response) {
+-                    textContents.current = response;
+-                    return Promise.resolve(response);
+-                })
+-                : Promise.resolve(textContents.current);
+-            getTextPromise.then(function (response) {
+-                var arr = [];
+-                response.forEach(function (pageText, pageIndex) {
+-                    if (targetPageFilter()({ pageIndex: pageIndex, numPages: numPages })) {
+-                        keywords.forEach(function (keyword) {
+-                            var matchIndex = 0;
+-                            var matches;
+-                            while ((matches = keyword.regExp.exec(pageText)) !== null) {
+-                                arr.push({
+-                                    keyword: keyword.regExp,
+-                                    matchIndex: matchIndex,
+-                                    pageIndex: pageIndex,
+-                                    pageText: pageText,
+-                                    startIndex: matches.index,
+-                                    endIndex: keyword.regExp.lastIndex,
+-                                });
+-                                matchIndex++;
+-                            }
+-                        });
+-                    }
+-                });
+-                setFound(arr);
+-                if (arr.length > 0) {
+-                    setCurrentMatch(1);
+-                    jumpToGivenMatch(arr[0]);
++        var generation = ++searchGeneration.current;
++        if (!textContents.current || textContents.current.doc !== currentDoc) {
++            textContents.current = { doc: currentDoc, promise: getTextContents() };
++        }
++        var contents = textContents.current;
++        return contents.promise.then(function (response) {
++            // A newer query or clearing the input must also cancel this plugin's
++            // automatic scroll, not just the result reported by the caller.
++            if (generation !== searchGeneration.current || currentDocRef.current !== currentDoc) {
++                return [];
++            }
++            var arr = [];
++            response.forEach(function (pageText, pageIndex) {
++                if (targetPageFilter()({ pageIndex: pageIndex, numPages: numPages })) {
++                    keywords.forEach(function (keyword) {
++                        var matchIndex = 0;
++                        var matches;
++                        while ((matches = keyword.regExp.exec(pageText)) !== null) {
++                            arr.push({
++                                keyword: keyword.regExp,
++                                matchIndex: matchIndex,
++                                pageIndex: pageIndex,
++                                pageText: pageText,
++                                startIndex: matches.index,
++                                endIndex: keyword.regExp.lastIndex,
++                            });
++                            matchIndex++;
++                        }
++                    });
+                 }
+-                resolve(arr);
+             });
++            setFound(arr);
++            if (arr.length > 0) {
++                setCurrentMatch(1);
++                jumpToGivenMatch(arr[0]);
++            }
++            return arr;
++        }, function (error) {
++            if (textContents.current === contents) {
++                textContents.current = null;
++            }
++            throw error;
+         });
+     };
+-    React__namespace.useEffect(function () {
+-        textContents.current = [];
+-    }, [currentDocRef.current]);
+     return {
+         clearKeyword: clearKeyword,
+         changeMatchCase: changeMatchCase,
+diff --git a/lib/index.js b/lib/index.js
+index 785bae7c0b187a314238687ff629ce7fa465df67..78f8e5f5fb2fc76fa13e6d2c0a237d832ff1b60a 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -11,5 +11,2 @@
+-if (process.env.NODE_ENV === 'production') {
+-    module.exports = require('./cjs/search.min.js');
+-} else {
+-    module.exports = require('./cjs/search.js');
+-}
++// Keep development and production on the same patched search implementation.
++module.exports = require('./cjs/search.js');

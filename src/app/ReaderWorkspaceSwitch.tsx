@@ -32,7 +32,6 @@ import { TagManager } from '../tags/TagManager';
 import type { ViewerActions } from '../viewer/viewerController';
 import type {
   ViewerDocumentInfo,
-  ViewerSearchOptions,
   ViewerSearchState,
 } from '../viewer/viewerTypes';
 import { AnnotationManagerWorkspace } from '../workspaces/AnnotationManagerWorkspace';
@@ -74,14 +73,12 @@ type ReaderWorkspaceSwitchProps = {
   bookmarkDashboard: BookmarkDashboard | null;
   bookmarkDashboardError: string | null;
   bookmarkDashboardLoading: boolean;
-  lastSearchCommand: string;
   pageInput: string;
   persistence: Parameters<typeof TagManager>[0]['persistence'];
   readerPreferences: ReaderPreferences;
   preferencesReady?: boolean;
   recentDocuments: PersistedDocument[];
   searchState: ViewerSearchState;
-  searchOptions: ViewerSearchOptions;
   documentInfo: ViewerDocumentInfo | null;
   searchInputRef: RefObject<HTMLInputElement>;
   searchText: string;
@@ -93,14 +90,12 @@ type ReaderWorkspaceSwitchProps = {
   closeSettingsWorkspace?(): void;
   settingsSaving: boolean;
   sidebarOpen: boolean;
-  rightPanelOpen: boolean;
   viewerContent: ReactNode;
   addBookmarkForActivePage(): void;
   addPageNote(): void;
   canOpenNativePdf(): boolean;
   onLocateFile?(document: Pick<PersistedDocument, 'documentKey' | 'path'>): void | Promise<void>;
   canOpenRecordPage(documentKey: string, documentPath: string | null, documentMissing: boolean): boolean;
-  clearSearch(): void;
   closeToolWorkspace(): void;
   deleteBookmark(bookmark: Bookmark): void | Promise<void>;
   deleteManagedBookmarks(
@@ -124,8 +119,6 @@ type ReaderWorkspaceSwitchProps = {
   importAnnotationsForDocument(documentKey: string, json: string): Promise<void>;
   jumpToActiveDocumentPage(page: number): void;
   jumpToPage(page: number): void;
-  jumpToSearchMatch(index: number): void;
-  setSearchOptions(options: ViewerSearchOptions): void;
   onTagsChange(update: SetStateAction<Tag[]>): void;
   openCompareDocument(document: PersistedDocument): void | Promise<void>;
   openFavoriteDocument(document: FavoriteDocument): void | Promise<void | boolean>;
@@ -144,14 +137,11 @@ type ReaderWorkspaceSwitchProps = {
   renameBookmark(bookmark: Bookmark, title: string): void | Promise<void>;
   refreshBookmarkDashboard(): void | Promise<void>;
   reopenRecentDocument(document: PersistedDocument): Promise<boolean>;
-  runSearch(keyword: string): void;
   setPageInput(value: string): void;
   setSearchText(value: string): void;
+  setSearchComposing(composing: boolean): void;
   setSelectedAnnotationId(annotationId: number | null): void;
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
-  setRightPanelOpen: Dispatch<SetStateAction<boolean>>;
-  stepHistoryBack(): void;
-  stepHistoryForward(): void;
   updateManagedBookmark(
     bookmark: BookmarkManagementRecord,
     updates: BookmarkUpdateInput,
@@ -183,14 +173,12 @@ export function ReaderWorkspaceSwitch({
   bookmarkDashboard,
   bookmarkDashboardError,
   bookmarkDashboardLoading,
-  lastSearchCommand,
   pageInput,
   persistence,
   readerPreferences,
   preferencesReady = true,
   recentDocuments,
   searchState,
-  searchOptions,
   documentInfo,
   searchInputRef,
   searchText,
@@ -202,14 +190,12 @@ export function ReaderWorkspaceSwitch({
   closeSettingsWorkspace,
   settingsSaving,
   sidebarOpen,
-  rightPanelOpen,
   viewerContent,
   addBookmarkForActivePage,
   addPageNote,
   canOpenNativePdf,
   onLocateFile,
   canOpenRecordPage,
-  clearSearch,
   closeToolWorkspace,
   deleteBookmark,
   deleteManagedBookmarks,
@@ -231,8 +217,6 @@ export function ReaderWorkspaceSwitch({
   importAnnotationsForDocument,
   jumpToActiveDocumentPage,
   jumpToPage,
-  jumpToSearchMatch,
-  setSearchOptions,
   onTagsChange,
   openCompareDocument,
   openFavoriteDocument,
@@ -246,14 +230,11 @@ export function ReaderWorkspaceSwitch({
   renameBookmark,
   refreshBookmarkDashboard,
   reopenRecentDocument,
-  runSearch,
   setPageInput,
   setSearchText,
+  setSearchComposing,
   setSelectedAnnotationId,
   setSidebarOpen,
-  setRightPanelOpen,
-  stepHistoryBack,
-  stepHistoryForward,
   updateManagedBookmark,
 }: ReaderWorkspaceSwitchProps) {
   const research = useResearch();
@@ -356,10 +337,8 @@ export function ReaderWorkspaceSwitch({
           activeSessionIsFavorite={activeSessionIsFavorite}
           activeViewerController={activeViewerController}
           availableTags={availableTags}
-          lastSearchCommand={lastSearchCommand}
           pageInput={pageInput}
           searchState={searchState}
-          searchOptions={searchOptions}
           documentInfo={documentInfo}
           documentRecord={
             recentDocuments.find(
@@ -370,11 +349,9 @@ export function ReaderWorkspaceSwitch({
           searchText={searchText}
           selectedAnnotation={selectedAnnotation}
           sidebarOpen={sidebarOpen}
-          rightPanelOpen={rightPanelOpen}
           viewerContent={viewerContent}
           addBookmarkForActivePage={addBookmarkForActivePage}
           addPageNote={addPageNote}
-          clearSearch={clearSearch}
           deleteBookmark={deleteBookmark}
           deleteAnnotationForDocument={deleteAnnotationForDocument}
           handleSaveAnnotationNote={handleSaveAnnotationNote}
@@ -384,18 +361,13 @@ export function ReaderWorkspaceSwitch({
           importAnnotationsForDocument={importAnnotationsForDocument}
           jumpToActiveDocumentPage={jumpToActiveDocumentPage}
           jumpToPage={jumpToPage}
-          jumpToSearchMatch={jumpToSearchMatch}
-          setSearchOptions={setSearchOptions}
           openSettingsWorkspace={openSettingsWorkspace}
           renameBookmark={renameBookmark}
-          runSearch={runSearch}
           setPageInput={setPageInput}
           setSearchText={setSearchText}
+          setSearchComposing={setSearchComposing}
           setSelectedAnnotationId={setSelectedAnnotationId}
           setSidebarOpen={setSidebarOpen}
-          setRightPanelOpen={setRightPanelOpen}
-          stepHistoryBack={stepHistoryBack}
-          stepHistoryForward={stepHistoryForward}
         />
       ) : null}
       {activeWorkspace === 'home' ? (

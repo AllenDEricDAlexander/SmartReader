@@ -2180,9 +2180,10 @@ select {
   background: rgba(220, 38, 38, 0.06);
 }
 
-.toolbar-search-group {
+.toolbar-search-field {
   position: relative;
-  min-width: 0;
+  display: flex;
+  align-items: center;
 }
 
 .toolbar-search-icon {
@@ -2193,7 +2194,20 @@ select {
 }
 
 .toolbar-search-input {
-  padding-left: 28px;
+  width: 180px;
+  padding-inline: 28px;
+}
+
+.toolbar-search-clear {
+  position: absolute;
+  right: 4px;
+  width: 23px;
+  min-width: 0;
+  min-height: 23px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--sr-text-muted);
 }
 
 .toolbar-match-count {
@@ -2237,27 +2251,17 @@ select {
 }
 
 .reader-left-panel,
-.reader-right-panel,
 .reader-drawer {
   min-width: 0;
   min-height: 0;
   background: var(--sr-surface);
 }
 
-.reader-left-panel,
-.reader-right-panel {
+.reader-left-panel {
   padding: 14px;
   overflow: auto;
-}
-
-.reader-left-panel {
   flex: 0 1 min(260px, 24%);
   border-right: 1px solid var(--sr-border);
-}
-
-.reader-right-panel {
-  flex: 0 1 min(280px, 26%);
-  border-left: 1px solid var(--sr-border);
 }
 
 .reader-drawer {
@@ -2442,13 +2446,6 @@ select {
   gap: 6px;
 }
 
-.search-panel-controls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-}
-
-.search-panel-meta,
 .filter-control,
 .inline-toggle {
   display: flex;
@@ -2458,16 +2455,6 @@ select {
   font-size: 12px;
 }
 
-.search-panel-meta {
-  justify-content: space-between;
-}
-
-.search-panel-meta label,
-.filter-control {
-  min-width: 0;
-}
-
-.search-results-list,
 .annotation-list,
 .bookmark-list,
 .tag-picker,
@@ -2552,120 +2539,6 @@ select {
   color: var(--sr-danger);
   font-size: 12px;
   text-align: right;
-}
-
-.search-results-list {
-  max-height: 300px;
-  display: grid;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  overflow-y: auto;
-}
-
-.search-result-group ul {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.search-result-group-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 2px 4px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.search-result-group-count {
-  color: var(--sr-text-muted);
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
-}
-
-.search-current-match {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid rgba(37, 99, 235, 0.24);
-  border-radius: var(--sr-radius);
-  background: rgba(37, 99, 235, 0.06);
-  font-size: 12px;
-  color: var(--sr-text-muted);
-}
-
-.search-current-match strong {
-  color: var(--sr-primary);
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-}
-
-.search-options {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--sr-border);
-  border-radius: var(--sr-radius);
-}
-
-.search-options legend {
-  padding: 0 4px;
-  color: var(--sr-text-muted);
-  font-size: 12px;
-}
-
-.search-options label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.search-options input {
-  width: 14px;
-  height: 14px;
-  margin: 0;
-}
-
-.search-result-card {
-  width: 100%;
-  display: grid;
-  justify-items: start;
-  gap: 4px;
-  padding: 8px;
-  text-align: left;
-}
-
-.search-result-card.current {
-  border-color: rgba(37, 99, 235, 0.32);
-  background: rgba(37, 99, 235, 0.06);
-}
-
-.search-result-meta {
-  color: var(--sr-primary);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.search-result-card span,
-.search-result-card small {
-  color: var(--sr-text-muted);
-  font-size: 12px;
-}
-
-.search-result-card small {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
 }
 
 .reader-progress-card {
@@ -2833,18 +2706,6 @@ select {
 
 .selection-markup-action.ghost {
   color: var(--sr-text-muted);
-}
-
-.search-match-strip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px;
-  border: 1px solid var(--sr-border);
-  border-radius: var(--sr-radius);
-  background: var(--sr-surface-muted);
-  font-size: 12px;
 }
 
 .control-grid {
@@ -3774,8 +3635,7 @@ select {
     display: none;
   }
 
-  .reader-left-panel,
-  .reader-right-panel {
+  .reader-left-panel {
     padding: 8px;
   }
 

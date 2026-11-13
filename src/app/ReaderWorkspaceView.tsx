@@ -5,7 +5,7 @@ import type { PersistedBookmark, PersistedDocument } from '../persistence/persis
 import type { Tag } from '../tags/tagModels';
 import { ReaderLeftPanel } from '../reader/ReaderLeftPanel';
 import { ReaderDocumentInfoDrawer } from '../reader/ReaderDocumentInfoDrawer';
-import { ReaderRightPanel } from '../reader/ReaderRightPanel';
+import { AnnotationDetail } from '../reader/annotations/AnnotationDetail';
 import { ReaderStatusBar } from '../reader/ReaderStatusBar';
 import { ReaderToolbar } from '../reader/ReaderToolbar';
 import { ReaderWorkspace } from '../reader/ReaderWorkspace';
@@ -13,7 +13,6 @@ import { PdfOutlineDrawer } from '../reader/PdfOutlineDrawer';
 import type { ViewerActions } from '../viewer/viewerController';
 import type {
   ViewerDocumentInfo,
-  ViewerSearchOptions,
   ViewerSearchState,
 } from '../viewer/viewerTypes';
 import type { SettingsSection } from '../settings/SettingsWorkspace';
@@ -26,21 +25,17 @@ type ReaderWorkspaceViewProps = {
   activeSessionIsFavorite: boolean;
   activeViewerController: ViewerActions;
   availableTags: Tag[];
-  lastSearchCommand: string;
   pageInput: string;
   searchState: ViewerSearchState;
-  searchOptions: ViewerSearchOptions;
   documentInfo: ViewerDocumentInfo | null;
   documentRecord: PersistedDocument | null;
   searchInputRef: RefObject<HTMLInputElement>;
   searchText: string;
   selectedAnnotation: ReaderAnnotation | null;
   sidebarOpen: boolean;
-  rightPanelOpen: boolean;
   viewerContent: ReactNode;
   addBookmarkForActivePage(): void;
   addPageNote(): void;
-  clearSearch(): void;
   deleteBookmark(bookmark: Bookmark): void | Promise<void>;
   deleteAnnotationForDocument(documentKey: string, annotationId: number): void;
   handleSaveAnnotationNote(annotation: ReaderAnnotation, text: string): void | Promise<void>;
@@ -50,18 +45,13 @@ type ReaderWorkspaceViewProps = {
   importAnnotationsForDocument(documentKey: string, json: string): Promise<void>;
   jumpToActiveDocumentPage(page: number): void;
   jumpToPage(page: number): void;
-  jumpToSearchMatch(index: number): void;
-  setSearchOptions(options: ViewerSearchOptions): void;
   openSettingsWorkspace(initialSection?: SettingsSection): void;
   renameBookmark(bookmark: Bookmark, title: string): void | Promise<void>;
-  runSearch(keyword: string): void;
   setPageInput(value: string): void;
   setSearchText(value: string): void;
+  setSearchComposing(composing: boolean): void;
   setSelectedAnnotationId(annotationId: number | null): void;
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
-  setRightPanelOpen: Dispatch<SetStateAction<boolean>>;
-  stepHistoryBack(): void;
-  stepHistoryForward(): void;
 };
 
 export function ReaderWorkspaceView({
@@ -72,21 +62,17 @@ export function ReaderWorkspaceView({
   activeSessionIsFavorite,
   activeViewerController,
   availableTags,
-  lastSearchCommand,
   pageInput,
   searchState,
-  searchOptions,
   documentInfo,
   documentRecord,
   searchInputRef,
   searchText,
   selectedAnnotation,
   sidebarOpen,
-  rightPanelOpen,
   viewerContent,
   addBookmarkForActivePage,
   addPageNote,
-  clearSearch,
   deleteBookmark,
   deleteAnnotationForDocument,
   handleSaveAnnotationNote,
@@ -96,18 +82,13 @@ export function ReaderWorkspaceView({
   importAnnotationsForDocument,
   jumpToActiveDocumentPage,
   jumpToPage,
-  jumpToSearchMatch,
-  setSearchOptions,
   openSettingsWorkspace,
   renameBookmark,
-  runSearch,
   setPageInput,
   setSearchText,
+  setSearchComposing,
   setSelectedAnnotationId,
   setSidebarOpen,
-  setRightPanelOpen,
-  stepHistoryBack,
-  stepHistoryForward,
 }: ReaderWorkspaceViewProps) {
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [documentInfoOpen, setDocumentInfoOpen] = useState(false);
@@ -119,7 +100,7 @@ export function ReaderWorkspaceView({
     const nextPage = Math.max(1, activeSession.page + delta);
     const capped =
       activeSession.totalPages != null ? Math.min(activeSession.totalPages, nextPage) : nextPage;
-    jumpToPage(capped);
+    if (capped !== activeSession.page) jumpToPage(capped);
   };
 
   return (
@@ -133,7 +114,6 @@ export function ReaderWorkspaceView({
           searchInputRef={searchInputRef}
           pageInput={pageInput}
           sidebarOpen={sidebarOpen}
-          rightPanelOpen={rightPanelOpen}
           outlineOpen={outlineVisible}
           outlineButtonRef={outlineButton}
           onToggleOutline={() => setOutlineOpen((open) => !open)}
@@ -142,16 +122,16 @@ export function ReaderWorkspaceView({
           onToggleDocumentInfo={() => setDocumentInfoOpen((open) => !open)}
           onSearchTextChange={setSearchText}
           onPageInputChange={setPageInput}
-          onSearch={() => runSearch(searchText)}
+          onSearchCompositionChange={setSearchComposing}
           onSearchNext={() => activeViewerController.searchNext()}
           onSearchPrevious={() => activeViewerController.searchPrevious()}
-          onJumpToPage={() => jumpToPage(Number(pageInput))}
+          onJumpToPage={() => {
+            const page = Number(pageInput);
+            if (Number.isSafeInteger(page) && page > 0) jumpToPage(page);
+          }}
           onPagePrevious={() => goToAdjacentPage(-1)}
           onPageNext={() => goToAdjacentPage(1)}
           onToggleSidebar={() => setSidebarOpen((open) => !open)}
-          onToggleRightPanel={() => setRightPanelOpen((open) => !open)}
-          onHistoryBack={stepHistoryBack}
-          onHistoryForward={stepHistoryForward}
           onAddBookmark={addBookmarkForActivePage}
           onAddNote={addPageNote}
           isFavorite={activeSessionIsFavorite}
@@ -187,39 +167,24 @@ export function ReaderWorkspaceView({
             deleteAnnotationForDocument(activeSession.documentKey, annotationId)
           }
           onImportAnnotations={(json) => importAnnotationsForDocument(activeSession.documentKey, json)}
-        />
+        >
+          {selectedAnnotation ? (
+            <AnnotationDetail
+              annotation={selectedAnnotation}
+              tags={availableTags}
+              onJumpToPage={jumpToActiveDocumentPage}
+              onDeleteAnnotation={(id) => deleteAnnotationForDocument(activeSession.documentKey, id)}
+              onSaveNote={handleSaveAnnotationNote}
+              onToggleTag={handleToggleAnnotationTag}
+            />
+          ) : null}
+        </ReaderLeftPanel>
       ) : null}
       viewer={
         <section className="viewer-surface" aria-label="PDF viewer surface" onWheel={handleViewerWheel}>
           {viewerContent}
         </section>
       }
-      rightPanel={rightPanelOpen ? (
-        <ReaderRightPanel
-          activeSession={activeSession}
-          selectedAnnotation={selectedAnnotation}
-          tags={availableTags}
-          searchText={searchText}
-          searchState={searchState}
-          searchOptions={searchOptions}
-          lastSearchCommand={lastSearchCommand}
-          onSearchTextChange={setSearchText}
-          onSearch={() => runSearch(searchText)}
-          onClearSearch={clearSearch}
-          onSearchNext={() => activeViewerController.searchNext()}
-          onSearchPrevious={() => activeViewerController.searchPrevious()}
-          onJumpToMatch={jumpToSearchMatch}
-          onSearchOptionsChange={setSearchOptions}
-          onJumpToPage={jumpToActiveDocumentPage}
-          onFitWidth={() => activeViewerController.fitWidth()}
-          onFitPage={() => activeViewerController.fitPage()}
-          onDeleteAnnotation={(annotationId) =>
-            deleteAnnotationForDocument(activeSession.documentKey, annotationId)
-          }
-          onSaveAnnotationNote={handleSaveAnnotationNote}
-          onToggleAnnotationTag={handleToggleAnnotationTag}
-        />
-      ) : null}
       documentInfoDrawer={documentInfoOpen ? (
         <ReaderDocumentInfoDrawer
           key={`info:${activeSession.id}`}

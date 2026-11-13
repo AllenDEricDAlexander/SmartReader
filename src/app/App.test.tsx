@@ -34,8 +34,8 @@ function TestPdfRenderer({
   onHighlightSelection,
 }: Parameters<PdfRenderer>[0]) {
   useEffect(() => {
-    if (fileUrl === 'blob:progress-sync') {
-      onPageChange(4, 10);
+    if (fileUrl === 'blob:progress-sync' || fileUrl === 'blob:toolbar' || fileUrl === 'blob:search-clear') {
+      onPageChange(fileUrl === 'blob:progress-sync' ? 4 : 1, 10);
     }
   }, [fileUrl, onPageChange]);
 
@@ -466,21 +466,13 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: 'book.pdf' })).toBeInTheDocument();
 
     const leftPanelToggle = screen.getByRole('button', { name: '当前阅读' });
-    const rightPanelToggle = screen.getByRole('button', { name: '搜索与批注' });
     expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
-    expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
 
     fireEvent.click(leftPanelToggle);
     expect(screen.queryByLabelText('阅读侧栏')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
-
-    fireEvent.click(rightPanelToggle);
-    expect(screen.queryByLabelText('阅读检查器')).not.toBeInTheDocument();
 
     fireEvent.click(leftPanelToggle);
-    fireEvent.click(rightPanelToggle);
     expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
-    expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
   });
 
   it('opens a PDF from the native dialog and displays a tab', async () => {
@@ -1988,12 +1980,16 @@ describe('App', () => {
 
     await screen.findByRole('tab', { name: 'toolbar.pdf' });
 
-    fireEvent.change(screen.getByLabelText('Search text'), { target: { value: 'method' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Search PDF' }));
+    const search = screen.getByLabelText('Search text');
+    fireEvent.compositionStart(search);
+    fireEvent.change(search, { target: { value: 'fang' } });
     fireEvent.change(screen.getByLabelText('Page number'), { target: { value: '8' } });
     fireEvent.click(screen.getByRole('button', { name: 'Go to page' }));
 
-    expect(viewerController.search).toHaveBeenCalledWith('method', expect.any(Object));
+    expect(viewerController.search).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(search, { data: '方法' });
+    fireEvent.change(search, { target: { value: '方法' } });
+    await waitFor(() => expect(viewerController.search).toHaveBeenCalledExactlyOnceWith('方法'));
     expect(viewerController.jumpToPage).toHaveBeenCalledWith(8);
   });
 
@@ -2030,13 +2026,17 @@ describe('App', () => {
     await screen.findByRole('tab', { name: 'search.pdf' });
 
     fireEvent.change(screen.getByLabelText('Search text'), { target: { value: 'method' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Search PDF' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
-
-    expect(viewerController.search).toHaveBeenNthCalledWith(1, 'method', expect.any(Object));
-    expect(viewerController.search).toHaveBeenNthCalledWith(2, '', expect.any(Object));
+    await waitFor(() => expect(viewerController.search).toHaveBeenNthCalledWith(1, 'method'));
+    fireEvent.blur(screen.getByLabelText('Search text'));
+    expect(screen.getByLabelText('Search text')).toHaveValue('method');
+    expect(viewerController.search).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '清除查找' }));
+    expect(viewerController.search).toHaveBeenNthCalledWith(2, '');
     expect(screen.getByLabelText('Search text')).toHaveValue('');
     expect(screen.queryByText('1 / 1')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next match' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Search text'), { target: { value: '   ' } });
+    expect(viewerController.search).toHaveBeenCalledTimes(2);
   });
 
   it('runs tab and fit mode shortcuts', () => {
@@ -2807,7 +2807,6 @@ describe('App', () => {
     });
     await screen.findByText('View test PDF');
     fireEvent.click(screen.getByRole('button', { name: '当前阅读' }));
-    fireEvent.click(screen.getByRole('button', { name: '搜索与批注' }));
     const firstStatus = within(screen.getByLabelText('阅读状态'));
     fireEvent.click(firstStatus.getByRole('button', { name: 'Zoom in' }));
     expect(firstStatus.queryByRole('dialog')).not.toBeInTheDocument();
@@ -2828,7 +2827,6 @@ describe('App', () => {
     });
     await screen.findByText('View test PDF');
     expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
-    expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 100%' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: '首页视图控制' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 100%' }));
@@ -2840,7 +2838,6 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'view-one.pdf' }));
     expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 180%' })).toBeInTheDocument();
     expect(screen.queryByLabelText('阅读侧栏')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('阅读检查器')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: '阅读视图控制' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
     expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 80%' })).toBeInTheDocument();
@@ -2855,7 +2852,6 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '打开阅读视图控制，当前缩放 300%' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: '阅读视图控制' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
-    expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
   });
 
   it.each(['关闭欢迎语', '关闭快速上手', '关闭桌面集成', '卡片视图'])(

@@ -4,13 +4,14 @@ import {
   ChevronRight,
   FileText,
   ListOrdered,
+  MoveLeft,
+  MoveRight,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
   Search,
   Star,
   StickyNote,
+  X,
 } from 'lucide-react';
 import type { ReactNode, RefObject } from 'react';
 import type { DocumentSession } from '../documents/documentModels';
@@ -24,7 +25,6 @@ type ReaderToolbarProps = {
   searchInputRef?: RefObject<HTMLInputElement>;
   pageInput: string;
   sidebarOpen: boolean;
-  rightPanelOpen: boolean;
   outlineOpen?: boolean;
   outlineButtonRef?: RefObject<HTMLButtonElement>;
   onToggleOutline?(): void;
@@ -33,16 +33,13 @@ type ReaderToolbarProps = {
   onToggleDocumentInfo?(): void;
   onSearchTextChange(value: string): void;
   onPageInputChange(value: string): void;
-  onSearch(): void;
+  onSearchCompositionChange(composing: boolean): void;
   onSearchNext(): void;
   onSearchPrevious(): void;
   onJumpToPage(): void;
   onPagePrevious(): void;
   onPageNext(): void;
   onToggleSidebar(): void;
-  onToggleRightPanel(): void;
-  onHistoryBack(): void;
-  onHistoryForward(): void;
   onAddBookmark(): void | Promise<void>;
   onAddNote(): void | Promise<void>;
   isFavorite: boolean;
@@ -58,7 +55,6 @@ export function ReaderToolbar({
   searchInputRef,
   pageInput,
   sidebarOpen,
-  rightPanelOpen,
   outlineOpen = false,
   outlineButtonRef,
   onToggleOutline,
@@ -67,16 +63,13 @@ export function ReaderToolbar({
   onToggleDocumentInfo,
   onSearchTextChange,
   onPageInputChange,
-  onSearch,
+  onSearchCompositionChange,
   onSearchNext,
   onSearchPrevious,
   onJumpToPage,
   onPagePrevious,
   onPageNext,
   onToggleSidebar,
-  onToggleRightPanel,
-  onHistoryBack,
-  onHistoryForward,
   onAddBookmark,
   onAddNote,
   isFavorite,
@@ -84,14 +77,14 @@ export function ReaderToolbar({
   onOpenPreferences,
 }: ReaderToolbarProps) {
   const totalPages = activeSession?.totalPages ?? null;
-  const hasMatches = searchState.matches.length > 0;
-  // Only report counts once a search has actually run, so an empty result is
-  // distinguishable from "no search yet".
-  const matchSummary = !searchState.keyword
-    ? null
-    : hasMatches
-      ? `${searchState.currentIndex} / ${searchState.matches.length}`
-      : '无匹配';
+  const keyword = searchText.trim();
+  const searchReady = Boolean(keyword) && searchState.keyword === keyword;
+  const hasMatches = searchReady && searchState.matches.length > 0;
+  const matchSummary = !keyword ? null
+    : !searchReady ? '查找中…'
+    : searchState.error ? '查找失败'
+    : hasMatches ? `${searchState.currentIndex} / ${searchState.matches.length}` : '无匹配';
+  const targetPage = Number(pageInput);
 
   return (
     <section className="reader-toolbar" aria-label="阅读工具栏">
@@ -112,16 +105,6 @@ export function ReaderToolbar({
         >
           {sidebarOpen ? <PanelLeftClose size={16} aria-hidden="true" /> : <PanelLeftOpen size={16} aria-hidden="true" />}当前阅读
         </button>
-        <button
-          type="button"
-          className="toolbar-text-button toolbar-panel-toggle"
-          onClick={onToggleRightPanel}
-          title={rightPanelOpen ? '收起搜索与批注' : '展开搜索与批注'}
-          aria-expanded={rightPanelOpen}
-          aria-controls={rightPanelOpen ? 'reader-inspector' : undefined}
-        >
-          {rightPanelOpen ? <PanelRightClose size={16} aria-hidden="true" /> : <PanelRightOpen size={16} aria-hidden="true" />}搜索与批注
-        </button>
         <button type="button" className="toolbar-text-button toolbar-panel-toggle" ref={documentInfoButtonRef} onClick={onToggleDocumentInfo}
           title={documentInfoOpen ? '收起文献信息' : '展开文献信息'} aria-expanded={documentInfoOpen}
           aria-controls={documentInfoOpen ? 'reader-document-info' : undefined}
@@ -132,84 +115,71 @@ export function ReaderToolbar({
 
       <div className="toolbar-divider" aria-hidden="true" />
 
-      <div className="toolbar-group toolbar-search-group">
-        <Search size={15} className="toolbar-search-icon" aria-hidden="true" />
-        <input
-          aria-label="Search text"
-          ref={searchInputRef}
-          className="toolbar-input toolbar-search-input"
-          value={searchText}
-          placeholder="在文档中查找…"
-          onChange={(event) => onSearchTextChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              if (event.shiftKey) {
-                onSearchPrevious();
-              } else {
-                onSearch();
+      <div className="toolbar-group toolbar-search-group" role="group" aria-label="文档查找">
+        <button type="button" className="toolbar-icon-button" onClick={onSearchPrevious}
+          aria-label="Previous match" title="上一处匹配（Shift+Enter）" disabled={!hasMatches}>
+          <MoveLeft size={16} aria-hidden="true" />
+        </button>
+        <div className="toolbar-search-field">
+          <Search size={15} className="toolbar-search-icon" aria-hidden="true" />
+          <input
+            aria-label="Search text"
+            ref={searchInputRef}
+            className="toolbar-input toolbar-search-input"
+            value={searchText}
+            placeholder="在文档中查找…"
+            disabled={activeSession?.status !== 'ready'}
+            onChange={(event) => onSearchTextChange(event.target.value)}
+            onCompositionStart={() => onSearchCompositionChange(true)}
+            onCompositionEnd={(event) => {
+              onSearchTextChange(event.currentTarget.value);
+              onSearchCompositionChange(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+                event.preventDefault();
+                if (hasMatches) (event.shiftKey ? onSearchPrevious : onSearchNext)();
               }
-            }
-          }}
-        />
-        <button type="button" className="toolbar-text-button" onClick={onSearch} aria-label="Search PDF">
-          查找
-        </button>
-        {matchSummary ? (
-          <span className="toolbar-match-count" aria-live="polite">
-            {matchSummary}
-          </span>
-        ) : null}
-        <button
-          type="button"
-          className="toolbar-icon-button"
-          onClick={onSearchPrevious}
-          aria-label="Previous match"
-          title="上一处匹配"
-          disabled={!hasMatches}
-        >
-          <ChevronLeft size={16} />
-        </button>
+            }}
+          />
+          {searchText ? (
+            <button type="button" className="toolbar-search-clear" aria-label="清除查找"
+              onClick={() => {
+                onSearchTextChange('');
+                onSearchCompositionChange(false);
+                searchInputRef?.current?.focus();
+              }}>
+              <X size={14} aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
         <button
           type="button"
           className="toolbar-icon-button"
           onClick={onSearchNext}
           aria-label="Next match"
-          title="下一处匹配"
+          title="下一处匹配（Enter）"
           disabled={!hasMatches}
         >
-          <ChevronRight size={16} />
+          <MoveRight size={16} aria-hidden="true" />
         </button>
+        {matchSummary ? (
+          <span className="toolbar-match-count" aria-live="polite" title={searchReady ? searchState.error : undefined}>
+            {matchSummary}
+          </span>
+        ) : null}
       </div>
 
       <div className="toolbar-divider" aria-hidden="true" />
 
-      <div className="toolbar-group">
-        <button
-          type="button"
-          className="toolbar-icon-button"
-          onClick={onHistoryBack}
-          aria-label="History back"
-          title="后退"
-        >
-          <ChevronLeft size={16} />
-        </button>
-        <button
-          type="button"
-          className="toolbar-icon-button"
-          onClick={onHistoryForward}
-          aria-label="History forward"
-          title="前进"
-        >
-          <ChevronRight size={16} />
-        </button>
+      <div className="toolbar-group" role="group" aria-label="页码跳转">
         <button
           type="button"
           className="toolbar-icon-button"
           onClick={onPagePrevious}
           aria-label="Previous page"
           title="上一页"
-          disabled={!activeSession}
+          disabled={!activeSession || activeSession.page <= 1}
         >
           <ChevronLeft size={16} />
         </button>
@@ -230,7 +200,8 @@ export function ReaderToolbar({
           <span className="toolbar-page-total" aria-hidden="true">
             / {totalPages ?? '—'}
           </span>
-          <button type="button" className="toolbar-text-button" onClick={onJumpToPage} aria-label="Go to page">
+          <button type="button" className="toolbar-text-button" onClick={onJumpToPage} aria-label="Go to page"
+            disabled={!activeSession || !Number.isSafeInteger(targetPage) || targetPage <= 0}>
             跳转
           </button>
         </div>
@@ -240,7 +211,7 @@ export function ReaderToolbar({
           onClick={onPageNext}
           aria-label="Next page"
           title="下一页"
-          disabled={!activeSession}
+          disabled={!activeSession || (totalPages !== null && activeSession.page >= totalPages)}
         >
           <ChevronRight size={16} />
         </button>

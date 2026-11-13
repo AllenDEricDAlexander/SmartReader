@@ -34,27 +34,23 @@ function createSession(): DocumentSession {
   };
 }
 
-function renderToolbar(searchState: ViewerSearchState) {
+function renderToolbar(searchState: ViewerSearchState, searchText = searchState.keyword) {
   return render(
     <ReaderToolbarUnderTest
       activeSession={createSession()}
-      searchText="method"
+      searchText={searchText}
       searchState={searchState}
       pageInput="3"
       sidebarOpen={true}
-      rightPanelOpen={true}
       onSearchTextChange={vi.fn()}
+      onSearchCompositionChange={vi.fn()}
       onPageInputChange={vi.fn()}
-      onSearch={vi.fn()}
       onSearchNext={vi.fn()}
       onSearchPrevious={vi.fn()}
       onJumpToPage={vi.fn()}
       onPagePrevious={vi.fn()}
       onPageNext={vi.fn()}
       onToggleSidebar={vi.fn()}
-      onToggleRightPanel={vi.fn()}
-      onHistoryBack={vi.fn()}
-      onHistoryForward={vi.fn()}
       onAddBookmark={vi.fn()}
       onAddNote={vi.fn()}
       isFavorite={false}
@@ -73,7 +69,10 @@ describe('ReaderToolbar search state', () => {
     expect(screen.queryByRole('button', { name: 'Close active tab' })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('在文档中查找…')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '当前阅读' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '搜索与批注' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '搜索与批注' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Search PDF' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'History back' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'History forward' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Previous page' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Next page' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Zoom in' })).not.toBeInTheDocument();
@@ -98,6 +97,23 @@ describe('ReaderToolbar search state', () => {
 
     expect(screen.getByText('2 / 3')).toBeInTheDocument();
     expect(screen.getByLabelText('Next match')).toBeEnabled();
+  });
+
+  it('disables match navigation while a new query is pending or the input is empty', () => {
+    const oldResult = {
+      ...emptySearchState,
+      keyword: 'method',
+      matches: [{ index: 1, page: 2, excerpt: 'method' }],
+      currentIndex: 1,
+    };
+    const pending = renderToolbar(oldResult, 'methods');
+    expect(screen.getByText('查找中…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Previous match' })).toBeDisabled();
+    pending.unmount();
+    renderToolbar(oldResult, '   ');
+    expect(screen.queryByText('1 / 1')).not.toBeInTheDocument();
+    expect(screen.queryByText('无匹配')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next match' })).toBeDisabled();
   });
 
   it('says so when a search returned nothing instead of showing a count', () => {

@@ -1,4 +1,5 @@
 import { BookMarked } from 'lucide-react';
+import type { ReactNode } from 'react';
 import type { Bookmark, ReaderAnnotation } from '../annotations/annotationModels';
 import type { DocumentSession } from '../documents/documentModels';
 import { AnnotationPanel } from './annotations/AnnotationPanel';
@@ -8,6 +9,7 @@ type ReaderLeftPanelProps = {
   bookmarks: Bookmark[];
   annotations: ReaderAnnotation[];
   selectedAnnotationId: number | null;
+  children?: ReactNode;
   onJumpToPage(page: number): void;
   onAddBookmark(): void | Promise<void>;
   onDeleteBookmark(bookmark: Bookmark): void | Promise<void>;
@@ -23,6 +25,7 @@ export function ReaderLeftPanel({
   bookmarks,
   annotations,
   selectedAnnotationId,
+  children,
   onJumpToPage,
   onAddBookmark,
   onDeleteBookmark,
@@ -82,6 +85,7 @@ export function ReaderLeftPanel({
         onDeleteAnnotation={onDeleteAnnotation}
         onImportAnnotations={onImportAnnotations}
       />
+      {children}
     </aside>
   );
 }

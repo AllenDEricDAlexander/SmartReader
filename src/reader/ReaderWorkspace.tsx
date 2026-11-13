@@ -5,7 +5,6 @@ type ReaderWorkspaceProps = {
   outlineDrawer: ReactNode;
   leftPanel: ReactNode;
   viewer: ReactNode;
-  rightPanel: ReactNode;
   documentInfoDrawer: ReactNode;
   statusBar: ReactNode;
 };
@@ -15,7 +14,6 @@ export function ReaderWorkspace({
   outlineDrawer,
   leftPanel,
   viewer,
-  rightPanel,
   documentInfoDrawer,
   statusBar,
 }: ReaderWorkspaceProps) {
@@ -26,7 +24,6 @@ export function ReaderWorkspace({
         {outlineDrawer}
         {leftPanel}
         <section className="viewer-pane">{viewer}</section>
-        {rightPanel}
         {documentInfoDrawer}
       </div>
       {statusBar}

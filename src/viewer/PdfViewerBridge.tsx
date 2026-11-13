@@ -384,8 +384,10 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
     searchPlugin: { enableShortcuts: false },
     zoomPlugin: { enableShortcuts: false },
   });
-  const { pageNavigationPluginInstance, searchPluginInstance, zoomPluginInstance } =
-    toolbarPluginInstance;
+  const viewerPluginsRef = useRef(toolbarPluginInstance);
+  useLayoutEffect(() => {
+    viewerPluginsRef.current = toolbarPluginInstance;
+  });
   // Selection callbacks are read through a ref so a changing handler identity
   // never has to reach this component as a new prop.
   const highlightPluginInstance = highlightPlugin({
@@ -460,12 +462,12 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
       }
 
       const wrapped = ((index - 1 + matches.length) % matches.length) + 1;
-      searchPluginInstance.jumpToMatch(wrapped);
+      viewerPluginsRef.current.searchPluginInstance.jumpToMatch(wrapped);
       publishSearchState({ ...searchStateRef.current, currentIndex: wrapped });
     };
 
     controller.bind({
-      jumpToPage: (page) => pageNavigationPluginInstance.jumpToPage(Math.max(0, page - 1)),
+      jumpToPage: (page) => viewerPluginsRef.current.pageNavigationPluginInstance.jumpToPage(Math.max(0, page - 1)),
       // SmartReader owns the find UI, so opening search focuses the reader's own
       // search field rather than the plugin's popover, which keeps a separate
       // keyword and match count that would contradict the toolbar.
@@ -473,6 +475,7 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
       search: (keyword, options = defaultSearchOptions) => {
         const generation = ++searchGeneration;
         const trimmed = keyword.trim();
+        const { searchPluginInstance } = viewerPluginsRef.current;
 
         if (!trimmed) {
           searchPluginInstance.clearHighlights();
@@ -504,20 +507,23 @@ const ReactPdfViewer = memo(function ReactPdfViewer({
       searchPrevious: () => focusMatch(searchStateRef.current.currentIndex - 1),
       jumpToMatch: (index) => focusMatch(index),
       zoomIn: () => {
-        if (scaleRef.current < maxZoom) zoomPluginInstance.zoomTo(Math.min(maxZoom, scaleRef.current + 0.1));
+        if (scaleRef.current < maxZoom) viewerPluginsRef.current.zoomPluginInstance.zoomTo(Math.min(maxZoom, scaleRef.current + 0.1));
       },
       zoomOut: () => {
-        if (scaleRef.current > minZoom) zoomPluginInstance.zoomTo(Math.max(minZoom, scaleRef.current - 0.1));
+        if (scaleRef.current > minZoom) viewerPluginsRef.current.zoomPluginInstance.zoomTo(Math.max(minZoom, scaleRef.current - 0.1));
       },
       zoomTo: (scale) => {
-        if (Number.isFinite(scale)) zoomPluginInstance.zoomTo(Math.max(minZoom, Math.min(maxZoom, scale)));
+        if (Number.isFinite(scale)) viewerPluginsRef.current.zoomPluginInstance.zoomTo(Math.max(minZoom, Math.min(maxZoom, scale)));
       },
-      fitWidth: () => zoomPluginInstance.zoomTo(SpecialZoomLevel.PageWidth),
-      fitPage: () => zoomPluginInstance.zoomTo(SpecialZoomLevel.PageFit),
+      fitWidth: () => viewerPluginsRef.current.zoomPluginInstance.zoomTo(SpecialZoomLevel.PageWidth),
+      fitPage: () => viewerPluginsRef.current.zoomPluginInstance.zoomTo(SpecialZoomLevel.PageFit),
     });
 
-    return () => { disposed = true; controller.clear(); };
-  }, [controller, pageNavigationPluginInstance, searchPluginInstance, zoomPluginInstance]);
+    return () => {
+      disposed = true;
+      controller.clear();
+    };
+  }, [controller]);
 
   const plugins = [toolbarPluginInstance, highlightPluginInstance];
 

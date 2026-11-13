@@ -5,7 +5,7 @@ import type { ReaderAnnotation } from '../annotations/annotationModels';
 import type { DocumentSession } from '../documents/documentModels';
 import type { PersistedDocument } from '../persistence/persistenceApi';
 import { ViewerController } from '../viewer/viewerController';
-import { defaultSearchOptions, emptySearchState } from '../viewer/viewerTypes';
+import { emptySearchState } from '../viewer/viewerTypes';
 import { ReaderWorkspaceView } from './ReaderWorkspaceView';
 
 type ReaderWorkspaceViewTestProps = Omit<
@@ -49,10 +49,8 @@ describe('ReaderWorkspaceView', () => {
         activeSessionIsFavorite={false}
         activeViewerController={new ViewerController()}
         availableTags={[]}
-        lastSearchCommand=""
         pageInput="2"
         searchState={emptySearchState}
-        searchOptions={defaultSearchOptions}
         documentInfo={{
           sessionId: activeSession.id, pageCount: 10, pdfVersion: null, title: null, author: null,
           subject: null, keywords: null, creator: null, producer: null,
@@ -63,11 +61,9 @@ describe('ReaderWorkspaceView', () => {
         searchText=""
         selectedAnnotation={null}
         sidebarOpen={true}
-        rightPanelOpen={true}
         viewerContent={<div>Viewer content</div>}
         addBookmarkForActivePage={vi.fn()}
         addPageNote={vi.fn()}
-        clearSearch={vi.fn()}
         deleteBookmark={vi.fn()}
         deleteAnnotationForDocument={vi.fn()}
         handleSaveAnnotationNote={vi.fn()}
@@ -77,18 +73,13 @@ describe('ReaderWorkspaceView', () => {
         importAnnotationsForDocument={vi.fn()}
         jumpToActiveDocumentPage={jumpToActiveDocumentPage}
         jumpToPage={vi.fn()}
-        jumpToSearchMatch={vi.fn()}
-        setSearchOptions={vi.fn()}
         openSettingsWorkspace={vi.fn()}
         renameBookmark={vi.fn()}
-        runSearch={vi.fn()}
         setPageInput={vi.fn()}
         setSearchText={vi.fn()}
+        setSearchComposing={vi.fn()}
         setSelectedAnnotationId={vi.fn()}
         setSidebarOpen={vi.fn()}
-        setRightPanelOpen={vi.fn()}
-        stepHistoryBack={vi.fn()}
-        stepHistoryForward={vi.fn()}
       />,
     );
 
@@ -101,7 +92,7 @@ describe('ReaderWorkspaceView', () => {
     expect(screen.getByPlaceholderText('在文档中查找…')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'More options' })).toBeInTheDocument();
     expect(screen.getByLabelText('阅读侧栏')).toBeInTheDocument();
-    expect(screen.getByLabelText('阅读检查器')).toBeInTheDocument();
+    expect(screen.queryByLabelText('阅读检查器')).not.toBeInTheDocument();
     expect(within(screen.getByLabelText('阅读侧栏')).queryByLabelText('目录内容')).not.toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'PDF 目录' })).not.toBeInTheDocument();
     const outlineButton = screen.getByRole('button', { name: '目录' });
@@ -110,16 +101,14 @@ describe('ReaderWorkspaceView', () => {
     const drawer = screen.getByRole('complementary', { name: 'PDF 目录' });
     expect(drawer).toHaveClass('reader-drawer');
     const reading = screen.getByLabelText('阅读侧栏');
-    const inspector = screen.getByLabelText('阅读检查器');
     expect(drawer.nextElementSibling).toBe(reading);
     expect(outlineButton).toHaveAttribute('aria-expanded', 'true');
     expect(within(drawer).queryByText('书签与批注')).not.toBeInTheDocument();
     const infoButton = screen.getByRole('button', { name: '文献信息' });
     expect(infoButton).toHaveAttribute('aria-expanded', 'false');
-    expect(within(inspector).queryByText('文件大小')).not.toBeInTheDocument();
     fireEvent.click(infoButton);
     const infoDrawer = screen.getByRole('complementary', { name: '文献信息' });
-    expect(inspector.nextElementSibling).toBe(infoDrawer);
+    expect(infoDrawer.previousElementSibling).toHaveClass('viewer-pane');
     expect(within(infoDrawer).getByText('/tmp/book.pdf')).toBeInTheDocument();
     fireEvent.click(within(infoDrawer).getByRole('button', { name: '收藏文档' }));
     expect(toggleFavorite).toHaveBeenCalledOnce();
@@ -143,15 +132,11 @@ describe('ReaderWorkspaceView', () => {
     expect(outlineButton).toHaveAttribute('aria-expanded', 'false');
 
     fireEvent.click(screen.getByRole('button', { name: '当前阅读' }));
-    fireEvent.click(screen.getByRole('button', { name: '搜索与批注' }));
 
     expect(screen.getByRole('button', { name: '当前阅读' })).toHaveAttribute(
       'title',
       '收起当前阅读',
     );
-    expect(screen.getByRole('button', { name: '搜索与批注' })).toHaveAttribute(
-      'title',
-      '收起搜索与批注',
-    );
+
   });
 });
