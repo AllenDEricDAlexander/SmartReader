@@ -174,7 +174,20 @@ cargo test --manifest-path src-tauri/Cargo.toml
 ./scripts/build-install-macos.sh
 ```
 
-脚本会构建 macOS `.app`，应用仅供本机使用的临时签名，安装或更新 `/Applications/SmartReader.app`，再校验应用标识、可执行文件和签名，但不会自动启动应用。可通过 `--install-dir <绝对路径>` 安装到其他目录。
+脚本会构建并临时签名 macOS `.app`，安装或更新 `/Applications/SmartReader.app`，再校验应用标识、可执行文件和签名。可通过 `--install-dir <绝对路径>` 安装到其他目录。
+
+## macOS DMG 分发
+
+在 macOS 上执行 `bun install` 后，可以打包供 Apple Silicon 和 Intel Mac 使用的通用 DMG。使用 Rustup 安装两个编译目标，再执行构建。
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+bunx tauri build --target universal-apple-darwin --bundles dmg
+```
+
+将 `src-tauri/target/universal-apple-darwin/release/bundle/dmg/` 下的 `.dmg` 提供给接收方。若只需为当前 Mac 的架构打包，可运行 `bunx tauri build --bundles dmg`，产物在 `src-tauri/target/release/bundle/dmg/`。
+
+Tauri 默认使用临时签名（ad hoc）签署 macOS 应用，无需 Apple 开发者账号。接收方打开 DMG 后，将 SmartReader 拖入「应用程序」。由于应用未经 Apple 公证，首次打开下载的应用时，macOS 可能会拦截。确认安装包来源可信后，接收方可以在「系统设置 → 隐私与安全性」中点按「仍要打开」。[Apple 官方说明](https://support.apple.com/zh-cn/102445)
 
 ## 本地桌面复测
 

@@ -1,4 +1,5 @@
-import { BookOpenCheck, FileText, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { FileText, ShieldCheck, Sparkles, X } from 'lucide-react';
+import appLogoUrl from '../../favicon.png';
 
 type HomeWelcomeBannerProps = {
   disabled?: boolean;
@@ -19,7 +20,7 @@ export function HomeWelcomeBanner({ disabled, onClose }: HomeWelcomeBannerProps)
         <X size={16} />
       </button>
       <div className="welcome-brand-icon" aria-hidden="true">
-        <BookOpenCheck size={44} strokeWidth={1.8} />
+        <img className="app-logo" src={appLogoUrl} width={78} height={78} alt="" />
       </div>
       <div className="welcome-copy">
         <h1>欢迎使用 SmartReader</h1>

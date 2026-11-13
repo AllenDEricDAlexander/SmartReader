@@ -1,4 +1,5 @@
 import { Info } from 'lucide-react';
+import appLogoUrl from '../../favicon.png';
 import type { HomeAppVersion } from '../home/homeTypes';
 import { CheckUpdatesButton } from './CheckUpdatesButton';
 
@@ -13,7 +14,10 @@ export function AboutSettings({ appVersion }: AboutSettingsProps) {
         <Info size={16} />
         <h2 id="about-title">版本信息</h2>
       </div>
-      <strong>SmartReader</strong>
+      <div className="about-brand">
+        <img className="app-logo" src={appLogoUrl} width={48} height={48} alt="" />
+        <strong>SmartReader</strong>
+      </div>
       <p>版本 {appVersion.version}{appVersion.build ? ` (Build ${appVersion.build})` : ''}</p>
       <p className="muted-copy">本地优先 · 隐私安全 · 高效阅读</p>
       <CheckUpdatesButton />

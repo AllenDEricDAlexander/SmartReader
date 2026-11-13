@@ -110,7 +110,7 @@ require_command ditto
 printf 'Building %s for macOS...\n' "${APP_NAME}"
 (
   cd "${PROJECT_ROOT}"
-  "${TAURI_CLI}" build --bundles app
+  APPLE_SIGNING_IDENTITY=- "${TAURI_CLI}" build --bundles app
 )
 
 verify_app_bundle "${BUILT_APP}"
@@ -129,8 +129,6 @@ printf 'Staging %s...\n' "${DESTINATION_APP}"
 ditto "${BUILT_APP}" "${STAGED_APP}"
 verify_app_bundle "${STAGED_APP}"
 
-printf 'Applying a local ad hoc code signature...\n'
-codesign --force --deep --sign - "${STAGED_APP}"
 verify_code_signature "${STAGED_APP}"
 
 if [[ -e "${DESTINATION_APP}" ]]; then

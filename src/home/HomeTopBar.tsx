@@ -1,6 +1,5 @@
 import {
   BookMarked,
-  BookOpenCheck,
   Columns2,
   FileInput,
   FolderOpen,
@@ -9,6 +8,7 @@ import {
   Settings,
 } from 'lucide-react';
 import { useRef, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import appLogoUrl from '../../favicon.png';
 
 type HomeTopBarProps = {
   themeSwitcher?: ReactNode;
@@ -86,7 +86,7 @@ export function HomeTopBar({
   return (
     <header className="home-top-bar" aria-label="SmartReader 顶部栏">
       <div className="home-top-brand">
-        <BookOpenCheck size={28} strokeWidth={1.8} />
+        <img className="app-logo" src={appLogoUrl} width={36} height={36} alt="" />
         <div className="home-top-title">
           <strong>SmartReader</strong>
           <span>本地优先的 PDF 阅读器</span>

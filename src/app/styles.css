@@ -265,6 +265,19 @@ button:disabled,
   flex: 0 0 auto;
 }
 
+.app-logo {
+  display: block;
+  flex: 0 0 auto;
+  border-radius: 20%;
+  object-fit: contain;
+}
+
+.about-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .home-top-title {
   min-width: 0;
   display: grid;
@@ -1131,6 +1144,12 @@ button:disabled,
   border-radius: 20px;
   background: var(--sr-primary-soft, #eaf3ff);
   color: var(--sr-text);
+}
+
+.welcome-brand-icon .app-logo {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
 }
 
 .welcome-copy {
