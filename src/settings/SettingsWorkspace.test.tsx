@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { version as packageVersion } from '../../package.json';
 import { CommandRegistry } from '../commands/commandRegistry';
 import { defaultReaderPreferences } from '../preferences/preferencesStore';
 import { renderApp } from '../test/renderApp';
@@ -121,7 +122,7 @@ describe('SettingsWorkspace', () => {
     expect(cache.nextElementSibling).toBe(version);
     fireEvent.click(version);
     expect(screen.getByRole('heading', { name: '版本信息' })).toBeInTheDocument();
-    expect(screen.getByText('版本 0.1.0')).toBeInTheDocument();
+    expect(screen.getByText(`版本 ${packageVersion}`)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '检查更新' })).toBeInTheDocument();
     expect(screen.queryByLabelText('本地缓存')).not.toBeInTheDocument();
   });

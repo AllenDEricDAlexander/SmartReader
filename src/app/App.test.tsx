@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { version } from '../../package.json';
 import type {
   BookmarkDashboard,
   PersistedAnnotationRecord,
@@ -294,7 +295,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '会话恢复 3' })).toBeInTheDocument();
     expect(screen.queryByLabelText('本地缓存')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '管理缓存' })).not.toBeInTheDocument();
-    expect(screen.queryByText('版本 0.1.0')).not.toBeInTheDocument();
+    expect(screen.queryByText(`版本 ${version}`)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '打开设置' }));
     fireEvent.click(screen.getByRole('button', { name: '缓存' }));
     expect(await screen.findByText('1.24 GB / 5 GB')).toBeInTheDocument();
@@ -390,12 +391,12 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: '缓存' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '版本信息' }));
     expect(screen.getByRole('heading', { name: '版本信息' })).toBeInTheDocument();
-    expect(screen.getByText('版本 0.1.0')).toBeInTheDocument();
+    expect(screen.getByText(`版本 ${version}`)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '检查更新' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '关闭设置' }));
     expect(screen.getByRole('button', { name: '打开设置' })).toBeInTheDocument();
     expect(screen.queryByLabelText('本地缓存')).not.toBeInTheDocument();
-    expect(screen.queryByText('版本 0.1.0')).not.toBeInTheDocument();
+    expect(screen.queryByText(`版本 ${version}`)).not.toBeInTheDocument();
   });
 
   it('falls back to empty cache stats when cache stats fail to load', async () => {

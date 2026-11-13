@@ -8,6 +8,7 @@ import {
   type ChangeEvent,
   type SetStateAction,
 } from 'react';
+import { version } from '../../package.json';
 import { BlobUrlCache } from '../cache/blobUrlCache';
 import { PdfByteCache } from '../cache/pdfByteCache';
 import { hasDroppedDirectory, readDroppedPdfs } from '../platform/dropZone';
@@ -92,7 +93,7 @@ const defaultCacheStats: CacheStats = {
   fileCount: 0,
 };
 const appVersion = {
-  version: '0.1.0',
+  version,
   build: null,
 };
 

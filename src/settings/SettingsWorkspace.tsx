@@ -1,5 +1,6 @@
 import { RotateCcw, Save, Settings, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { version } from '../../package.json';
 import type { CommandId, CommandRegistry } from '../commands/commandRegistry';
 import type { ReaderPreferences } from '../preferences/preferencesModels';
 import { defaultReaderPreferences } from '../preferences/preferencesStore';
@@ -59,7 +60,7 @@ export function SettingsWorkspace({
   preferences,
   openSessionCount,
   recentDocumentCount,
-  appVersion = { version: '0.1.0', build: null },
+  appVersion = { version, build: null },
   cacheStats,
   initialSection = 'shortcuts',
   navigationRequest = 0,
