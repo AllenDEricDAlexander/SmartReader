@@ -2,6 +2,49 @@
 
 SmartReader 是一款本地优先的桌面科研文献阅读器，基于 Tauri、React、TypeScript 和 SQLite。它将 PDF 阅读、文献索引、论文信息维护、分类、批注与可配置的 AI 助手连接在同一份本地文献库中。
 
+> 下载已发布的安装包请查看 [GitHub Releases](https://github.com/AllenDEricDAlexander/SmartReader/releases)。发行包按各自版本构建，功能可能与当前仓库源码不同；请同时阅读所下载版本的发布说明。
+
+## 目录
+
+- [快速开始](#快速开始)
+- [当前能力](#当前能力)
+- [数据和加密边界](#数据和加密边界)
+- [技术栈与结构](#技术栈与结构)
+- [开发环境](#开发环境)
+- [macOS 本机打包安装](#macos-本机打包安装)
+- [macOS DMG 分发](#macos-dmg-分发)
+- [本地桌面复测](#本地桌面复测)
+- [验证与设计文档](#验证与设计文档)
+- [问题反馈与贡献](#问题反馈与贡献)
+- [许可证](#许可证)
+
+## 快速开始
+
+### 下载并安装
+
+从 [GitHub Releases](https://github.com/AllenDEricDAlexander/SmartReader/releases) 选择适合操作系统和处理器架构的安装包，并按该版本发布说明完成安装。可用平台和安装注意事项以具体 Release 页面为准。
+
+### 开始阅读
+
+1. 启动 SmartReader，通过文件选择、文件夹导入或拖放添加 PDF。
+2. 文献保存在本机 SQLite 文献库中，可直接阅读和进行全文检索；导入、阅读和本地全文检索不需要 AI 服务。
+3. 如需 AI 信息补全、问答或语义检索，打开“设置 → AI 厂商”，配置兼容的服务地址、模型和自己的 API Key。语义检索还需要配置 Embedding 模型；不配置时仍可使用全文检索。
+
+启用 AI 后，问题、相关文献信息或摘录会按所选功能发送到配置的服务；云端向量模式还会将文献向量写入用户配置的 Milvus 服务。详细的数据流和加密范围见[数据和加密边界](#数据和加密边界)及[知识库与语义检索](#知识库与语义检索)。
+
+### 从源码运行
+
+先安装 Bun、Rust toolchain 以及当前平台所需的 Tauri v2 系统依赖，然后运行：
+
+```bash
+git clone https://github.com/AllenDEricDAlexander/SmartReader.git
+cd SmartReader
+bun install
+bun run tauri
+```
+
+`bun run dev` 只启动 Vite 前端开发服务器，不包含桌面端原生文件访问和 SQLite 文献库功能。
+
 ## 当前能力
 
 ### 文献导入与阅读
@@ -249,3 +292,13 @@ bun scripts/qa/verify-knowledge.ts
 - [原始 PDF 阅读器设计](docs/superpowers/specs/2026-06-15-smartreader-pdf-reader-design.md)
 - [原始实施计划](docs/superpowers/plans/2026-06-15-smartreader-pdf-reader.md)
 - [PDF 核心补全计划](docs/superpowers/plans/2026-06-16-smartreader-pdf-core-completion.md)
+
+## 问题反馈与贡献
+
+可以在 [GitHub Issues](https://github.com/AllenDEricDAlexander/SmartReader/issues) 提交问题或功能建议。请在报告中说明操作系统、应用版本和复现步骤，并先移除 API Key、个人路径及论文内容等敏感信息。
+
+准备贡献代码时，请先通过 Issue 讨论改动范围，并参照[开发环境](#开发环境)和[验证与设计文档](#验证与设计文档)中的命令完成本地检查。
+
+## 许可证
+
+当前仓库没有提供 `LICENSE` 文件，因此尚未声明软件的授权和再分发条件。使用或分发前，请先向项目维护者确认许可。
