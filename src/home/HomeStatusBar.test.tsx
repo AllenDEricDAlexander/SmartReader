@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderApp } from '../test/renderApp';
 import { HomeStatusBar } from './HomeStatusBar';
@@ -64,5 +64,38 @@ describe('HomeStatusBar', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开首页视图控制，当前缩放 100%' }));
     expect(screen.getByRole('button', { name: '100%' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '检查更新' })).toBeEnabled();
+  });
+
+  it('dismisses the update message on focus loss, an outside click or Escape', () => {
+    renderApp(<HomeStatusBar scale={1} onScaleChange={vi.fn()} />);
+    const update = screen.getByRole('button', { name: '检查更新' });
+    const zoom = screen.getByRole('button', { name: 'Zoom in' });
+
+    fireEvent.click(update);
+    expect(update).toHaveFocus();
+    expect(screen.getByRole('status')).toBeInTheDocument();
+    act(() => zoom.focus());
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+
+    fireEvent.click(update);
+    fireEvent.pointerDown(screen.getByText('本地模式'));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+
+    fireEvent.click(update);
+    fireEvent.keyDown(update, { key: 'Escape' });
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('keeps a dismissed update check closed if it fails after focus leaves', async () => {
+    let fail!: (error: Error) => void;
+    const check = new Promise<void>((_resolve, reject) => { fail = reject; });
+    renderApp(<HomeStatusBar scale={1} onScaleChange={vi.fn()} onCheckUpdates={() => check} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
+    act(() => screen.getByRole('button', { name: 'Zoom in' }).focus());
+    await act(async () => fail(new Error('offline')));
+
+    expect(screen.getByRole('button', { name: '检查更新' })).toBeEnabled();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });
