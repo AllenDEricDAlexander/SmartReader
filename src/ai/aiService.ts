@@ -1,6 +1,7 @@
 import { createVaultKey, decryptJson, deriveVaultKey, encryptJson } from '../library/libraryCrypto';
 import { aiConversationTitle, compareAiConversations, emptyMetadata, providerModels, type AiAssistantSession, type AiChatTurn, type AiConversationGroup, type AiConversationSummary, type AiModelSelection, type AiProviderProfile, type AiRetrieval, type AiSource, type MetadataField, type Paper, type PaperMetadata } from '../library/libraryModels';
 import { errorMessage, LibraryService } from '../library/libraryService';
+import { normalizeSearchText } from '../library/librarySearch';
 import { failureStatus, normalizeBaseUrl, providerDetail, requestCompletion, streamCompletion, type AiMessage } from './openAiClient';
 import { KnowledgeService, type KnowledgeDependencies } from './knowledgeService';
 import { normalizeMilvusUrl, type KnowledgeSearchOptions } from './knowledgeVectors';
@@ -741,7 +742,14 @@ export class AiService {
       if (grounded && provider.embeddingModel) {
         const milvusKey = this.milvusSecret?.url === knowledgeSettings?.milvusUrl ? this.milvusSecret?.key : undefined;
         const chunks = await this.knowledge.retrieve(query, available, provider, key, controller.signal, assertAccess, milvusKey);
-        for (const chunk of chunks) sources.push({ label: `S${sources.length + 1}`, paperId: chunk.paperId, title: chunk.title, page: chunk.page, excerpt: chunk.text });
+        const keywordSources = chunks.length ? this.keywordSources(query, available, 3) : [];
+        const keywordExcerpts = new Map(keywordSources.map(({ paperId, page, excerpt }) => [`${paperId}:${page}`, excerpt]));
+        sources.push(...keywordSources);
+        for (const chunk of chunks) {
+          if (sources.length >= 8) break;
+          if (keywordExcerpts.get(`${chunk.paperId}:${chunk.page}`)?.includes(chunk.text)) continue;
+          sources.push({ label: `S${sources.length + 1}`, paperId: chunk.paperId, title: chunk.title, page: chunk.page, excerpt: chunk.text });
+        }
         retrieval = knowledgeSettings?.backend === 'milvus' ? 'milvus-vector' : 'local-vector';
         for (const paper of available) { this.indexedKnowledge.add(paper.id); this.knowledgeErrors.delete(paper.id); }
         this.publish();
@@ -792,24 +800,23 @@ export class AiService {
     }
   }
 
-  /** Keyword fallback used when no embedding model is configured. */
+  private keywordSources(query: string, available: Paper[], limit: number): AiSource[] {
+    const papers = new Map(available.map((paper) => [paper.id, paper]));
+    return this.retrieve(query, [...papers.keys()]).slice(0, limit).map((hit, index) => {
+      const paper = papers.get(hit.paperId)!;
+      const text = normalizeSearchText(paper.pages.find((page) => page.page === hit.page)?.text || paper.metadata.abstract);
+      const found = hit.snippet.replace(/^…|…$/g, '');
+      const position = text.toLowerCase().indexOf(found.toLowerCase());
+      const at = Math.max(0, position - 500);
+      return { label: `S${index + 1}`, paperId: paper.id, title: paper.metadata.title,
+        page: hit.page, excerpt: position >= 0 ? text.slice(at, at + 3500) : hit.snippet };
+    });
+  }
+
   private fullTextSources(query: string, available: Paper[]): AiSource[] {
-    const sources: AiSource[] = [];
+    const sources = this.keywordSources(query, available, 6);
+    if (sources.length) return sources;
     const label = () => `S${sources.length + 1}`;
-    const hits = this.retrieve(query, available.map((paper) => paper.id));
-    if (hits.length) {
-      for (const hit of hits) {
-        const paper = available.find((item) => item.id === hit.paperId)!;
-        const text = (paper.pages.find((page) => page.page === hit.page)?.text || paper.metadata.abstract)
-          .normalize('NFKC').replace(/\s+/g, ' ').trim();
-        const found = hit.snippet.replace(/^…|…$/g, '');
-        const position = text.toLowerCase().indexOf(found.toLowerCase());
-        const at = Math.max(0, position - 500);
-        sources.push({ label: label(), paperId: paper.id, title: paper.metadata.title,
-          page: hit.page, excerpt: position >= 0 ? text.slice(at, at + 3500) : hit.snippet });
-      }
-      return sources;
-    }
     for (const paper of available.slice(0, 3)) {
       for (const page of excerptPages(paper, 6000).slice(0, 2)) {
         sources.push({ label: label(), paperId: paper.id, title: paper.metadata.title, page: page.page, excerpt: page.text });
@@ -869,18 +876,35 @@ export class AiService {
     if (direct.length) return direct;
     const stopWords = new Set(['what', 'which', 'does', 'the', 'how', 'why', 'are', 'was', 'were', 'this', 'that', 'about', 'please', 'study', 'paper', 'report',
       '什么', '哪些', '如何', '为什么', '这篇', '论文', '文章', '研究', '请', '总结', '结论']);
-    const words = [...new Intl.Segmenter(undefined, { granularity: 'word' }).segment(query)]
-      .filter((part) => part.isWordLike).map((part) => part.segment.toLowerCase())
-      .filter((word) => word.length >= 2 && !stopWords.has(word));
-    const merged = new Map<string, ReturnType<LibraryService['search']>[number]>();
-    for (const word of [...new Set(words)].slice(0, 16)) {
-      for (const hit of this.library.search(word, { limit: 8, paperIds })) {
-        const key = `${hit.paperId}:${hit.page}`;
-        const previous = merged.get(key);
-        merged.set(key, { ...hit, score: hit.score + (previous?.score ?? 0) });
+    const text = normalizeSearchText(query).toLowerCase();
+    const terms = [...new Intl.Segmenter(undefined, { granularity: 'word' }).segment(text)]
+      .filter((part) => part.isWordLike);
+    const words = new Set(terms.map((part) => part.segment).filter((word) => word.length >= 2 && !stopWords.has(word)));
+    const phrases = new Set<string>();
+    for (let index = 1; index < terms.length && phrases.size < 24; index++) {
+      const left = terms[index - 1];
+      const right = terms[index];
+      const between = text.slice(left.index + left.segment.length, right.index);
+      if (words.has(left.segment) && words.has(right.segment) && !between.trim()) {
+        phrases.add(text.slice(left.index, right.index + right.segment.length));
       }
     }
-    return [...merged.values()].sort((a, b) => b.score - a.score).slice(0, 6);
+    const merged = new Map<string, { hit: ReturnType<LibraryService['search']>[number]; score: number; best: number }>();
+    for (const term of [...phrases, ...[...words].slice(0, 16)]) {
+      const phrase = phrases.has(term);
+      for (const hit of this.library.search(term, { limit: 8, paperIds })) {
+        if (phrase && !hit.snippet.toLowerCase().includes(term)) continue;
+        const key = `${hit.paperId}:${hit.page}`;
+        const previous = merged.get(key);
+        const score = hit.score * (phrase ? 2 : 1);
+        merged.set(key, {
+          hit: previous && previous.best >= score ? previous.hit : hit,
+          score: (previous?.score ?? 0) + score,
+          best: Math.max(previous?.best ?? 0, score),
+        });
+      }
+    }
+    return [...merged.values()].sort((a, b) => b.score - a.score).slice(0, 6).map(({ hit }) => hit);
   }
 
   private configure<T>(operation: () => Promise<T>): Promise<T> {

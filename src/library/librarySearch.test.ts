@@ -65,6 +65,15 @@ describe('library search index', () => {
     expect(index.search('忆')[0]).toMatchObject({ paperId: 'chinese', page: 1 });
   });
 
+  it('matches consecutive Chinese terms in stored PDF text with glyph spacing', () => {
+    const index = new LibrarySearchIndex();
+    index.rebuild([paper('trading', '交易规则', ['目录', '竞 价 交 易：价 格 优 先、时　间　优　先。Latin words'])]);
+    expect(index.search('价格优先、时间优先')).toEqual([
+      expect.objectContaining({ page: 2, snippet: expect.stringContaining('价格优先、时间优先') }),
+    ]);
+    expect(index.search('Latin words')[0].page).toBe(2);
+  });
+
   it('weights title and keyword matches above incidental body mentions without duplicating metadata-only hits', () => {
     const index = new LibrarySearchIndex();
     const titled = paper('title', 'Cognition and attention', ['First page', 'Second page', 'Third page']);

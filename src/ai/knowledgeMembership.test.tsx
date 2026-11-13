@@ -6,7 +6,7 @@ import { LibraryService } from '../library/libraryService';
 import type { LibraryStorage } from '../library/libraryStorage';
 import { AiAssistant } from './AiAssistant';
 import { AiService } from './aiService';
-import { KnowledgeService } from './knowledgeService';
+import { chunkPaper, KnowledgeService } from './knowledgeService';
 
 const pdf = new TextEncoder().encode('%PDF-1.7\nknowledge membership');
 const profile = { name: '研究服务', baseUrl: 'https://api.example.com/v1', model: 'research-model' };
@@ -159,9 +159,7 @@ describe('AI knowledge membership', () => {
     const forget = vi.spyOn(KnowledgeService.prototype, 'forget').mockResolvedValue();
     const index = vi.spyOn(KnowledgeService.prototype, 'index')
       .mockResolvedValue({ chunks: [], dimension: 2, entries: null, fingerprint: 'f'.repeat(64) });
-    const retrieve = vi.spyOn(KnowledgeService.prototype, 'retrieve').mockResolvedValue([
-      { id: `${second.id}:0`, paperId: second.id, page: 1, title: '知识库论文', text: 'Attention improves memory.' },
-    ]);
+    const retrieve = vi.spyOn(KnowledgeService.prototype, 'retrieve').mockResolvedValue(chunkPaper(second));
     const providerId = library.getView().snapshot.ai.activeProviderId!;
     await ai.saveProvider({ ...profile, id: providerId, embeddingModel: 'embedding-test' });
     await ai.saveKnowledgeSettings(backend, backend === 'milvus' ? 'https://milvus.example.test' : '', backend === 'milvus' ? 'cloud-token' : undefined);

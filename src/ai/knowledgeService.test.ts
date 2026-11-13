@@ -71,6 +71,30 @@ describe('SQLite-backed semantic knowledge', () => {
     ai.dispose();
   });
 
+  it('combines vector hits with scoped keyword evidence and includes both rules from the same source page', async () => {
+    const app = await setup([
+      { page: 1, text: '竞价交易目录。' },
+      { page: 10, text: '报价单的交割流程。' },
+      { page: 14, text: '竞 价 交 易：价 格 优 先、时 间 优 先。延期交收合约以涨跌停板价格成交时，实行平 仓 优 先、时 间 优 先。' },
+    ]);
+    const completion = vi.fn().mockResolvedValue('普通撮合按价格和时间优先，特殊撮合按平仓和时间优先 [S1]。');
+    const ai = new AiService(app.library, completion, { storage: app.storage, embeddings: app.embeddings, store: app.store });
+    try {
+      await ai.saveProvider(provider, 'test-key');
+      const answer = await ai.ask('请说明竞价交易的一般撮合原则，以及延期交收合约以涨跌停板价格成交时的特殊撮合原则。', { paperIds: [app.paper.id] });
+      expect(answer.retrieval).toBe('local-vector');
+      expect(answer.sources[0]).toMatchObject({
+        label: 'S1', paperId: app.paper.id, page: 14,
+        excerpt: expect.stringMatching(/价格优先.*平仓优先/),
+      });
+      expect(answer.sources.some((source) => source.page === 10)).toBe(true);
+      expect(answer.sources.every((source) => source.paperId === app.paper.id)).toBe(true);
+      expect(app.embeddings.mock.calls.some(([, , texts]) => texts.some((text) => text.includes('价格优先')))).toBe(true);
+    } finally {
+      ai.dispose();
+    }
+  });
+
   it('answers without any knowledge base instead of refusing a configured provider', async () => {
     const app = await setup();
     await app.library.deletePapers([app.paper.id]);

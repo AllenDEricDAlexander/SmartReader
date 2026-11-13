@@ -58,8 +58,8 @@ export class LibrarySearchIndex {
         this.entries.set(id, {
           paperId: paper.id,
           page: page.page,
-          text: displayText(page.text),
-          metadataText: displayText(metadataFields.map(([value]) => value).filter(Boolean).join(' · ')),
+          text: normalizeSearchText(page.text),
+          metadataText: normalizeSearchText(metadataFields.map(([value]) => value).filter(Boolean).join(' · ')),
           title: normalize(paper.metadata.title),
           bodyTokens: new Set(bodyCounts.keys()),
         });
@@ -103,7 +103,7 @@ export class LibrarySearchIndex {
       if (entry.title.includes(phrase)) {
         score += 12;
       }
-      if (normalize(entry.text).includes(phrase)) {
+      if (entry.text.toLowerCase().includes(phrase)) {
         score += tokens.length > 1 ? 5 : 1;
       }
       hits.push({
@@ -119,12 +119,16 @@ export class LibrarySearchIndex {
   }
 }
 
-function displayText(text: string): string {
-  return text.normalize('NFKC').replace(/\s+/g, ' ').trim();
+export function normalizeSearchText(text: string): string {
+  // PDF.js can insert spaces between glyphs on the same line. Keep Latin
+  // word boundaries and avoid joining Han text across separate lines.
+  return text.normalize('NFKC')
+    .replace(/(\p{Script=Han})[^\S\r\n\u2028\u2029]+(?=\p{Script=Han})/gu, '$1')
+    .replace(/\s+/g, ' ').trim();
 }
 
 function normalize(text: string): string {
-  return displayText(text).toLowerCase();
+  return normalizeSearchText(text).toLowerCase();
 }
 
 function tokenize(text: string, query = false): string[] {

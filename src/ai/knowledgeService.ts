@@ -1,5 +1,6 @@
 import type { AiProviderProfile, Paper } from '../library/libraryModels';
 import type { LibraryService } from '../library/libraryService';
+import { normalizeSearchText } from '../library/librarySearch';
 import { normalizeEmbeddingUrl, requestEmbeddings, validEmbedding } from './embeddingsClient';
 import { failureStatus, providerDetail } from './openAiClient';
 import { createKnowledgeStorage, type KnowledgeStorage } from './knowledgeStorage';
@@ -252,7 +253,7 @@ export function chunkPaper(paper: Paper): KnowledgeChunk[] {
   const title = paper.metadata.title || paper.fileName;
   const pages = paper.pages.some((page) => page.text.trim()) ? paper.pages : [{ page: 1, text: paper.metadata.abstract }];
   for (const page of pages) {
-    const characters = Array.from(page.text.normalize('NFKC').replace(/\s+/g, ' ').trim());
+    const characters = Array.from(normalizeSearchText(page.text));
     for (let at = 0; at < characters.length; at += CHUNK_STRIDE) {
       chunks.push({ id: `${paper.id}:${chunks.length}`, paperId: paper.id, page: page.page,
         title, text: characters.slice(at, at + CHUNK_CHARS).join('') });
